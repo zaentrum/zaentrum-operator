@@ -1,0 +1,151 @@
+# ── chino-api: product BFF (read consumer of katalog-api + chino-stream) ──
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-api
+  labels: { app: chino-api, role: backend, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: chino-api } }
+  template:
+    metadata:
+      labels: { app: chino-api, role: backend }
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/nalet/stube/chino-api:latest
+          ports: [{ containerPort: 8080, name: http }]
+          envFrom:
+            - configMapRef: { name: stube-env }   # OIDC_*, KATALOG_BASE_URL, STREAM_BASE_URL, ADMIN_SUBJECTS
+          env:
+            - name: ADDR
+              value: ":8080"
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+            - name: PG_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable"
+            # Shared with chino-stream; mismatch ⇒ playback 403 while artwork loads.
+            - name: STREAM_SIGNING_KEY
+              valueFrom: { secretKeyRef: { name: stube-stream-signing, key: key } }
+          readinessProbe:
+            httpGet: { path: /api/healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: chino-api, labels: { app: chino-api } }
+spec:
+  selector: { app: chino-api }
+  ports: [{ name: http, port: 80, targetPort: 8080 }]
+---
+# ── chino-stream: HLS/CMAF origin. Base = SOFTWARE ffmpeg (no GPU). ──
+# GPU/NVENC pinning (nodeSelector + nvidia.com/gpu) is an optional overlay.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-stream
+  labels: { app: chino-stream, role: stream, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: chino-stream } }
+  template:
+    metadata:
+      labels: { app: chino-stream, role: stream }
+    spec:
+      containers:
+        - name: chino-stream
+          image: ghcr.io/nalet/stube/chino-stream:latest
+          ports: [{ containerPort: 8080, name: http }]
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: KATALOG_API_BASE_URL
+              value: "http://katalog-api"
+            - name: MEDIA_ROOT
+              value: "/var/lib/stube/media"
+            - name: OIDC_ISSUER
+              valueFrom: { configMapKeyRef: { name: stube-env, key: OIDC_ISSUER } }
+            - name: OIDC_AUDIENCE
+              valueFrom: { configMapKeyRef: { name: stube-env, key: OIDC_AUDIENCE } }
+            - name: AUTH_ENABLED
+              value: "true"
+            - name: STREAM_SIGNING_KEY
+              valueFrom: { secretKeyRef: { name: stube-stream-signing, key: key } }
+            # Software transcode by default. The GPU overlay flips USE_NVENC=true.
+            - name: USE_NVENC
+              value: "false"
+            - name: TRANSCODE_PRESET
+              value: "veryfast"
+            - name: HLS_CACHE_DIR
+              value: "/var/cache/stube-hls"
+            - name: FFMPEG_MAX_CONCURRENT
+              value: "2"
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          volumeMounts:
+            - { name: media, mountPath: /var/lib/stube/media, readOnly: true }
+            - { name: hls-cache, mountPath: /var/cache/stube-hls }
+      volumes:
+        # Your library. Appliance default: a local RWO PVC you fill via the
+        # import path. Operators swap this for their NFS/object store.
+        - name: media
+          persistentVolumeClaim: { claimName: media }
+        - name: hls-cache
+          emptyDir: { sizeLimit: 5Gi }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: media }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 50Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: chino-stream, labels: { app: chino-stream } }
+spec:
+  selector: { app: chino-stream }
+  ports: [{ name: http, port: 80, targetPort: 8080 }]
+---
+# ── chino-web: the web client (static SPA served over http) ──
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-web
+  labels: { app: chino-web, role: frontend, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: chino-web } }
+  template:
+    metadata:
+      labels: { app: chino-web, role: frontend }
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/nalet/stube/chino-web:latest
+          ports: [{ containerPort: 8080, name: http }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 1
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: chino-web, labels: { app: chino-web } }
+spec:
+  selector: { app: chino-web }
+  ports: [{ name: http, port: 80, targetPort: 8080 }]

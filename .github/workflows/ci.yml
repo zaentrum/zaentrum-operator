@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push: { branches: [main] }
+  pull_request: {}
+
+jobs:
+  # kind's real job: smoke-test that the manifests apply on a throwaway
+  # vanilla cluster (NOT a runtime — see docs/architecture.md).
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kustomize build (base + demo)
+        run: |
+          kubectl kustomize deploy/base   > /tmp/base.yaml
+          kubectl kustomize deploy/overlays/demo > /tmp/demo.yaml
+          echo "rendered $(grep -c '^kind:' /tmp/base.yaml) base resources"
+      - uses: helm/kind-action@v1
+        with: { cluster_name: stube-ci }
+      - name: apply base on kind
+        run: |
+          kubectl apply -k deploy/base --dry-run=server || \
+          kubectl apply -k deploy/base   # images may be private until first release
+          kubectl -n stube get all
+
+  # TODO as code lands: build/lint each component (Go: services/, platform/;
+  # web: apps/chino/web; Gradle: apps/chino/{mobile,androidtv}) with path filters.
