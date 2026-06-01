@@ -82,8 +82,8 @@ flowchart LR
 
 ## License {#license}
 
-**Open decision, required before going public.** The clients ship to app stores, which
-constrains the choice:
+**Chosen: [MPL-2.0](../LICENSE).** Rationale below. The clients ship to app stores, which
+constrained the choice:
 
 - **GPL-2.0 / AGPL-3.0** — category norm (Jellyfin GPLv2; Immich AGPL). Strong copyleft,
   but **GPL is incompatible with the Apple App Store** terms, and the iOS client (KMP)
@@ -91,15 +91,16 @@ constrains the choice:
 - **MPL-2.0** — file-level copyleft, app-store compatible (used by Firefox). Good middle.
 - **Apache-2.0 / MIT** — permissive, zero friction, weakest protection.
 
-Recommendation: **MPL-2.0** for the whole monorepo (protects the platform, keeps the
-clients store-distributable), or split AGPL-server / MPL-clients if you want stronger
-server copyleft.
+**Decision: MPL-2.0** for the whole monorepo — protects the platform (file-level copyleft)
+while keeping the clients store-distributable. (Alternative considered: split AGPL-server /
+MPL-clients for stronger server copyleft — rejected for now to keep one license across the
+monorepo.)
 
 ## Pre-public gates
 
 Before the repo is flipped public on GitHub:
 
-1. **License chosen** and applied.
+1. ~~License chosen and applied~~ ✅ MPL-2.0.
 2. **No nalet specifics in tree** — verified: neutral images, env-driven OIDC, no
    hardcoded issuer/admin subjects/registry creds (the migration de-nalets each file).
 3. **Clean git history** — this repo starts from a fresh initial commit (no imported
