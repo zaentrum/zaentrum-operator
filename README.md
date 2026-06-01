@@ -56,6 +56,6 @@ This repo is a media server + clients, nothing more. See
 
 ## License
 
-**TBD — decision required before the first public commit.** GPL/AGPL is the category
-norm (Jellyfin, Kodi) but **conflicts with the Apple App Store** for the iOS client;
-MPL-2.0 or Apache-2.0 are store-safe. See [docs/architecture.md](docs/architecture.md#license).
+[**MPL-2.0**](LICENSE) — file-level copyleft that protects the platform while staying
+distributable on the Apple App Store / Google Play (GPL/AGPL conflict with the App Store,
+which matters for the iOS client). Rationale in [docs/architecture.md](docs/architecture.md#license).
