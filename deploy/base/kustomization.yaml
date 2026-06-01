@@ -1,0 +1,50 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Vanilla Kubernetes base — runs on k3s/k3d, kind (CI), or any cluster.
+# No OpenShift Route / ServiceMonitor / GrafanaDashboard here: those are
+# operator-private overlays (see docs/architecture.md).
+
+namespace: stube
+
+resources:
+  - namespace.yaml
+  - data.yaml        # postgres + valkey
+  - platform.yaml    # katalog-api (neutral catalog read API)
+  - chino.yaml       # chino-api + chino-stream + chino-web
+  - ingress.yaml
+
+configMapGenerator:
+  - name: stube-env
+    literals:
+      # Operator sets these for their server (or overlays patch them).
+      # Empty issuer = clients drive first-run server setup + OIDC discovery.
+      - OIDC_ISSUER=
+      - OIDC_AUDIENCE=chino
+      - OIDC_ENABLED=true
+      # In-cluster service DNS — never leaves the namespace.
+      - KATALOG_BASE_URL=http://katalog-api
+      - STREAM_BASE_URL=http://chino-stream
+      # Empty = no admins until the operator sets Keycloak subs / realm role.
+      - ADMIN_SUBJECTS=
+
+secretGenerator:
+  # DEV DEFAULTS — fine for a local appliance, CHANGE for anything exposed.
+  - name: stube-db
+    literals:
+      - user=stube
+      - password=stube-dev-change-me
+  - name: stube-stream-signing
+    literals:
+      # Regenerate: openssl rand -base64 32
+      - key=dev-only-stream-signing-key-change-me
+
+images:
+  - name: ghcr.io/nalet/stube/chino-web
+    newTag: latest
+  - name: ghcr.io/nalet/stube/chino-api
+    newTag: latest
+  - name: ghcr.io/nalet/stube/chino-stream
+    newTag: latest
+  - name: ghcr.io/nalet/stube/katalog-api
+    newTag: latest

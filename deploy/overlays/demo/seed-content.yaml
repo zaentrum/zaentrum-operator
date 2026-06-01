@@ -1,0 +1,38 @@
+# Seeds the demo library with Creative-Commons content only (Blender Open
+# Movies, CC-BY). NEVER point a public demo at a private/licensed library.
+# Runs once; idempotent (skips files already present).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-demo-content
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: curlimages/curl:8.11.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              dst=/var/lib/stube/media
+              mkdir -p "$dst"
+              # CC-BY, freely distributable. Add/replace as you like.
+              titles="
+              https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4
+              https://download.blender.org/durian/movies/Sintel.2010.720p.mkv
+              https://media.xiph.org/tearsofsteel/tearsofsteel_4k.mov
+              "
+              for url in $titles; do
+                f="$dst/$(basename "$url")"
+                [ -f "$f" ] && { echo "have $f"; continue; }
+                echo "fetch $url"; curl -fsSL "$url" -o "$f"
+              done
+              echo "demo content ready"
+          volumeMounts:
+            - { name: media, mountPath: /var/lib/stube/media }
+      volumes:
+        - name: media
+          persistentVolumeClaim: { claimName: media }

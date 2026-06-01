@@ -1,0 +1,79 @@
+# Single-node Postgres + Valkey for the appliance. An operator running at
+# scale points the services at managed instances instead (override PG_URL).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels: { app: postgres, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports: [{ containerPort: 5432, name: pg }]
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+            # Both apps get a database; least-privilege role split is an
+            # operator concern (the appliance keeps it simple).
+            - name: POSTGRES_DB
+              value: stube
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "stube"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: postgres-data }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  selector: { app: postgres }
+  ports: [{ name: pg, port: 5432, targetPort: pg }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  labels: { app: valkey, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: valkey } }
+  template:
+    metadata:
+      labels: { app: valkey }
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          ports: [{ containerPort: 6379, name: valkey }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  labels: { app: valkey }
+spec:
+  selector: { app: valkey }
+  ports: [{ name: valkey, port: 6379, targetPort: valkey }]

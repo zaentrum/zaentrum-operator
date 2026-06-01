@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: stube
+  annotations:
+    # Long-form playback proxies through chino-api; the browser stops reading
+    # once its buffer fills, so a short proxy read-timeout severs the stream
+    # every few minutes. 4h covers any title. (Annotation key is ingress-
+    # controller specific — this one is nginx; Traefik uses a ServersTransport.)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
+spec:
+  # Operators / overlays set the real host. Base is a placeholder.
+  rules:
+    - host: stube.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: chino-api
+                port: { number: 80 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chino-web
+                port: { number: 80 }

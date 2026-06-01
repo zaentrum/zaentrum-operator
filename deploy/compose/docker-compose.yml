@@ -1,0 +1,57 @@
+# Lighter front door for a NAS / single box. Same images as the k8s base.
+# Software transcode by default (no GPU). For HW transcode use the k3s
+# appliance + GPU overlay, or add an NVIDIA device reservation here.
+name: stube
+
+x-env: &oidc
+  OIDC_ISSUER: ""          # set to your server's OIDC issuer, or leave blank for first-run setup
+  OIDC_AUDIENCE: "chino"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stube
+      POSTGRES_PASSWORD: stube-dev-change-me
+      POSTGRES_DB: stube
+    volumes: ["pg:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "stube"], interval: 10s, retries: 5 }
+
+  valkey:
+    image: valkey/valkey:8-alpine
+
+  katalog-api:
+    image: ghcr.io/nalet/stube/katalog-api:latest
+    environment:
+      <<: *oidc
+      KATALOG_API_PG_URL: "postgres://stube:stube-dev-change-me@postgres:5432/stube?sslmode=disable"
+    depends_on: { postgres: { condition: service_healthy } }
+
+  chino-api:
+    image: ghcr.io/nalet/stube/chino-api:latest
+    environment:
+      <<: *oidc
+      KATALOG_BASE_URL: "http://katalog-api:8080"
+      STREAM_BASE_URL: "http://chino-stream:8080"
+      PG_URL: "postgres://stube:stube-dev-change-me@postgres:5432/stube?sslmode=disable"
+      STREAM_SIGNING_KEY: "dev-only-stream-signing-key-change-me"
+    depends_on: [katalog-api, chino-stream]
+
+  chino-stream:
+    image: ghcr.io/nalet/stube/chino-stream:latest
+    environment:
+      <<: *oidc
+      KATALOG_API_BASE_URL: "http://katalog-api:8080"
+      MEDIA_ROOT: "/media"
+      USE_NVENC: "false"
+      STREAM_SIGNING_KEY: "dev-only-stream-signing-key-change-me"
+    volumes:
+      - "${STUBE_MEDIA:-./media}:/media:ro"   # ← your library (files you own)
+
+  chino-web:
+    image: ghcr.io/nalet/stube/chino-web:latest
+    ports: ["8080:8080"]
+    depends_on: [chino-api]
+
+volumes:
+  pg:

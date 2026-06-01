@@ -1,0 +1,50 @@
+# ── Secret hygiene (this is a PUBLIC repo — never commit credentials) ──
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.kubeconfig
+kubeconfig
+*.env
+.env
+.env.*
+!.env.example
+secrets/
+**/secret*.yaml
+**/*secret*.local.*
+*.tfstate
+*.tfstate.*
+
+# ── Node / web ──
+node_modules/
+dist/
+build/
+.next/
+.cache/
+*.tsbuildinfo
+
+# ── Kotlin / Gradle (mobile, androidtv, core) ──
+.gradle/
+**/build/
+local.properties
+.kotlin/
+*.hprof
+
+# ── Go (services, platform) ──
+bin/
+vendor/
+*.test
+*.out
+
+# ── Tooling / IDE / OS ──
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ── Local deploy artifacts ──
+deploy/**/*.local.yaml
+deploy/k3s/.kube/
+*.tgz
