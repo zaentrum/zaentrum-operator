@@ -1,0 +1,201 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WIP — STAGE 3. This is a SKELETON ClusterServiceVersion (CSV), not a complete
+# or installable bundle. It exists so the OLM packaging structure is in place;
+# Stage 3 fills in the real values once the operator-core agent's CRD, RBAC, and
+# manager Deployment manifests are final.
+#
+# What is intentionally a placeholder (Stage 3 must finalise):
+#   * `version` / `name` (must follow <package>.v<semver>) — pinned to 0.0.0 here.
+#   * `replaces` / `skips` upgrade graph — none yet (this is the first version).
+#   * `containerImage` digest + `createdAt` — injected at release time.
+#   * `customresourcedefinitions.owned` — references the Stube CRD the
+#     operator-core agent defines (group/version/kind below match
+#     operator/api/v1alpha1: stube.io/v1alpha1 Stube). Stage 3 must ADD the
+#     generated CRD manifest to manifests/ and copy its spec descriptors here.
+#   * `install.spec.deployments` / `permissions` — must be COPIED from the
+#     operator's real manager Deployment + RBAC (operator-core owns those).
+#     The blocks below are illustrative shape only.
+#   * `relatedImages` — the full neutral ghcr.io/nalet/stube/<service>:<tag> set
+#     the operator reconciles, for disconnected/mirrored installs.
+#
+# The operator reconciles a single `Stube` CR into the SAME 35-resource set that
+# `kubectl kustomize deploy/base` renders (namespace, data/kafka/keycloak,
+# katalog-*, chino-*, admin, ingress + the boot fixes). Nothing here invents a
+# new shape — derive from the rendered base.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: stube-operator.v0.0.0           # WIP placeholder — Stage 3 sets real semver
+  namespace: placeholder                # OLM substitutes the install namespace
+  annotations:
+    # Marks this object as a STUB so reviewers/tooling don't treat it as ready.
+    stube.io/bundle-stage: "wip-stage-3"
+    capabilities: Basic Install
+    categories: Streaming & Messaging
+    description: >-
+      Stube is a neutral, self-hostable media client + server for a library you
+      own and are entitled to stream. The operator reconciles a single Stube
+      custom resource into the full platform (catalog core, per-product
+      streaming backends, clients, bundled Postgres/Valkey/Kafka and OIDC).
+    repository: https://github.com/nalet/stube
+    support: https://github.com/nalet/stube/issues
+    # alm-examples is the CR sample OperatorHub renders in the "Create instance"
+    # form. Stage 3 replaces this with a real example pulled from the CRD.
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "stube.io/v1alpha1",
+          "kind": "Stube",
+          "metadata": { "name": "stube" },
+          "spec": {
+            "channel": "stable",
+            "version": "latest",
+            "hostname": "stube.localhost",
+            "identity": { "mode": "bundled", "clientId": "chino-web", "audience": "chino" },
+            "storage": { "mediaSize": "50Gi" },
+            "features": { "gpu": false, "kafka": true },
+            "update": { "mode": "manual" }
+          }
+        }
+      ]
+spec:
+  displayName: Stube
+  description: |
+    **WIP / Stage 3 skeleton — not yet installable.**
+
+    Stube is a neutral media client + server for a library you own and are
+    entitled to stream. Bring your own files; Stube catalogs, processes, and
+    streams them to clean clients on the web, phone/tablet, and TV.
+
+    This operator manages a `Stube` custom resource and reconciles it into the
+    same Kubernetes resources that `kubectl kustomize deploy/base` renders — one
+    declarative, GitOps-friendly way to run the whole platform on any cluster.
+
+    The bundle is content-neutral: it ships only the platform. It never fetches
+    content and has no downloaders or indexer integrations.
+  maturity: alpha
+  version: 0.0.0                         # WIP placeholder — Stage 3 sets real semver
+  minKubeVersion: 1.27.0
+  keywords:
+    - media
+    - streaming
+    - catalog
+    - self-hosted
+  maintainers:
+    - name: Stube maintainers
+      email: maintainers@stube.invalid   # neutral placeholder — Stage 3 sets real contact
+  provider:
+    name: Stube
+  links:
+    - name: Source
+      url: https://github.com/nalet/stube
+    - name: Documentation
+      url: https://github.com/nalet/stube/blob/main/docs/architecture.md
+  # MPL-2.0, matching the repo LICENSE.
+  # installModes — which target namespaces OLM may install into. Stage 3
+  # confirms these against the operator's actual watch scope (the operator-core
+  # manager decides namespaced vs cluster-scoped reconcile).
+  installModes:
+    - type: OwnNamespace
+      supported: true
+    - type: SingleNamespace
+      supported: true
+    - type: MultiNamespace
+      supported: false
+    - type: AllNamespaces
+      supported: true
+  # ── CRDs this operator owns ────────────────────────────────────────────────
+  # group/version/kind match operator/api/v1alpha1 (stube.io/v1alpha1 Stube).
+  # WIP: this is still a name-only reference — Stage 3 adds the generated CRD
+  # manifest to manifests/ and copies its spec/status descriptors here.
+  customresourcedefinitions:
+    owned:
+      - name: stubes.stube.io
+        kind: Stube
+        version: v1alpha1
+        displayName: Stube
+        description: >-
+          A single Stube platform instance. The operator reconciles it into the
+          full neutral platform (see deploy/base for the rendered resource set).
+  # ── Install strategy ───────────────────────────────────────────────────────
+  # WIP: the deployment + permissions below are ILLUSTRATIVE shape only. Stage 3
+  # replaces them verbatim with the operator-core agent's real manager
+  # Deployment and RBAC (ServiceAccount/ClusterRole rules). Do not treat the
+  # image, args, or rules here as authoritative.
+  install:
+    strategy: deployment
+    spec:
+      clusterPermissions:
+        - serviceAccountName: stube-operator-controller-manager
+          rules:
+            # Placeholder rule set — Stage 3 copies the operator's real RBAC.
+            # The operator must be able to manage every kind deploy/base renders
+            # (Namespace, ConfigMap, Secret, Service, Deployment, PVC, Ingress,
+            # plus the katalog-manager-api SA/Role/RoleBinding) and the Stube CR
+            # + its status.
+            - apiGroups: ["stube.io"]
+              resources: ["stubes", "stubes/status", "stubes/finalizers"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            - apiGroups: [""]
+              resources:
+                - namespaces
+                - configmaps
+                - secrets
+                - services
+                - persistentvolumeclaims
+                - serviceaccounts
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            - apiGroups: ["apps"]
+              resources: ["deployments"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            - apiGroups: ["networking.k8s.io"]
+              resources: ["ingresses"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            - apiGroups: ["rbac.authorization.k8s.io"]
+              resources: ["roles", "rolebindings"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      deployments:
+        - name: stube-operator-controller-manager
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: stube-operator
+                app.kubernetes.io/component: controller-manager
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: stube-operator
+                  app.kubernetes.io/component: controller-manager
+                  app.kubernetes.io/part-of: stube
+              spec:
+                serviceAccountName: stube-operator-controller-manager
+                securityContext:
+                  runAsNonRoot: true
+                containers:
+                  - name: manager
+                    # WIP: pinned to :latest. Stage 3 wires the release tag/digest
+                    # (the same image the build-images workflow publishes from
+                    # the `operator` matrix leg).
+                    image: ghcr.io/nalet/stube/operator:latest
+                    args:
+                      - --leader-elect
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop: ["ALL"]
+                    resources:
+                      requests:
+                        cpu: 50m
+                        memory: 64Mi
+                      limits:
+                        cpu: 500m
+                        memory: 256Mi
+  # ── relatedImages ────────────────────────────────────────────────────────--
+  # WIP: for disconnected/mirrored installs OLM needs the full image set the
+  # operator pulls/reconciles. Stage 3 lists every neutral service image at the
+  # pinned release tag. Only the operator image is listed here as a marker.
+  relatedImages:
+    - name: operator
+      image: ghcr.io/nalet/stube/operator:latest

@@ -1,0 +1,49 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: stube
+  namespace: {{ .Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
+spec:
+  rules:
+    - host: {{ .Hostname }}
+      http:
+        paths:
+          - path: /api/manage
+            pathType: Prefix
+            backend:
+              service:
+                name: katalog-manager-api
+                port:
+                  number: 80
+          - path: /manage
+            pathType: Prefix
+            backend:
+              service:
+                name: admin
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: chino-api
+                port:
+                  number: 80
+          {{- if .Bundled }}
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 80
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chino-web
+                port:
+                  number: 80

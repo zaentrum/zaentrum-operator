@@ -1,0 +1,56 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stube-operator-manager-role
+rules:
+  # The Stube CR itself + status/finalizers.
+  - apiGroups: ["stube.io"]
+    resources: ["stubes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["stube.io"]
+    resources: ["stubes/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["stube.io"]
+    resources: ["stubes/finalizers"]
+    verbs: ["update"]
+  # Namespace (cluster-scoped) — created/owned by the operator.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Core namespaced kinds rendered by the templates.
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+      - services
+      - serviceaccounts
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Workloads.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Ingress.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # RBAC the operator hands to katalog-manager-api (first-run config propagation).
+  # A controller may only grant rights it already holds, so it must carry these.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stube-operator-leader-election-role
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]

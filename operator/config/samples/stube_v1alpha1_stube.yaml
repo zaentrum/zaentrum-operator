@@ -1,0 +1,20 @@
+apiVersion: stube.io/v1alpha1
+kind: Stube
+metadata:
+  name: stube
+  namespace: stube
+spec:
+  channel: stable
+  version: latest
+  hostname: stube.localhost
+  identity:
+    mode: bundled
+    clientId: chino-web
+    audience: chino
+  storage:
+    mediaSize: 50Gi
+  features:
+    gpu: false
+    kafka: true
+  update:
+    mode: manual

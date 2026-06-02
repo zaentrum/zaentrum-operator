@@ -48,6 +48,7 @@ jobs:
       katalog-manager-api: ${{ steps.decide.outputs.katalog-manager-api }}
       admin: ${{ steps.decide.outputs.admin }}
       keycloak: ${{ steps.decide.outputs.keycloak }}
+      operator: ${{ steps.decide.outputs.operator }}
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +82,9 @@ jobs:
             keycloak:
               - *shared
               - 'platform/keycloak/**'
+            operator:
+              - *shared
+              - 'operator/**'
 
       # On main / manual dispatch, build everything; on PRs, honour the filter.
       - id: decide
@@ -93,6 +97,7 @@ jobs:
           F_KATALOG_MANAGER_API: ${{ steps.filter.outputs.katalog-manager-api }}
           F_ADMIN: ${{ steps.filter.outputs.admin }}
           F_KEYCLOAK: ${{ steps.filter.outputs.keycloak }}
+          F_OPERATOR: ${{ steps.filter.outputs.operator }}
         run: |
           set -euo pipefail
           emit() {
@@ -110,6 +115,7 @@ jobs:
           emit katalog-manager-api "$F_KATALOG_MANAGER_API"
           emit admin               "$F_ADMIN"
           emit keycloak            "$F_KEYCLOAK"
+          emit operator            "$F_OPERATOR"
 
   # ── Build + push each changed component ──────────────────────────────────
   build:
@@ -140,6 +146,13 @@ jobs:
           - svc: keycloak
             context: platform/keycloak
             changed: ${{ needs.changes.outputs.keycloak }}
+          # The cluster operator (controller-manager). Reconciles the Stube CRD
+          # into the same resource set that `kubectl kustomize deploy/base`
+          # renders. Built from operator/ (Go); image is wired into the OLM
+          # bundle under operator/bundle/ for OperatorHub/OpenShift install.
+          - svc: operator
+            context: operator
+            changed: ${{ needs.changes.outputs.operator }}
     steps:
       - name: Skip unchanged component
         if: matrix.changed != 'true'

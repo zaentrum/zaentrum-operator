@@ -1,0 +1,80 @@
+# katalog-api (neutral catalog read API)
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-api
+  namespace: {{ .Namespace }}
+  labels:
+    app: katalog-api
+spec:
+  selector:
+    app: katalog-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-api
+  namespace: {{ .Namespace }}
+  labels:
+    app: katalog-api
+    role: catalog-read
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: katalog-api
+  template:
+    metadata:
+      labels:
+        app: katalog-api
+        role: catalog-read
+    spec:
+      containers:
+        - name: katalog-api
+          image: {{ image "katalog-api" }}
+          env:
+            - name: KATALOG_API_ADDR
+              value: :8080
+            - name: KATALOG_API_OIDC_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: stube-env
+                  key: OIDC_ISSUER
+            - name: KATALOG_API_OIDC_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: stube-env
+                  key: OIDC_AUDIENCE
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: password
+            - name: KATALOG_API_PG_URL
+              value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

@@ -1,0 +1,119 @@
+{{- if .Kafka }}
+# single-node KRaft event stream (no Zookeeper)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: {{ .Namespace }}
+  labels:
+    app: kafka
+spec:
+  selector:
+    app: kafka
+  ports:
+    - name: client
+      port: 9092
+      targetPort: client
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+  namespace: {{ .Namespace }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .HasClass }}
+  storageClassName: {{ .ClassName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: {{ .Namespace }}
+  labels:
+    app: kafka
+    role: event-stream
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        role: event-stream
+    spec:
+      containers:
+        - name: kafka
+          image: apache/kafka:3.8.0
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@127.0.0.1:9093
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_LISTENERS
+              value: CLIENT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: CLIENT://kafka:9092
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: CLIENT:PLAINTEXT,CONTROLLER:PLAINTEXT
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: CLIENT
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "1"
+            - name: CLUSTER_ID
+              value: stube-kraft-0000000000001
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data
+            - name: KAFKA_HEAP_OPTS
+              value: -Xmx512m -Xms512m
+          ports:
+            - name: client
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          livenessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 640Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kafka-data
+{{- end }}

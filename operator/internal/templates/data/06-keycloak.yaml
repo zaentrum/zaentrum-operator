@@ -1,0 +1,365 @@
+{{- if .Bundled }}
+# bundled OIDC provider: realm import ConfigMap + Service (:80) + Deployment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: {{ .Namespace }}
+  labels:
+    app: keycloak
+    app.kubernetes.io/part-of: stube
+data:
+  stube-realm.json: |
+    {
+      "realm": "stube",
+      "displayName": "Stube",
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "resetPasswordAllowed": true,
+      "editUsernameAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "verifyEmail": false,
+      "rememberMe": true,
+      "bruteForceProtected": true,
+      "accessTokenLifespan": 300,
+      "accessTokenLifespanForImplicitFlow": 900,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "offlineSessionIdleTimeout": 2592000,
+      "offlineSessionMaxLifespanEnabled": false,
+      "actionTokenGeneratedByUserLifespan": 300,
+      "defaultSignatureAlgorithm": "RS256",
+      "revokeRefreshToken": false,
+      "oauth2DeviceCodeLifespan": 600,
+      "oauth2DevicePollingInterval": 5,
+      "defaultRoles": ["offline_access", "uma_authorization"],
+      "roles": {
+        "realm": [
+          { "name": "offline_access", "description": "${role_offline-access}", "composite": false, "clientRole": false },
+          { "name": "uma_authorization", "description": "${role_uma_authorization}", "composite": false, "clientRole": false },
+          { "name": "stube-user", "description": "Default Stube end user. Granted to interactive accounts on the public clients.", "composite": false, "clientRole": false },
+          { "name": "stube-admin", "description": "Stube administrator. Manage the catalog and other users via the Stube /manage console.", "composite": false, "clientRole": false }
+        ]
+      },
+      "clientScopes": [
+        {
+          "name": "offline_access",
+          "description": "OpenID Connect built-in scope: offline_access",
+          "protocol": "openid-connect",
+          "attributes": { "consent.screen.text": "${offlineAccessScopeConsentText}", "display.on.consent.screen": "true" }
+        },
+        {
+          "name": "profile",
+          "description": "OpenID Connect built-in scope: profile",
+          "protocol": "openid-connect",
+          "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" },
+          "protocolMappers": [
+            { "name": "username", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper", "consentRequired": false, "config": { "user.attribute": "username", "claim.name": "preferred_username", "jsonType.label": "String", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" } },
+            { "name": "full name", "protocol": "openid-connect", "protocolMapper": "oidc-full-name-mapper", "consentRequired": false, "config": { "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" } }
+          ]
+        },
+        {
+          "name": "email",
+          "description": "OpenID Connect built-in scope: email",
+          "protocol": "openid-connect",
+          "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" },
+          "protocolMappers": [
+            { "name": "email", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-attribute-mapper", "consentRequired": false, "config": { "user.attribute": "email", "claim.name": "email", "jsonType.label": "String", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" } },
+            { "name": "email verified", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-property-mapper", "consentRequired": false, "config": { "user.attribute": "emailVerified", "claim.name": "email_verified", "jsonType.label": "boolean", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" } }
+          ]
+        },
+        {
+          "name": "roles",
+          "description": "OpenID Connect scope for add user roles to the access token",
+          "protocol": "openid-connect",
+          "attributes": { "include.in.token.scope": "false", "display.on.consent.screen": "true" },
+          "protocolMappers": [
+            { "name": "realm roles", "protocol": "openid-connect", "protocolMapper": "oidc-usermodel-realm-role-mapper", "consentRequired": false, "config": { "multivalued": "true", "claim.name": "realm_access.roles", "jsonType.label": "String", "id.token.claim": "false", "access.token.claim": "true", "userinfo.token.claim": "false" } }
+          ]
+        },
+        {
+          "name": "web-origins",
+          "description": "OpenID Connect scope for add allowed web origins to the access token",
+          "protocol": "openid-connect",
+          "attributes": { "include.in.token.scope": "false", "display.on.consent.screen": "false" },
+          "protocolMappers": [
+            { "name": "allowed web origins", "protocol": "openid-connect", "protocolMapper": "oidc-allowed-origins-mapper", "consentRequired": false, "config": {} }
+          ]
+        }
+      ],
+      "defaultDefaultClientScopes": ["profile", "email", "roles", "web-origins"],
+      "defaultOptionalClientScopes": ["offline_access"],
+      "clients": [
+        {
+          "clientId": "chino-web",
+          "name": "Chino Web",
+          "description": "Browser SPA for the chino product. Authorization Code + PKCE (S256) plus the OAuth 2.0 Device Authorization Grant. Public client. Tokens carry aud=chino so services keep OIDC_AUDIENCE=chino.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "rootUrl": "${authBaseUrl}",
+          "redirectUris": ["*"],
+          "webOrigins": ["*"],
+          "attributes": { "pkce.code.challenge.method": "S256", "oauth2.device.authorization.grant.enabled": "true", "post.logout.redirect.uris": "+" },
+          "defaultClientScopes": ["profile", "email", "roles", "web-origins"],
+          "optionalClientScopes": ["offline_access"],
+          "protocolMappers": [
+            { "name": "audience-chino", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper", "consentRequired": false, "config": { "included.custom.audience": "{{ .Audience }}", "id.token.claim": "false", "access.token.claim": "true", "introspection.token.claim": "true", "userinfo.token.claim": "false" } }
+          ]
+        },
+        {
+          "clientId": "chino-tv",
+          "name": "Chino TV",
+          "description": "Living-room / TV client for the chino product. OAuth 2.0 Device Authorization Grant (no browser on device). Public client. Tokens carry aud=chino.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": false,
+          "redirectUris": [],
+          "webOrigins": [],
+          "attributes": { "pkce.code.challenge.method": "S256", "oauth2.device.authorization.grant.enabled": "true" },
+          "defaultClientScopes": ["profile", "email", "roles", "web-origins"],
+          "optionalClientScopes": ["offline_access"],
+          "protocolMappers": [
+            { "name": "audience-chino", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper", "consentRequired": false, "config": { "included.custom.audience": "{{ .Audience }}", "id.token.claim": "false", "access.token.claim": "true", "introspection.token.claim": "true", "userinfo.token.claim": "false" } }
+          ]
+        },
+        {
+          "clientId": "chino-mobile",
+          "name": "Chino Mobile",
+          "description": "Phone / tablet client for the chino product. Authorization Code + PKCE (S256) via the system browser, plus the OAuth 2.0 Device Authorization Grant. Public client. Tokens carry aud=chino.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "redirectUris": ["*"],
+          "webOrigins": [],
+          "attributes": { "pkce.code.challenge.method": "S256", "oauth2.device.authorization.grant.enabled": "true", "post.logout.redirect.uris": "+" },
+          "defaultClientScopes": ["profile", "email", "roles", "web-origins"],
+          "optionalClientScopes": ["offline_access"],
+          "protocolMappers": [
+            { "name": "audience-chino", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper", "consentRequired": false, "config": { "included.custom.audience": "{{ .Audience }}", "id.token.claim": "false", "access.token.claim": "true", "introspection.token.claim": "true", "userinfo.token.claim": "false" } }
+          ]
+        },
+        {
+          "clientId": "stube-manager",
+          "name": "Stube Manager",
+          "description": "Confidential service-account client the Stube manage-api uses for the Keycloak Admin REST API. Not for interactive login; secret injected at runtime.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "bearerOnly": false,
+          "frontchannelLogout": false,
+          "secret": "${STUBE_MANAGER_SECRET}",
+          "redirectUris": [],
+          "webOrigins": [],
+          "attributes": { "use.refresh.tokens": "false", "client_credentials.use_refresh_token": "false" },
+          "defaultClientScopes": ["roles"],
+          "optionalClientScopes": []
+        }
+      ],
+      "users": [
+        {
+          "username": "admin",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Stube",
+          "lastName": "Administrator",
+          "email": "admin@stube.local",
+          "requiredActions": ["UPDATE_PASSWORD"],
+          "credentials": [ { "type": "password", "value": "${STUBE_ADMIN_PASSWORD}", "temporary": true } ],
+          "realmRoles": ["stube-admin", "stube-user", "offline_access"],
+          "clientRoles": { "realm-management": ["realm-admin"] }
+        },
+        {
+          "username": "service-account-stube-manager",
+          "enabled": true,
+          "serviceAccountClientId": "stube-manager",
+          "clientRoles": { "realm-management": ["manage-users", "view-users", "query-users", "view-realm"] }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: {{ .Namespace }}
+  labels:
+    app: keycloak
+spec:
+  selector:
+    app: keycloak
+  ports:
+    # Service stays on :80 -> container http port. (boot fix)
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: {{ .Namespace }}
+  labels:
+    app: keycloak
+    role: identity
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+        role: identity
+    spec:
+      initContainers:
+        - name: create-keycloak-db
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do
+                echo "waiting for postgres…"; sleep 2
+              done
+              if psql -h postgres -U "$PGUSER" -tAc \
+                   "SELECT 1 FROM pg_database WHERE datname='keycloak'" \
+                   | grep -q 1; then
+                echo "database keycloak already exists"
+              else
+                echo "creating database keycloak"
+                createdb -h postgres -U "$PGUSER" keycloak
+              fi
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: user
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: password
+      containers:
+        - name: keycloak
+          image: {{ image "keycloak" }}
+          args: ["start", "--import-realm"]
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: postgres
+            - name: KC_DB_URL_DATABASE
+              value: keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: user
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: password
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_HTTP_RELATIVE_PATH
+              value: /auth
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HOSTNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: stube-keycloak-config
+                  key: KC_HOSTNAME
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: stube-keycloak-admin
+                  key: username
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-keycloak-admin
+                  key: password
+            - name: STUBE_MANAGER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stube-keycloak
+                  key: client-secret
+            - name: STUBE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-keycloak-admin
+                  key: realm-admin-password
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: mgmt
+              containerPort: 9000
+          # Health on the management port (:9000) at /auth/health/*. (boot fix)
+          readinessProbe:
+            httpGet:
+              path: /auth/health/ready
+              port: mgmt
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /auth/health/live
+              port: mgmt
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm-import
+          configMap:
+            name: keycloak-realm
+{{- end }}
