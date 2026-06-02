@@ -1,0 +1,207 @@
+# ── stube realm import ──────────────────────────────────────────────────────
+# Mounted into Keycloak at /opt/keycloak/data/import and ingested with
+# --import-realm on first boot. This ConfigMap is the single source of truth
+# for the realm/client/role contract; the keycloak image carries no realm.
+#
+# Clients mirror /projects/identity/idp-config/clients/chino*.json for
+# compatibility, but NEUTRALISED for the public bundle: redirect/web-origins are
+# wildcards (the appliance host is unknown at build time) and the realm is the
+# generic 'stube' (NOT a tenant realm). Every access token gets aud=chino via an
+# audience mapper so the services keep OIDC_AUDIENCE=chino.
+#
+# ${STUBE_MANAGER_SECRET} is substituted by Keycloak from the env var of the
+# same name (sourced from the stube-keycloak Secret) so the confidential
+# service-account secret never lives in this manifest.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  labels: { app: keycloak, app.kubernetes.io/part-of: stube }
+data:
+  stube-realm.json: |
+    {
+      "realm": "stube",
+      "enabled": true,
+      "displayName": "Stube",
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "editUsernameAllowed": false,
+      "defaultSignatureAlgorithm": "RS256",
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "offlineSessionIdleTimeout": 2592000,
+      "oauth2DeviceCodeLifespan": 600,
+      "oauth2DevicePollingInterval": 5,
+      "defaultDefaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "defaultOptionalClientScopes": [
+        "offline_access",
+        "address",
+        "phone",
+        "microprofile-jwt"
+      ],
+      "clients": [
+        {
+          "clientId": "chino-web",
+          "name": "Chino Web",
+          "description": "Web SPA — Authorization Code + PKCE and the OAuth 2.0 Device Authorization Grant. Public client; neutral wildcard redirects for the unknown appliance host.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "redirectUris": ["*"],
+          "webOrigins": ["*"],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "oauth2.device.authorization.grant.enabled": "true",
+            "post.logout.redirect.uris": "+"
+          },
+          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "protocolMappers": [
+            {
+              "name": "audience-chino",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.custom.audience": "chino",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "chino-tv",
+          "name": "Chino TV",
+          "description": "TV client — OAuth 2.0 Device Authorization Grant only (no browser redirect on the device). Public client.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "oauth2.device.authorization.grant.enabled": "true"
+          },
+          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "protocolMappers": [
+            {
+              "name": "audience-chino",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.custom.audience": "chino",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "chino-mobile",
+          "name": "Chino Mobile",
+          "description": "Mobile client — Authorization Code + PKCE (AppAuth) plus the Device Authorization Grant. Public client; neutral wildcard redirects.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "redirectUris": ["*"],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "oauth2.device.authorization.grant.enabled": "true",
+            "post.logout.redirect.uris": "+"
+          },
+          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "protocolMappers": [
+            {
+              "name": "audience-chino",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.custom.audience": "chino",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "stube-manager",
+          "name": "Stube Manager (service account)",
+          "description": "Confidential service-account client. katalog-manager-api uses client_credentials to call the Admin REST API (manage/view/query users + first-run admin bootstrap).",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "bearerOnly": false,
+          "secret": "${STUBE_MANAGER_SECRET}",
+          "attributes": {
+            "client.secret.creation.time": "0"
+          }
+        }
+      ],
+      "users": [
+        {
+          "username": "admin",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Stube",
+          "lastName": "Admin",
+          "email": "admin@stube.local",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "${STUBE_ADMIN_PASSWORD}",
+              "temporary": true
+            }
+          ],
+          "realmRoles": ["default-roles-stube"],
+          "clientRoles": {
+            "realm-management": ["realm-admin"]
+          }
+        },
+        {
+          "username": "service-account-stube-manager",
+          "enabled": true,
+          "serviceAccountClientId": "stube-manager",
+          "clientRoles": {
+            "realm-management": ["manage-users", "view-users", "query-users"]
+          }
+        }
+      ]
+    }

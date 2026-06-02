@@ -29,6 +29,39 @@ if [ -f "$MANIFEST_DIR/stube.yaml" ]; then
   sed -i 's/^\([[:space:]]*\)- host: stube\.example\.com[[:space:]]*$/\1-/' "$MANIFEST_DIR/stube.yaml" || true
 fi
 
+# --- in-cluster split-horizon for the OIDC issuer host ----------------------
+# The bundled Keycloak pins its issuer to the PUBLIC host (KC_HOSTNAME ->
+# http://stube.example.com/auth), so tokens carry iss=http://stube.example.com/
+# auth/realms/stube. The Go services validate with coreos/go-oidc, which fetches
+# {OIDC_ISSUER}/.well-known/openid-configuration and requires the doc `issuer`
+# AND the token `iss` to equal OIDC_ISSUER. For that to work from inside the
+# cluster, the issuer host must resolve to Keycloak. We add a coredns-custom
+# entry rewriting stube.example.com straight to the keycloak Service — pods then
+# reach the issuer directly (no ingress hop, Keycloak serves /auth natively), so
+# discovery + JWKS succeed while the browser still uses the same public host
+# (add '127.0.0.1 stube.example.com' to your hosts file, or set your real host
+# in deploy/base/ingress.yaml + KC_HOSTNAME + OIDC_ISSUER and let cluster DNS
+# resolve it). k3s applies anything in the manifest dir, so drop the ConfigMap
+# there. CoreDNS hot-reloads the import on change.
+ISSUER_HOST="${STUBE_ISSUER_HOST:-stube.example.com}"
+cat > "$MANIFEST_DIR/coredns-custom.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  stube.server: |
+    ${ISSUER_HOST}:53 {
+      template IN A ${ISSUER_HOST} {
+        match ^${ISSUER_HOST}\.\$
+        answer "{{ .Name }} 5 IN CNAME keycloak.stube.svc.cluster.local"
+        upstream
+      }
+      forward . /etc/resolv.conf
+    }
+EOF
+
 echo ">> starting k3s (single node, Traefik ingress on :80)"
 # Keep servicelb (klipper): it is what binds Traefik's LoadBalancer Service to
 # the container's :80 — without it the Service stays <pending> and nothing

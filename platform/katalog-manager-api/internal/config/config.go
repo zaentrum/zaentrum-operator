@@ -39,6 +39,24 @@ type Config struct {
 	// validate player-issued stream tokens. Optional: the first-run setup
 	// generates one and persists it if this is empty.
 	StreamSigningKey string
+
+	// KeycloakBaseURL is the base URL of the bundled (or external) Keycloak,
+	// including the legacy /auth context path, e.g.
+	// http://keycloak:8080/auth. Empty disables the Admin integration: the
+	// /api/manage/users endpoints then return 503 and first-run setup skips
+	// the bundled-admin bootstrap (an external oidcIssuer can still be used).
+	KeycloakBaseURL string
+	// KeycloakRealm is the realm the platform users live in. Generic 'stube'
+	// by default — never a tenant-specific realm.
+	KeycloakRealm string
+	// KeycloakAdminClientID is the confidential client used for the Admin REST
+	// API via the client_credentials grant (service account with realm-admin
+	// rights). Defaults to 'stube-manager'.
+	KeycloakAdminClientID string
+	// KeycloakAdminClientSecret is the client secret for the admin client. It
+	// is sourced from the 'stube-keycloak' Secret (key client-secret) in the
+	// cluster. Empty (together with an empty base URL) disables the client.
+	KeycloakAdminClientSecret string
 }
 
 // Load reads env vars and returns a Config with defaults so the server can
@@ -52,6 +70,11 @@ func Load() Config {
 		OIDCIssuer:        os.Getenv("OIDC_ISSUER"),
 		OIDCAudience:      envOr("OIDC_AUDIENCE", "stube"),
 		StreamSigningKey:  os.Getenv("STREAM_SIGNING_KEY"),
+
+		KeycloakBaseURL:           os.Getenv("KEYCLOAK_BASE_URL"),
+		KeycloakRealm:             envOr("KEYCLOAK_REALM", "stube"),
+		KeycloakAdminClientID:     envOr("KEYCLOAK_ADMIN_CLIENT_ID", "stube-manager"),
+		KeycloakAdminClientSecret: os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"),
 	}
 }
 

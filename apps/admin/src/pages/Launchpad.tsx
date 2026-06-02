@@ -53,10 +53,10 @@ const TILES: Tile[] = [
     planned: true,
   },
   {
+    to: '/manage/users',
     title: 'Users',
     blurb: 'Manage who can sign in and what they can reach.',
     icon: Users,
-    planned: true,
   },
   {
     to: '/settings',

@@ -24,14 +24,12 @@ const NAV: NavItem[] = [
   { to: '/library', label: 'Library', icon: <Boxes size={16} /> },
   { to: '/import', label: 'Import', icon: <FolderInput size={16} /> },
   { to: '/jobs', label: 'Jobs', icon: <ListChecks size={16} /> },
+  { to: '/manage/users', label: 'Users', icon: <Users size={16} /> },
   { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
 ];
 
 // Extra destinations surfaced on the Launchpad but not yet first-class routes.
-export const PLANNED = [
-  { label: 'Metadata', icon: <Tags size={16} /> },
-  { label: 'Users', icon: <Users size={16} /> },
-];
+export const PLANNED = [{ label: 'Metadata', icon: <Tags size={16} /> }];
 
 function Header() {
   return (
