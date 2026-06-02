@@ -1,0 +1,312 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: stubes.stube.io
+spec:
+  group: stube.io
+  names:
+    kind: Stube
+    listKind: StubeList
+    plural: stubes
+    singular: stube
+    shortNames:
+      - stb
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Version
+          type: string
+          jsonPath: .status.currentVersion
+        - name: Host
+          type: string
+          jsonPath: .spec.hostname
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: Stube is the Schema for the stubes API; one CR drives the whole platform.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                channel:
+                  type: string
+                  enum: ["stable", "edge"]
+                  default: stable
+                  description: Release train consulted by Stage-2 auto-update.
+                version:
+                  type: string
+                  default: latest
+                  description: Image tag applied to every ghcr.io/nalet/stube/* image.
+                hostname:
+                  type: string
+                  default: stube.localhost
+                  description: Public host - issuer host + ingress host + KC_HOSTNAME.
+                identity:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      enum: ["bundled", "external"]
+                      default: bundled
+                    issuer:
+                      type: string
+                    clientId:
+                      type: string
+                      default: chino-web
+                    audience:
+                      type: string
+                      default: chino
+                  default: {}
+                storage:
+                  type: object
+                  properties:
+                    mediaSize:
+                      anyOf:
+                        - type: integer
+                        - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                      default: 50Gi
+                    className:
+                      type: string
+                  default: {}
+                features:
+                  type: object
+                  properties:
+                    gpu:
+                      type: boolean
+                      default: false
+                    kafka:
+                      type: boolean
+                      default: true
+                  default: {}
+                update:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      enum: ["manual", "auto"]
+                      default: manual
+                  default: {}
+              default: {}
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                currentVersion:
+                  type: string
+                availableUpdate:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: ["type", "status", "lastTransitionTime", "reason", "message"]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: ["type"]
+                components:
+                  type: array
+                  items:
+                    type: object
+                    required: ["name", "ready"]
+                    properties:
+                      name:
+                        type: string
+                      ready:
+                        type: boolean
+                      image:
+                        type: string
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: stube-operator-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: stube-operator-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: stube-operator-controller-manager
+    namespace: stube-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: stube-operator-leader-election-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: stube-operator-leader-election-role
+subjects:
+  - kind: ServiceAccount
+    name: stube-operator-controller-manager
+    namespace: stube-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stube-operator-manager-role
+rules:
+  # The Stube CR itself + status/finalizers.
+  - apiGroups: ["stube.io"]
+    resources: ["stubes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["stube.io"]
+    resources: ["stubes/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["stube.io"]
+    resources: ["stubes/finalizers"]
+    verbs: ["update"]
+  # Namespace (cluster-scoped) — created/owned by the operator.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Core namespaced kinds rendered by the templates.
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+      - services
+      - serviceaccounts
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Workloads.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Ingress.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # RBAC the operator hands to katalog-manager-api (first-run config propagation).
+  # A controller may only grant rights it already holds, so it must carry these.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: stube-operator-leader-election-role
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: stube-operator-controller-manager
+  namespace: stube-operator-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stube-operator-system
+  labels:
+    app.kubernetes.io/part-of: stube-operator
+    control-plane: controller-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stube-operator-controller-manager
+  namespace: stube-operator-system
+  labels:
+    app.kubernetes.io/part-of: stube-operator
+    control-plane: controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      serviceAccountName: stube-operator-controller-manager
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: ghcr.io/nalet/stube/operator:latest
+          command: ["/manager"]
+          args:
+            - --leader-elect
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:8080
+          ports:
+            - name: metrics
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      terminationGracePeriodSeconds: 10
