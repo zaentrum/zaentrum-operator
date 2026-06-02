@@ -19,6 +19,7 @@ import (
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/config"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/events"
 	managerhttp "github.com/nalet/stube/platform/katalog-manager-api/internal/http"
+	"github.com/nalet/stube/platform/katalog-manager-api/internal/k8s"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
 )
 
@@ -79,10 +80,17 @@ func main() {
 		slog.Warn("oidc verifier init failed; protected routes will return 503", "err", err)
 	}
 
+	// In-cluster Kubernetes client for first-run config propagation. Never
+	// nil: when the ServiceAccount credentials are absent (docker-compose /
+	// local), it is a logged no-op so setup still persists to the DB.
+	k8sClient := k8s.New()
+	slog.Info("k8s config propagation", "enabled", k8sClient.Enabled(), "namespace", k8sClient.Namespace())
+
 	api := &managerhttp.API{
 		Cfg:      cfg,
 		Store:    st,
 		Producer: producer,
+		K8s:      k8sClient,
 		Version:  version,
 	}
 

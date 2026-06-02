@@ -11,6 +11,7 @@ resources:
   - namespace.yaml
   - data.yaml        # postgres + valkey
   - kafka.yaml       # single-node KRaft event stream (no Zookeeper)
+  - rbac.yaml        # katalog-manager-api SA + Role (first-run config propagation)
   - platform.yaml    # katalog-api (neutral catalog read API)
   - manage.yaml      # katalog-manager-api (neutral management/write API)
   - chino.yaml       # chino-api + chino-stream + chino-web
@@ -28,6 +29,10 @@ configMapGenerator:
       # In-cluster service DNS — never leaves the namespace.
       - KATALOG_BASE_URL=http://katalog-api
       - STREAM_BASE_URL=http://chino-stream
+      # On-disk library root the stream plane serves from. First-run setup
+      # patches this to the operator's configured library path and rolls the
+      # consumers; the default matches chino-stream's mounted media volume.
+      - MEDIA_ROOT=/var/lib/stube/media
       # Internal event stream (single-node KRaft broker). Override to a
       # managed cluster's bootstrap servers when running at scale.
       - KAFKA_BROKERS=kafka:9092

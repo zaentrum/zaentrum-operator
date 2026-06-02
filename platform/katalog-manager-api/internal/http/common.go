@@ -8,6 +8,7 @@ import (
 
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/config"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/events"
+	"github.com/nalet/stube/platform/katalog-manager-api/internal/k8s"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
 )
 
@@ -17,6 +18,11 @@ type API struct {
 	Cfg      config.Config
 	Store    *store.Store
 	Producer *events.Producer
+	// K8s propagates first-run config + the generated signing key out to the
+	// runtime objects sibling services read at startup (the stube-env
+	// ConfigMap, the stube-stream-signing Secret) and rolls the affected
+	// Deployments. It is never nil: outside a cluster it is a no-op client.
+	K8s *k8s.Client
 	// Version is the build/version string reported by setup status.
 	Version string
 }

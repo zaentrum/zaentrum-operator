@@ -21,6 +21,10 @@ spec:
     metadata:
       labels: { app: katalog-manager-api, role: catalog-write }
     spec:
+      # Runs as the katalog-manager-api ServiceAccount (see rbac.yaml) so the
+      # first-run setup flow can propagate config + the generated signing key to
+      # stube-env / stube-stream-signing and roll the affected deployments.
+      serviceAccountName: katalog-manager-api
       containers:
         - name: app
           image: ghcr.io/nalet/stube/katalog-manager-api:latest
