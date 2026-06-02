@@ -11,6 +11,23 @@ spec:
     metadata:
       labels: { app: chino-api, role: backend }
     spec:
+      # Gate startup on the bundled Keycloak so the OIDC verifier discovers on the
+      # first try (no crash-retry noise). Waits on the keycloak Service — NOT the
+      # stube.localhost issuer (musl short-circuits *.localhost). Bounded so an
+      # external-IdP operator (no bundled keycloak) doesn't hang.
+      initContainers:
+        - name: wait-for-oidc
+          image: curlimages/curl:8.11.0
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+                i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+                echo "waiting for bundled keycloak ($i)…"; sleep 3
+              done
+              echo "bundled keycloak ready"
       containers:
         - name: app
           image: ghcr.io/nalet/stube/chino-api:latest
@@ -58,6 +75,22 @@ spec:
     metadata:
       labels: { app: chino-stream, role: stream }
     spec:
+      # Gate startup on the bundled Keycloak (same rationale as chino-api):
+      # discover OIDC on the first try, no crash-retry. Waits on the keycloak
+      # Service, bounded for external-IdP operators.
+      initContainers:
+        - name: wait-for-oidc
+          image: curlimages/curl:8.11.0
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+                i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+                echo "waiting for bundled keycloak ($i)…"; sleep 3
+              done
+              echo "bundled keycloak ready"
       containers:
         - name: chino-stream
           image: ghcr.io/nalet/stube/chino-stream:latest
