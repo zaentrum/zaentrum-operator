@@ -6,12 +6,36 @@ content and no way to acquire content — you point it at your own files.
 ## Quick start (all-in-one)
 
 ```bash
-docker run -d --privileged --name stube -p 8080:80 ghcr.io/nalet/stube:latest
+docker run -d --privileged -p 80:80 --name stube ghcr.io/nalet/stube:latest
+open http://stube.localhost
 ```
 
-Open **http://localhost:8080**. On first boot nothing is configured, so the app sends you
-to the setup wizard at **`/manage/setup`** — give it a display name, your OIDC provider, and
-your library path, and you are running.
+Open **http://stube.localhost**. Modern browsers auto-resolve `*.localhost` to `127.0.0.1`,
+so this works with **no `/etc/hosts` edit**, and the issuer host matches the host you reach
+Stube at — the same invariant a real cluster holds.
+
+Sign-in uses the **bundled Keycloak** (realm `stube`): log in with its admin account
+(`admin` / `dev` by default), which forces a password change on first login. On first boot
+nothing is configured, so the app sends you to the setup wizard at **`/manage/setup`** —
+give it a display name, your OIDC provider, and your library path, and you are running.
+
+### Running under a different name
+
+If you reach the box by another name (a LAN hostname, a public domain, or its IP), the OIDC
+issuer host must equal that name — both the browser and in-cluster validation use it. Set it
+consistently in four places:
+
+| Where | What | Default |
+|---|---|---|
+| `deploy/base/ingress.yaml` | `spec.rules[0].host` | `stube.localhost` |
+| `stube-env` ConfigMap | `OIDC_ISSUER` | `http://stube.localhost/auth/realms/stube` |
+| `stube-keycloak-config` ConfigMap | `KC_HOSTNAME` | `http://stube.localhost/auth` |
+| all-in-one container | `STUBE_ISSUER_HOST` env (drives the in-cluster CoreDNS rewrite) | `stube.localhost` |
+
+On the appliance the first three are baked into the image; for a one-off host change pass
+`-e STUBE_ISSUER_HOST=my.host` only if you also rebuild with the matching ingress/issuer, or
+rebuild the image with all four aligned. On a real cluster the operator sets all four to the
+same name and lets cluster DNS resolve it.
 
 That one container holds the whole product: a full Kubernetes (k3s) running in-process with
 the web app, admin UI, catalog, transcode/package, streaming, and **bundled Postgres,

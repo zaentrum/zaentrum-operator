@@ -39,6 +39,7 @@ func main() {
 		"katalog_api_base_url", cfg.KatalogAPIBaseURL,
 		"oidc_issuer", cfg.OIDCIssuer,
 		"oidc_audience", cfg.OIDCAudience,
+		"oidc_required_role", cfg.OIDCRequiredRole,
 		"pg_set", cfg.PgURL != "",
 		"kafka_brokers", cfg.KafkaBrokers,
 	)
@@ -73,7 +74,7 @@ func main() {
 	}
 	defer func() { _ = producer.Close() }()
 
-	verifier, err := auth.NewVerifier(ctx, cfg.OIDCIssuer, cfg.OIDCAudience)
+	verifier, err := auth.NewVerifier(ctx, cfg.OIDCIssuer, cfg.OIDCAudience, cfg.OIDCRequiredRole)
 	if err != nil {
 		// Don't fatal — let the service come up so /healthz and the
 		// first-run status read answer even if the issuer is unreachable.

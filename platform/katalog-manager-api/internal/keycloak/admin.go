@@ -36,9 +36,18 @@ var ErrDisabled = errors.New("keycloak admin integration not configured")
 // ErrNotFound is returned when an addressed user does not exist.
 var ErrNotFound = errors.New("keycloak: user not found")
 
+// AdminRealmRole is the realm role that grants management access to the Stube
+// /manage console. Membership is what the manage-api auth middleware gates
+// /api/manage/* on. Assigning it here is how an admin promotes another account
+// (e.g. a family member) to co-administer the platform; new users never get it
+// by default (the realm's defaultRoles do not include it).
+const AdminRealmRole = "stube-admin"
+
 // User is the wire shape exchanged with the admin UI. It is a deliberately
 // small projection of Keycloak's UserRepresentation — only the fields the
-// management console reads or writes.
+// management console reads or writes. Admin reflects whether the account holds
+// the stube-admin realm role; it is populated by List/Get via a role-mappings
+// lookup and is settable through Create/Update to promote / demote a user.
 type User struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`
@@ -46,6 +55,7 @@ type User struct {
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 	Enabled   bool   `json:"enabled"`
+	Admin     bool   `json:"admin"`
 }
 
 // CreateInput is the payload for Create. Password is optional: when empty the
@@ -57,6 +67,10 @@ type CreateInput struct {
 	FirstName string
 	LastName  string
 	Password  string
+	// Admin, when true, grants the new account the stube-admin realm role after
+	// creation so it can use the /manage console. Defaults to false: a new user
+	// is a plain end user unless explicitly promoted.
+	Admin bool
 }
 
 // UpdateInput is a partial update for Update. All fields are pointers so a nil
@@ -68,6 +82,10 @@ type UpdateInput struct {
 	FirstName *string
 	LastName  *string
 	Enabled   *bool
+	// Admin, when non-nil, promotes (true) or demotes (false) the account by
+	// adding/removing the stube-admin realm role. Nil leaves role mappings
+	// untouched, preserving the partial-update semantics of the other fields.
+	Admin *bool
 }
 
 // Client is a Keycloak Admin REST client. A disabled client (no base URL or no
@@ -243,7 +261,43 @@ func (c *Client) List(ctx context.Context) ([]User, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
 		return nil, fmt.Errorf("decode users: %w", err)
 	}
+
+	// Flag which accounts hold stube-admin. One extra call (the role's member
+	// list) regardless of user count — avoids an N+1 per-user role lookup.
+	admins, err := c.adminMemberIDs(ctx)
+	if err != nil {
+		// Best-effort: the user list is still valid without the admin flag, so
+		// don't fail the whole listing on a role-members read error.
+		return users, nil
+	}
+	for i := range users {
+		if admins[users[i].ID] {
+			users[i].Admin = true
+		}
+	}
 	return users, nil
+}
+
+// adminMemberIDs returns the set of user ids that hold the stube-admin realm
+// role (GET /roles/{name}/users). Paged at a generous max to match List.
+func (c *Client) adminMemberIDs(ctx context.Context) (map[string]bool, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/roles/"+url.PathEscape(AdminRealmRole)+"/users?max=1000", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer drain(resp)
+	if err := expect(resp, http.StatusOK); err != nil {
+		return nil, err
+	}
+	var members []User
+	if err := json.NewDecoder(resp.Body).Decode(&members); err != nil {
+		return nil, fmt.Errorf("decode role members: %w", err)
+	}
+	out := make(map[string]bool, len(members))
+	for _, m := range members {
+		out[m.ID] = true
+	}
+	return out, nil
 }
 
 // userRepresentation is the Keycloak UserRepresentation subset we send on
@@ -296,19 +350,28 @@ func (c *Client) Create(ctx context.Context, in CreateInput) (string, error) {
 		return "", err
 	}
 
-	// The new user's id is the last path segment of the Location header.
-	loc := resp.Header.Get("Location")
-	if loc != "" {
+	// Resolve the new user's id: the last path segment of the Location header,
+	// falling back to a username lookup if a proxy strips the header.
+	id := ""
+	if loc := resp.Header.Get("Location"); loc != "" {
 		if i := strings.LastIndex(loc, "/"); i >= 0 && i+1 < len(loc) {
-			return loc[i+1:], nil
+			id = loc[i+1:]
+		}
+	}
+	if id == "" {
+		var err error
+		if id, err = c.findIDByUsername(ctx, rep.Username); err != nil {
+			return "", fmt.Errorf("user created but id not resolvable: %w", err)
 		}
 	}
 
-	// Fallback: Keycloak should always set Location, but if a proxy strips it
-	// we look the user up by the (unique) username to recover the id.
-	id, err := c.findIDByUsername(ctx, rep.Username)
-	if err != nil {
-		return "", fmt.Errorf("user created but id not resolvable: %w", err)
+	// Promote to admin only when explicitly requested. The user exists either
+	// way; surface a role-grant failure to the caller so the UI can warn that
+	// the account was created but NOT promoted.
+	if in.Admin {
+		if err := c.SetAdmin(ctx, id, true); err != nil {
+			return id, fmt.Errorf("user created but admin role not granted: %w", err)
+		}
 	}
 	return id, nil
 }
@@ -356,6 +419,104 @@ func (c *Client) Update(ctx context.Context, id string, in UpdateInput) error {
 	}
 
 	resp, err := c.do(ctx, http.MethodPut, "/users/"+url.PathEscape(id), rep)
+	if err != nil {
+		return err
+	}
+	defer drain(resp)
+	if err := expect(resp, http.StatusNoContent); err != nil {
+		return err
+	}
+
+	// Apply an explicit admin promotion/demotion last, so the profile update and
+	// the role change are independent. Nil leaves role mappings untouched.
+	if in.Admin != nil {
+		if err := c.SetAdmin(ctx, id, *in.Admin); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// realmRole is Keycloak's RoleRepresentation subset needed to address a realm
+// role in a role-mapping call (the id + name uniquely identify it).
+type realmRole struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// getRealmRole fetches a realm role by name (GET /roles/{name}). Returns
+// ErrNotFound when the role does not exist in the realm.
+func (c *Client) getRealmRole(ctx context.Context, name string) (realmRole, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/roles/"+url.PathEscape(name), nil)
+	if err != nil {
+		return realmRole{}, err
+	}
+	defer drain(resp)
+	if err := expect(resp, http.StatusOK); err != nil {
+		return realmRole{}, err
+	}
+	var rr realmRole
+	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
+		return realmRole{}, fmt.Errorf("decode realm role: %w", err)
+	}
+	return rr, nil
+}
+
+// hasAdmin reports whether the user currently holds the stube-admin realm role,
+// by listing the user's realm-level role mappings.
+func (c *Client) hasAdmin(ctx context.Context, id string) (bool, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/users/"+url.PathEscape(id)+"/role-mappings/realm", nil)
+	if err != nil {
+		return false, err
+	}
+	defer drain(resp)
+	if err := expect(resp, http.StatusOK); err != nil {
+		return false, err
+	}
+	var roles []realmRole
+	if err := json.NewDecoder(resp.Body).Decode(&roles); err != nil {
+		return false, fmt.Errorf("decode role mappings: %w", err)
+	}
+	for _, r := range roles {
+		if r.Name == AdminRealmRole {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// SetAdmin grants (admin=true) or revokes (admin=false) the stube-admin realm
+// role on a user. It is idempotent: granting a role the user already holds, or
+// revoking one they lack, is a no-op. Used by Create/Update to let an existing
+// admin promote or demote another account.
+func (c *Client) SetAdmin(ctx context.Context, id string, admin bool) error {
+	if !c.Enabled() {
+		return ErrDisabled
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrNotFound
+	}
+
+	has, err := c.hasAdmin(ctx, id)
+	if err != nil {
+		return err
+	}
+	if has == admin {
+		return nil // already in the desired state
+	}
+
+	role, err := c.getRealmRole(ctx, AdminRealmRole)
+	if err != nil {
+		return fmt.Errorf("resolve %q realm role: %w", AdminRealmRole, err)
+	}
+
+	method := http.MethodPost
+	if !admin {
+		method = http.MethodDelete
+	}
+	// The realm role-mapping endpoint takes an array of RoleRepresentations.
+	resp, err := c.do(ctx, method, "/users/"+url.PathEscape(id)+"/role-mappings/realm", []realmRole{role})
 	if err != nil {
 		return err
 	}

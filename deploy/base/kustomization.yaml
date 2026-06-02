@@ -33,7 +33,7 @@ configMapGenerator:
       # real cluster the operator sets this, KC_HOSTNAME and the ingress host to
       # the same name — the demo overlay shows the merge). Override together
       # with deploy/base/ingress.yaml host + stube-keycloak-config KC_HOSTNAME.
-      - OIDC_ISSUER=http://stube.example.com/auth/realms/stube
+      - OIDC_ISSUER=http://stube.localhost/auth/realms/stube
       - OIDC_AUDIENCE=chino
       - OIDC_ENABLED=true
       # In-cluster service DNS — never leaves the namespace.

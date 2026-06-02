@@ -35,6 +35,12 @@ type Config struct {
 	// OIDCAudience is the comma-separated audience accept-list checked
 	// against the bearer token's aud claim.
 	OIDCAudience string
+	// OIDCRequiredRole is the realm role that must be present in the token's
+	// realm_access.roles claim for the management plane to authorise a request.
+	// Defaults to 'stube-admin': a valid, in-audience token without this role is
+	// authenticated but rejected with 403. Set empty to disable role-gating
+	// (e.g. an operator delegating authz to an external policy layer).
+	OIDCRequiredRole string
 	// StreamSigningKey is the shared HMAC key the stream plane uses to
 	// validate player-issued stream tokens. Optional: the first-run setup
 	// generates one and persists it if this is empty.
@@ -69,6 +75,7 @@ func Load() Config {
 		PgURL:             os.Getenv("PG_URL"),
 		OIDCIssuer:        os.Getenv("OIDC_ISSUER"),
 		OIDCAudience:      envOr("OIDC_AUDIENCE", "stube"),
+		OIDCRequiredRole:  requiredRole(),
 		StreamSigningKey:  os.Getenv("STREAM_SIGNING_KEY"),
 
 		KeycloakBaseURL:           os.Getenv("KEYCLOAK_BASE_URL"),
@@ -76,6 +83,17 @@ func Load() Config {
 		KeycloakAdminClientID:     envOr("KEYCLOAK_ADMIN_CLIENT_ID", "stube-manager"),
 		KeycloakAdminClientSecret: os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"),
 	}
+}
+
+// requiredRole resolves OIDC_REQUIRED_ROLE. Unlike envOr it distinguishes
+// "unset" (apply the secure default 'stube-admin') from "set to empty"
+// (explicitly disable role-gating), so an operator can opt out deliberately
+// without the default silently re-enabling it.
+func requiredRole() string {
+	if v, ok := os.LookupEnv("OIDC_REQUIRED_ROLE"); ok {
+		return strings.TrimSpace(v)
+	}
+	return "stube-admin"
 }
 
 func envOr(key, def string) string {
