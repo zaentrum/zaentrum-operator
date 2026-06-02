@@ -339,6 +339,13 @@
       "lastName": "Administrator",
       "email": "admin@stube.local",
       "requiredActions": ["UPDATE_PASSWORD"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${STUBE_ADMIN_PASSWORD}",
+          "temporary": true
+        }
+      ],
       "realmRoles": ["stube-admin", "stube-user", "offline_access"],
       "clientRoles": {
         "realm-management": ["realm-admin"]
@@ -349,7 +356,7 @@
       "enabled": true,
       "serviceAccountClientId": "stube-manager",
       "clientRoles": {
-        "realm-management": ["manage-users", "view-users", "query-users"]
+        "realm-management": ["manage-users", "view-users", "query-users", "view-realm"]
       }
     }
   ]

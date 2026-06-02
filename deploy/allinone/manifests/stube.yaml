@@ -63,39 +63,203 @@ data:
   stube-realm.json: |
     {
       "realm": "stube",
-      "enabled": true,
       "displayName": "Stube",
+      "enabled": true,
       "sslRequired": "external",
       "registrationAllowed": false,
-      "loginWithEmailAllowed": true,
-      "duplicateEmailsAllowed": false,
       "resetPasswordAllowed": true,
       "editUsernameAllowed": false,
-      "defaultSignatureAlgorithm": "RS256",
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "verifyEmail": false,
+      "rememberMe": true,
+      "bruteForceProtected": true,
       "accessTokenLifespan": 300,
+      "accessTokenLifespanForImplicitFlow": 900,
       "ssoSessionIdleTimeout": 1800,
       "ssoSessionMaxLifespan": 36000,
       "offlineSessionIdleTimeout": 2592000,
+      "offlineSessionMaxLifespanEnabled": false,
+      "actionTokenGeneratedByUserLifespan": 300,
+      "defaultSignatureAlgorithm": "RS256",
+      "revokeRefreshToken": false,
       "oauth2DeviceCodeLifespan": 600,
       "oauth2DevicePollingInterval": 5,
+      "defaultRoles": [
+        "offline_access",
+        "uma_authorization"
+      ],
+      "roles": {
+        "realm": [
+          {
+            "name": "offline_access",
+            "description": "${role_offline-access}",
+            "composite": false,
+            "clientRole": false
+          },
+          {
+            "name": "uma_authorization",
+            "description": "${role_uma_authorization}",
+            "composite": false,
+            "clientRole": false
+          },
+          {
+            "name": "stube-user",
+            "description": "Default Stube end user. Granted to interactive accounts on the public clients.",
+            "composite": false,
+            "clientRole": false
+          },
+          {
+            "name": "stube-admin",
+            "description": "Stube administrator. Manage the catalog and other users via the Stube /manage console.",
+            "composite": false,
+            "clientRole": false
+          }
+        ]
+      },
+      "clientScopes": [
+        {
+          "name": "offline_access",
+          "description": "OpenID Connect built-in scope: offline_access",
+          "protocol": "openid-connect",
+          "attributes": {
+            "consent.screen.text": "${offlineAccessScopeConsentText}",
+            "display.on.consent.screen": "true"
+          }
+        },
+        {
+          "name": "profile",
+          "description": "OpenID Connect built-in scope: profile",
+          "protocol": "openid-connect",
+          "attributes": {
+            "include.in.token.scope": "true",
+            "display.on.consent.screen": "true"
+          },
+          "protocolMappers": [
+            {
+              "name": "username",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "username",
+                "claim.name": "preferred_username",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "full name",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-full-name-mapper",
+              "consentRequired": false,
+              "config": {
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "name": "email",
+          "description": "OpenID Connect built-in scope: email",
+          "protocol": "openid-connect",
+          "attributes": {
+            "include.in.token.scope": "true",
+            "display.on.consent.screen": "true"
+          },
+          "protocolMappers": [
+            {
+              "name": "email",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "email",
+                "claim.name": "email",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "email verified",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-property-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "emailVerified",
+                "claim.name": "email_verified",
+                "jsonType.label": "boolean",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "name": "roles",
+          "description": "OpenID Connect scope for add user roles to the access token",
+          "protocol": "openid-connect",
+          "attributes": {
+            "include.in.token.scope": "false",
+            "display.on.consent.screen": "true"
+          },
+          "protocolMappers": [
+            {
+              "name": "realm roles",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-realm-role-mapper",
+              "consentRequired": false,
+              "config": {
+                "multivalued": "true",
+                "claim.name": "realm_access.roles",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "false"
+              }
+            }
+          ]
+        },
+        {
+          "name": "web-origins",
+          "description": "OpenID Connect scope for add allowed web origins to the access token",
+          "protocol": "openid-connect",
+          "attributes": {
+            "include.in.token.scope": "false",
+            "display.on.consent.screen": "false"
+          },
+          "protocolMappers": [
+            {
+              "name": "allowed web origins",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-allowed-origins-mapper",
+              "consentRequired": false,
+              "config": {}
+            }
+          ]
+        }
+      ],
       "defaultDefaultClientScopes": [
-        "web-origins",
-        "acr",
         "profile",
+        "email",
         "roles",
-        "email"
+        "web-origins"
       ],
       "defaultOptionalClientScopes": [
-        "offline_access",
-        "address",
-        "phone",
-        "microprofile-jwt"
+        "offline_access"
       ],
       "clients": [
         {
           "clientId": "chino-web",
           "name": "Chino Web",
-          "description": "Web SPA — Authorization Code + PKCE and the OAuth 2.0 Device Authorization Grant. Public client; neutral wildcard redirects for the unknown appliance host.",
+          "description": "Browser SPA for the chino product. Authorization Code + PKCE (S256) plus the OAuth 2.0 Device Authorization Grant. Public client. Tokens carry aud=chino so services keep OIDC_AUDIENCE=chino.",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": true,
@@ -105,15 +269,27 @@ data:
           "serviceAccountsEnabled": false,
           "bearerOnly": false,
           "frontchannelLogout": true,
-          "redirectUris": ["*"],
-          "webOrigins": ["*"],
+          "rootUrl": "${authBaseUrl}",
+          "redirectUris": [
+            "*"
+          ],
+          "webOrigins": [
+            "*"
+          ],
           "attributes": {
             "pkce.code.challenge.method": "S256",
             "oauth2.device.authorization.grant.enabled": "true",
             "post.logout.redirect.uris": "+"
           },
-          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
-          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "defaultClientScopes": [
+            "profile",
+            "email",
+            "roles",
+            "web-origins"
+          ],
+          "optionalClientScopes": [
+            "offline_access"
+          ],
           "protocolMappers": [
             {
               "name": "audience-chino",
@@ -124,7 +300,8 @@ data:
                 "included.custom.audience": "chino",
                 "id.token.claim": "false",
                 "access.token.claim": "true",
-                "introspection.token.claim": "true"
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "false"
               }
             }
           ]
@@ -132,7 +309,7 @@ data:
         {
           "clientId": "chino-tv",
           "name": "Chino TV",
-          "description": "TV client — OAuth 2.0 Device Authorization Grant only (no browser redirect on the device). Public client.",
+          "description": "Living-room / TV client for the chino product. OAuth 2.0 Device Authorization Grant (no browser on device). Public client. Tokens carry aud=chino.",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": true,
@@ -141,13 +318,22 @@ data:
           "directAccessGrantsEnabled": false,
           "serviceAccountsEnabled": false,
           "bearerOnly": false,
-          "frontchannelLogout": true,
+          "frontchannelLogout": false,
+          "redirectUris": [],
+          "webOrigins": [],
           "attributes": {
             "pkce.code.challenge.method": "S256",
             "oauth2.device.authorization.grant.enabled": "true"
           },
-          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
-          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "defaultClientScopes": [
+            "profile",
+            "email",
+            "roles",
+            "web-origins"
+          ],
+          "optionalClientScopes": [
+            "offline_access"
+          ],
           "protocolMappers": [
             {
               "name": "audience-chino",
@@ -158,7 +344,8 @@ data:
                 "included.custom.audience": "chino",
                 "id.token.claim": "false",
                 "access.token.claim": "true",
-                "introspection.token.claim": "true"
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "false"
               }
             }
           ]
@@ -166,7 +353,7 @@ data:
         {
           "clientId": "chino-mobile",
           "name": "Chino Mobile",
-          "description": "Mobile client — Authorization Code + PKCE (AppAuth) plus the Device Authorization Grant. Public client; neutral wildcard redirects.",
+          "description": "Phone / tablet client for the chino product. Authorization Code + PKCE (S256) via the system browser, plus the OAuth 2.0 Device Authorization Grant. Public client. Tokens carry aud=chino.",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": true,
@@ -176,14 +363,24 @@ data:
           "serviceAccountsEnabled": false,
           "bearerOnly": false,
           "frontchannelLogout": true,
-          "redirectUris": ["*"],
+          "redirectUris": [
+            "*"
+          ],
+          "webOrigins": [],
           "attributes": {
             "pkce.code.challenge.method": "S256",
             "oauth2.device.authorization.grant.enabled": "true",
             "post.logout.redirect.uris": "+"
           },
-          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
-          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "defaultClientScopes": [
+            "profile",
+            "email",
+            "roles",
+            "web-origins"
+          ],
+          "optionalClientScopes": [
+            "offline_access"
+          ],
           "protocolMappers": [
             {
               "name": "audience-chino",
@@ -194,15 +391,16 @@ data:
                 "included.custom.audience": "chino",
                 "id.token.claim": "false",
                 "access.token.claim": "true",
-                "introspection.token.claim": "true"
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "false"
               }
             }
           ]
         },
         {
           "clientId": "stube-manager",
-          "name": "Stube Manager (service account)",
-          "description": "Confidential service-account client. katalog-manager-api uses client_credentials to call the Admin REST API (manage/view/query users + first-run admin bootstrap).",
+          "name": "Stube Manager",
+          "description": "Confidential service-account client used by the Stube manage-api to call the Keycloak Admin REST API (create / view / query users). Secret is injected at runtime; the value below is a placeholder overwritten on import via env substitution. NOT for interactive login.",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": false,
@@ -211,10 +409,18 @@ data:
           "directAccessGrantsEnabled": false,
           "serviceAccountsEnabled": true,
           "bearerOnly": false,
+          "frontchannelLogout": false,
           "secret": "${STUBE_MANAGER_SECRET}",
+          "redirectUris": [],
+          "webOrigins": [],
           "attributes": {
-            "client.secret.creation.time": "0"
-          }
+            "use.refresh.tokens": "false",
+            "client_credentials.use_refresh_token": "false"
+          },
+          "defaultClientScopes": [
+            "roles"
+          ],
+          "optionalClientScopes": []
         }
       ],
       "users": [
@@ -223,8 +429,11 @@ data:
           "enabled": true,
           "emailVerified": true,
           "firstName": "Stube",
-          "lastName": "Admin",
+          "lastName": "Administrator",
           "email": "admin@stube.local",
+          "requiredActions": [
+            "UPDATE_PASSWORD"
+          ],
           "credentials": [
             {
               "type": "password",
@@ -232,9 +441,15 @@ data:
               "temporary": true
             }
           ],
-          "realmRoles": ["default-roles-stube"],
+          "realmRoles": [
+            "stube-admin",
+            "stube-user",
+            "offline_access"
+          ],
           "clientRoles": {
-            "realm-management": ["realm-admin"]
+            "realm-management": [
+              "realm-admin"
+            ]
           }
         },
         {
@@ -242,7 +457,12 @@ data:
           "enabled": true,
           "serviceAccountClientId": "stube-manager",
           "clientRoles": {
-            "realm-management": ["manage-users", "view-users", "query-users"]
+            "realm-management": [
+              "manage-users",
+              "view-users",
+              "query-users",
+              "view-realm"
+            ]
           }
         }
       ]
@@ -263,16 +483,16 @@ data:
   MEDIA_ROOT: /var/lib/stube/media
   OIDC_AUDIENCE: chino
   OIDC_ENABLED: "true"
-  OIDC_ISSUER: http://stube.example.com/auth/realms/stube
+  OIDC_ISSUER: http://stube.localhost/auth/realms/stube
   STREAM_BASE_URL: http://chino-stream
 kind: ConfigMap
 metadata:
-  name: stube-env-9b9b2d8574
+  name: stube-env-bc6ctgt9bg
   namespace: stube
 ---
 apiVersion: v1
 data:
-  KC_HOSTNAME: http://stube.example.com/auth
+  KC_HOSTNAME: http://stube.localhost/auth
 kind: ConfigMap
 metadata:
   labels:
@@ -589,7 +809,7 @@ spec:
               name: stube-stream-signing-55c926tf47
         envFrom:
         - configMapRef:
-            name: stube-env-9b9b2d8574
+            name: stube-env-bc6ctgt9bg
         image: ghcr.io/nalet/stube/chino-api:latest
         name: app
         ports:
@@ -641,12 +861,12 @@ spec:
           valueFrom:
             configMapKeyRef:
               key: OIDC_ISSUER
-              name: stube-env-9b9b2d8574
+              name: stube-env-bc6ctgt9bg
         - name: OIDC_AUDIENCE
           valueFrom:
             configMapKeyRef:
               key: OIDC_AUDIENCE
-              name: stube-env-9b9b2d8574
+              name: stube-env-bc6ctgt9bg
         - name: AUTH_ENABLED
           value: "true"
         - name: STREAM_SIGNING_KEY
@@ -850,12 +1070,12 @@ spec:
           valueFrom:
             configMapKeyRef:
               key: OIDC_ISSUER
-              name: stube-env-9b9b2d8574
+              name: stube-env-bc6ctgt9bg
         - name: KATALOG_API_OIDC_AUDIENCE
           valueFrom:
             configMapKeyRef:
               key: OIDC_AUDIENCE
-              name: stube-env-9b9b2d8574
+              name: stube-env-bc6ctgt9bg
         - name: DB_USER
           valueFrom:
             secretKeyRef:
@@ -944,7 +1164,7 @@ spec:
               name: stube-keycloak-m2g5bdg8c7
         envFrom:
         - configMapRef:
-            name: stube-env-9b9b2d8574
+            name: stube-env-bc6ctgt9bg
         image: ghcr.io/nalet/stube/katalog-manager-api:latest
         livenessProbe:
           httpGet:
@@ -1204,7 +1424,7 @@ metadata:
   namespace: stube
 spec:
   rules:
-  - host: stube.example.com
+  - host: stube.localhost
     http:
       paths:
       - backend:

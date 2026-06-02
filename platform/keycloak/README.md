@@ -32,7 +32,7 @@ documented below.
 | `chino-web`     | public       | Auth Code + PKCE (S256), Device Grant   | Browser SPA. `redirectUris: ["*"]`, `webOrigins: ["*"]`.           |
 | `chino-tv`      | public       | Device Grant only                       | Living-room client; no browser on device.                          |
 | `chino-mobile`  | public       | Auth Code + PKCE (S256), Device Grant   | System-browser login; custom-scheme redirect via wildcard.         |
-| `stube-manager` | confidential | Service account (client credentials)    | Calls the Admin REST API from `manage-api`. Secret injected by env.|
+| `stube-manager` | confidential | Service account (client credentials)    | Calls the Admin REST API from `manage-api` (user CRUD + `stube-admin` role grants). Secret injected by env.|
 
 All three public clients:
 
@@ -64,8 +64,27 @@ the same value (also from that Secret) and uses it for the client-credentials
 grant against the Admin REST API. The image never contains a real secret.
 
 `service-account-stube-manager` is granted the `realm-management` client roles
-**`manage-users`, `view-users`, `query-users`** — exactly the scope `manage-api`
-needs to create and list Stube users.
+**`manage-users`, `view-users`, `query-users`, `view-realm`** — exactly the scope
+`manage-api` needs to create / list Stube users and to read and assign the
+`stube-admin` realm role when promoting a user (`view-realm` lets it resolve the
+realm role and its member list).
+
+### Realm roles and the `stube-admin` gate
+
+The realm defines two realm roles:
+
+| Role          | Granted to                              | Meaning                                                                 |
+| ------------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| `stube-user`  | interactive accounts (assign on create) | Plain end user of the products.                                         |
+| `stube-admin` | the seed `admin` user only              | May manage the catalog and other users via the Stube `/manage` console. |
+
+`stube-admin` is **not** in the realm `defaultRoles`, so newly-created users get
+no admin rights by default — an existing admin promotes another account
+explicitly (the Users API exposes an `admin` flag for this). The `roles` client
+scope emits realm roles into the access token's `realm_access.roles` claim
+(`access.token.claim: true`); `manage-api`'s auth middleware reads that claim and
+rejects any token lacking `stube-admin` on `/api/manage/*` with **403** (a valid
+token that is merely authenticated is not enough).
 
 ### Default admin user
 

@@ -26,6 +26,9 @@ type createUserRequest struct {
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 	Password  string `json:"password,omitempty"`
+	// Admin grants the stube-admin realm role on creation so the new account can
+	// use the /manage console. Omitted / false => a plain end user.
+	Admin bool `json:"admin,omitempty"`
 }
 
 // updateUserRequest is the body of PUT /api/manage/users/{id}. All fields are
@@ -36,6 +39,9 @@ type updateUserRequest struct {
 	FirstName *string `json:"firstName,omitempty"`
 	LastName  *string `json:"lastName,omitempty"`
 	Enabled   *bool   `json:"enabled,omitempty"`
+	// Admin, when present, promotes (true) or demotes (false) the account via
+	// the stube-admin realm role. Omitted leaves role mappings untouched.
+	Admin *bool `json:"admin,omitempty"`
 }
 
 // resetPasswordRequest is the body of POST /api/manage/users/{id}/reset-password.
@@ -73,6 +79,7 @@ func (a *API) CreateUser(w http.ResponseWriter, r *http.Request) {
 		FirstName: strings.TrimSpace(req.FirstName),
 		LastName:  strings.TrimSpace(req.LastName),
 		Password:  req.Password,
+		Admin:     req.Admin,
 	})
 	if writeKeycloakErr(w, r, "create user", err) {
 		return
@@ -93,6 +100,7 @@ func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		FirstName: req.FirstName,
 		LastName:  req.LastName,
 		Enabled:   req.Enabled,
+		Admin:     req.Admin,
 	})
 	if writeKeycloakErr(w, r, "update user", err) {
 		return

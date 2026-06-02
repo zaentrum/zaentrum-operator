@@ -19,31 +19,36 @@ fi
 
 MANIFEST_DIR=/var/lib/rancher/k3s/server/manifests
 
-# The bundled Ingress carries a placeholder host (stube.example.com). For the
-# appliance we want it to answer on ANY host (localhost, the box's IP, a LAN
-# name), so drop the host before k3s applies it — Traefik then treats the rule
-# as a host-less catch-all. Replace "- host: stube.example.com" with a bare "-"
-# (KEEP the list dash): deleting the whole line would turn rules: from a list
-# into a mapping and k3s would reject the Ingress.
-if [ -f "$MANIFEST_DIR/stube.yaml" ]; then
-  sed -i 's/^\([[:space:]]*\)- host: stube\.example\.com[[:space:]]*$/\1-/' "$MANIFEST_DIR/stube.yaml" || true
-fi
+# --- ingress host: keep it (issuer host == ingress host) --------------------
+# The bundled Ingress now carries a REAL default host (stube.localhost). Modern
+# browsers auto-resolve *.localhost to 127.0.0.1, so `docker run -p 80:80 …` +
+# http://stube.localhost reaches Traefik with Host: stube.localhost and Traefik
+# matches the rule — no /etc/hosts edit, no host-strip. Crucially this keeps the
+# ingress host EQUAL to the issuer host (stube.localhost), the same invariant a
+# real cluster holds, so a token minted by the browser-facing Keycloak validates
+# unchanged in-cluster. We therefore DO NOT rewrite the Ingress here.
+#
+# Reaching the box by a different name (raw IP, a LAN hostname): set your real
+# name in all four places — stube-env OIDC_ISSUER, stube-keycloak-config
+# KC_HOSTNAME, the deploy/base/ingress.yaml host, AND STUBE_ISSUER_HOST below
+# (the latter drives the in-cluster rewrite). They must agree, because the
+# issuer host is both the browser host and the in-cluster validation host.
 
 # --- in-cluster split-horizon for the OIDC issuer host ----------------------
 # The bundled Keycloak pins its issuer to the PUBLIC host (KC_HOSTNAME ->
-# http://stube.example.com/auth), so tokens carry iss=http://stube.example.com/
-# auth/realms/stube. The Go services validate with coreos/go-oidc, which fetches
+# http://stube.localhost/auth), so tokens carry iss=http://stube.localhost/auth/
+# realms/stube. The Go services validate with coreos/go-oidc, which fetches
 # {OIDC_ISSUER}/.well-known/openid-configuration and requires the doc `issuer`
 # AND the token `iss` to equal OIDC_ISSUER. For that to work from inside the
 # cluster, the issuer host must resolve to Keycloak. We add a coredns-custom
-# entry rewriting stube.example.com straight to the keycloak Service — pods then
+# entry rewriting stube.localhost straight to the keycloak Service — pods then
 # reach the issuer directly (no ingress hop, Keycloak serves /auth natively), so
-# discovery + JWKS succeed while the browser still uses the same public host
-# (add '127.0.0.1 stube.example.com' to your hosts file, or set your real host
-# in deploy/base/ingress.yaml + KC_HOSTNAME + OIDC_ISSUER and let cluster DNS
-# resolve it). k3s applies anything in the manifest dir, so drop the ConfigMap
-# there. CoreDNS hot-reloads the import on change.
-ISSUER_HOST="${STUBE_ISSUER_HOST:-stube.example.com}"
+# discovery + JWKS succeed while the browser reaches the SAME host on 127.0.0.1
+# (the *.localhost auto-resolution). To run under a different name, set your real
+# host in deploy/base/ingress.yaml + KC_HOSTNAME + OIDC_ISSUER + STUBE_ISSUER_HOST
+# (this rewrite follows STUBE_ISSUER_HOST). k3s applies anything in the manifest
+# dir, so drop the ConfigMap there. CoreDNS hot-reloads the import on change.
+ISSUER_HOST="${STUBE_ISSUER_HOST:-stube.localhost}"
 cat > "$MANIFEST_DIR/coredns-custom.yaml" <<EOF
 apiVersion: v1
 kind: ConfigMap
@@ -89,9 +94,9 @@ export KUBECONFIG
     sleep 2
   done
   if k3s kubectl -n stube rollout status deploy/chino-web --timeout=600s >/dev/null 2>&1; then
-    echo ">> Stube is up — open http://localhost:8080"
+    echo ">> Stube is up — open http://stube.localhost"
   else
-    echo ">> Stube is starting — pods may still be pulling images; open http://localhost:8080 shortly"
+    echo ">> Stube is starting — pods may still be pulling images; open http://stube.localhost shortly"
   fi
   echo ">> inspect: docker exec -it stube k3s kubectl -n stube get pods"
 ) &

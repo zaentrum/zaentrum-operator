@@ -33,8 +33,9 @@ kubectl -n stube rollout status deploy/chino-web --timeout=180s || true
 
 cat <<EOF
 
-Stube is starting on http://localhost:8080
-(add '127.0.0.1 stube.example.com' to /etc/hosts, or set your host in deploy/base/ingress.yaml)
+Stube is starting — open http://stube.localhost:8080
+(*.localhost resolves to 127.0.0.1 in modern browsers; for a LAN name set it in
+ deploy/base/ingress.yaml + OIDC_ISSUER + KC_HOSTNAME to the same host)
 
   kubectl -n stube get pods
   ./deploy/k3s/up.sh down   # when finished

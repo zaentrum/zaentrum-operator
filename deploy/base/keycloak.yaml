@@ -34,7 +34,7 @@ data:
   # WITHOUT the /auth path — Keycloak appends KC_HTTP_RELATIVE_PATH itself.
   # Override together with ingress host + stube-env OIDC_ISSUER. The demo
   # overlay shows the pattern (it patches the ingress host + merges OIDC_ISSUER).
-  KC_HOSTNAME: "http://stube.example.com/auth"
+  KC_HOSTNAME: "http://stube.localhost/auth"
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -9,9 +9,14 @@ metadata:
     # controller specific — this one is nginx; Traefik uses a ServersTransport.)
     nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
 spec:
-  # Operators / overlays set the real host. Base is a placeholder.
+  # Default host is stube.localhost: modern browsers auto-resolve *.localhost to
+  # 127.0.0.1, so the all-in-one answers on http://stube.localhost with no
+  # /etc/hosts edit, and the issuer host equals the ingress host (what a real
+  # cluster does too). Operators / overlays replace this with their real name
+  # — override together with stube-env OIDC_ISSUER + stube-keycloak-config
+  # KC_HOSTNAME (and, on the appliance, STUBE_ISSUER_HOST).
   rules:
-    - host: stube.example.com
+    - host: stube.localhost
       http:
         # ── Order matters ──
         # Ingress path matching is longest-prefix on most controllers, but we

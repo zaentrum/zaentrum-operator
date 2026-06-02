@@ -20,6 +20,8 @@
 // The base path is configurable so the SPA can run behind /manage with the
 // API on the same origin (default) or against a remote dev backend.
 
+import { getAccessToken } from '../auth/token';
+
 const API_BASE: string =
   (import.meta.env.VITE_MANAGE_API_BASE as string | undefined)?.replace(/\/$/, '') ??
   '/api/manage';
@@ -41,16 +43,15 @@ export interface SetupStatus {
 export interface SetupRequest {
   displayName: string;
   libraryPath: string;
-  /** Password for the bundled identity provider's built-in `admin` user.
-   *  Required unless the operator opts into an external OIDC provider. */
-  adminPassword?: string;
-  /** Advanced: point Stube at an external OIDC provider instead of the
-   *  bundled one. Leave blank to use the bundled IdP. When set, the bundled
-   *  `admin` user is not used and `adminPassword` is ignored. */
-  oidcIssuer?: string;
-  /** Client ID at the external OIDC provider. Only meaningful with
-   *  `oidcIssuer`. */
-  oidcClientId?: string;
+  /** OIDC issuer the platform validates tokens against. The server REQUIRES
+   *  this (rejects the request 400 without it). For the bundled identity
+   *  provider the wizard echoes back the issuer it discovered from
+   *  GET /api/config; for the advanced path the operator supplies their own. */
+  oidcIssuer: string;
+  /** Public OIDC client id. Also REQUIRED by the server. For the bundled IdP
+   *  this is the discovered web client (`chino-web`); for the advanced path the
+   *  operator's own public client. */
+  oidcClientId: string;
   /** Optional. If omitted the server generates one and keeps it secret. */
   streamSigningKey?: string;
 }
@@ -164,6 +165,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
   headers.set('Accept', 'application/json');
+
+  // Attach the OIDC access token to every manage-API call. The whole app is
+  // gated behind login (see AuthGate), so a token is normally present; the one
+  // exception, GET /setup/status, is unauthenticated server-side and works with
+  // or without it. Sending it when present is harmless and keeps this uniform.
+  const token = getAccessToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
 
   let res: Response;
   try {

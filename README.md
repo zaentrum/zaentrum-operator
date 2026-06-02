@@ -9,10 +9,14 @@ web, your phone/tablet, and your TV.
 ## Try it in one command
 
 ```bash
-docker run -d --privileged --name stube -p 8080:80 ghcr.io/nalet/stube:latest
+docker run -d --privileged -p 80:80 --name stube ghcr.io/nalet/stube:latest
+open http://stube.localhost
 ```
 
-Then open **http://localhost:8080** — the first-run setup wizard guides you through it.
+Then open **http://stube.localhost** — the first-run setup **wizard** guides you through it.
+(Modern browsers auto-resolve `*.localhost` to `127.0.0.1`, so this needs **no `/etc/hosts`
+edit**.) Sign-in uses the **bundled Keycloak** — log in with its admin account
+(`admin` / `dev` by default; you are forced to set a new password on first login).
 
 That single container is the whole product. It runs a full Kubernetes (k3s) **in-process**
 alongside the web app, the admin UI, the catalog, transcode/package, and streaming — plus
@@ -80,11 +84,17 @@ Stube is the platform; the clients are skins over one shared core.
 
 ```bash
 # All-in-one appliance — k3s in one container, everything bundled
-docker run -d --privileged -p 8080:80 ghcr.io/nalet/stube:latest
+docker run -d --privileged -p 80:80 --name stube ghcr.io/nalet/stube:latest
+# then: open http://stube.localhost
 
 # Scale out — the same manifests on a real cluster
 kubectl apply -k deploy/base
 ```
+
+**Running under a different name** (a LAN host, a public domain, or the box's IP):
+the issuer host must equal the host you reach Stube at, so set it in all four places —
+`deploy/base/ingress.yaml` host, `stube-env` `OIDC_ISSUER`, `stube-keycloak-config`
+`KC_HOSTNAME`, and (on the appliance) the `STUBE_ISSUER_HOST` env var on the container.
 
 See **[docs/self-hosting.md](docs/self-hosting.md)** for the operator contract and
 **[docs/architecture.md](docs/architecture.md)** for the deploy model.
