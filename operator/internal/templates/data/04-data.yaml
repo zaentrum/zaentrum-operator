@@ -1,0 +1,119 @@
+# postgres + valkey (data plane)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: {{ .Namespace }}
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: {{ .Namespace }}
+  labels:
+    app: valkey
+spec:
+  selector:
+    app: valkey
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: {{ .Namespace }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .HasClass }}
+  storageClassName: {{ .ClassName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: {{ .Namespace }}
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: password
+            - name: POSTGRES_DB
+              value: stube
+          ports:
+            - name: pg
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "stube"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: {{ .Namespace }}
+  labels:
+    app: valkey
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          ports:
+            - name: valkey
+              containerPort: 6379

@@ -1,0 +1,154 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: stubes.stube.io
+spec:
+  group: stube.io
+  names:
+    kind: Stube
+    listKind: StubeList
+    plural: stubes
+    singular: stube
+    shortNames:
+      - stb
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Version
+          type: string
+          jsonPath: .status.currentVersion
+        - name: Host
+          type: string
+          jsonPath: .spec.hostname
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: Stube is the Schema for the stubes API; one CR drives the whole platform.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                channel:
+                  type: string
+                  enum: ["stable", "edge"]
+                  default: stable
+                  description: Release train consulted by Stage-2 auto-update.
+                version:
+                  type: string
+                  default: latest
+                  description: Image tag applied to every ghcr.io/nalet/stube/* image.
+                hostname:
+                  type: string
+                  default: stube.localhost
+                  description: Public host - issuer host + ingress host + KC_HOSTNAME.
+                identity:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      enum: ["bundled", "external"]
+                      default: bundled
+                    issuer:
+                      type: string
+                    clientId:
+                      type: string
+                      default: chino-web
+                    audience:
+                      type: string
+                      default: chino
+                  default: {}
+                storage:
+                  type: object
+                  properties:
+                    mediaSize:
+                      anyOf:
+                        - type: integer
+                        - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                      default: 50Gi
+                    className:
+                      type: string
+                  default: {}
+                features:
+                  type: object
+                  properties:
+                    gpu:
+                      type: boolean
+                      default: false
+                    kafka:
+                      type: boolean
+                      default: true
+                  default: {}
+                update:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      enum: ["manual", "auto"]
+                      default: manual
+                  default: {}
+              default: {}
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                currentVersion:
+                  type: string
+                availableUpdate:
+                  type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: ["type", "status", "lastTransitionTime", "reason", "message"]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: ["type"]
+                components:
+                  type: array
+                  items:
+                    type: object
+                    required: ["name", "ready"]
+                    properties:
+                      name:
+                        type: string
+                      ready:
+                        type: boolean
+                      image:
+                        type: string

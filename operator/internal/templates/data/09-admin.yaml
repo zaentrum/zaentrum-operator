@@ -1,0 +1,169 @@
+# katalog-manager-api (neutral management/write API) + admin launchpad UI
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-manager-api
+  namespace: {{ .Namespace }}
+  labels:
+    app: katalog-manager-api
+spec:
+  selector:
+    app: katalog-manager-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin
+  namespace: {{ .Namespace }}
+  labels:
+    app: admin
+spec:
+  selector:
+    app: admin
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-manager-api
+  namespace: {{ .Namespace }}
+  labels:
+    app: katalog-manager-api
+    role: catalog-write
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: katalog-manager-api
+  template:
+    metadata:
+      labels:
+        app: katalog-manager-api
+        role: catalog-write
+    spec:
+      serviceAccountName: katalog-manager-api
+      {{- if .Bundled }}
+      initContainers:
+        - name: wait-for-oidc
+          image: curlimages/curl:8.11.0
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+                i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+                echo "waiting for bundled keycloak ($i)…"; sleep 3
+              done
+              echo "bundled keycloak ready"
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ image "katalog-manager-api" }}
+          envFrom:
+            - configMapRef:
+                name: stube-env
+          env:
+            - name: ADDR
+              value: :8080
+            - name: KATALOG_API_BASE_URL
+              value: http://katalog-api
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: password
+            - name: PG_URL
+              value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+            - name: STREAM_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stube-stream-signing
+                  key: key
+                  optional: true
+            - name: KEYCLOAK_BASE_URL
+              value: http://keycloak/auth
+            - name: KEYCLOAK_REALM
+              value: stube
+            - name: KEYCLOAK_ADMIN_CLIENT_ID
+              value: stube-manager
+            - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stube-keycloak
+                  key: client-secret
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+  namespace: {{ .Namespace }}
+  labels:
+    app: admin
+    role: frontend
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin
+  template:
+    metadata:
+      labels:
+        app: admin
+        role: frontend
+    spec:
+      containers:
+        - name: app
+          image: {{ image "admin" }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi

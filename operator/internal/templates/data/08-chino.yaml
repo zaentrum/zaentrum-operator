@@ -1,0 +1,286 @@
+# chino-api + chino-stream + chino-web (the chino product plane) + media PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media
+  namespace: {{ .Namespace }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .HasClass }}
+  storageClassName: {{ .ClassName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .MediaSize }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chino-api
+  namespace: {{ .Namespace }}
+  labels:
+    app: chino-api
+spec:
+  selector:
+    app: chino-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chino-stream
+  namespace: {{ .Namespace }}
+  labels:
+    app: chino-stream
+spec:
+  selector:
+    app: chino-stream
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chino-web
+  namespace: {{ .Namespace }}
+  labels:
+    app: chino-web
+spec:
+  selector:
+    app: chino-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-api
+  namespace: {{ .Namespace }}
+  labels:
+    app: chino-api
+    role: backend
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chino-api
+  template:
+    metadata:
+      labels:
+        app: chino-api
+        role: backend
+    spec:
+      {{- if .Bundled }}
+      initContainers:
+        - name: wait-for-oidc
+          image: curlimages/curl:8.11.0
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+                i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+                echo "waiting for bundled keycloak ($i)…"; sleep 3
+              done
+              echo "bundled keycloak ready"
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ image "chino-api" }}
+          envFrom:
+            - configMapRef:
+                name: stube-env
+          env:
+            - name: ADDR
+              value: :8080
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stube-db
+                  key: password
+            - name: PG_URL
+              value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+            - name: STREAM_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stube-stream-signing
+                  key: key
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-stream
+  namespace: {{ .Namespace }}
+  labels:
+    app: chino-stream
+    role: stream
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chino-stream
+  template:
+    metadata:
+      labels:
+        app: chino-stream
+        role: stream
+    spec:
+      {{- if .GPU }}
+      # GPU overlay: pin to a GPU node so the NVENC device plugin schedules us.
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      {{- end }}
+      {{- if .Bundled }}
+      initContainers:
+        - name: wait-for-oidc
+          image: curlimages/curl:8.11.0
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+                i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+                echo "waiting for bundled keycloak ($i)…"; sleep 3
+              done
+              echo "bundled keycloak ready"
+      {{- end }}
+      containers:
+        - name: chino-stream
+          image: {{ image "chino-stream" }}
+          env:
+            - name: LISTEN_ADDR
+              value: :8080
+            - name: KATALOG_API_BASE_URL
+              value: http://katalog-api
+            - name: MEDIA_ROOT
+              value: /var/lib/stube/media
+            - name: OIDC_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: stube-env
+                  key: OIDC_ISSUER
+            - name: OIDC_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: stube-env
+                  key: OIDC_AUDIENCE
+            - name: AUTH_ENABLED
+              value: "true"
+            - name: STREAM_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stube-stream-signing
+                  key: key
+            # Software transcode by default. The GPU feature flips USE_NVENC=true.
+            - name: USE_NVENC
+              value: "{{ if .GPU }}true{{ else }}false{{ end }}"
+            - name: TRANSCODE_PRESET
+              value: veryfast
+            - name: HLS_CACHE_DIR
+              value: /var/cache/stube-hls
+            - name: FFMPEG_MAX_CONCURRENT
+              value: "2"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+              {{- if .GPU }}
+              nvidia.com/gpu: "1"
+              {{- end }}
+          volumeMounts:
+            - name: media
+              mountPath: /var/lib/stube/media
+              readOnly: true
+            - name: hls-cache
+              mountPath: /var/cache/stube-hls
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: media
+        - name: hls-cache
+          emptyDir:
+            sizeLimit: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-web
+  namespace: {{ .Namespace }}
+  labels:
+    app: chino-web
+    role: frontend
+    app.kubernetes.io/part-of: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chino-web
+  template:
+    metadata:
+      labels:
+        app: chino-web
+        role: frontend
+    spec:
+      containers:
+        - name: app
+          image: {{ image "chino-web" }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
