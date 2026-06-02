@@ -50,6 +50,23 @@ spec:
             - name: STREAM_SIGNING_KEY
               valueFrom:
                 secretKeyRef: { name: stube-stream-signing, key: key, optional: true }
+            # ── Bundled Keycloak Admin REST integration (USERS_API) ──
+            # The manager calls the Admin API as the confidential 'stube-manager'
+            # service account (client_credentials) to manage platform users and,
+            # on first run, bootstrap the bundled 'admin' password. The base URL
+            # is the IN-CLUSTER Keycloak Service WITH the /auth context path, so
+            # admin calls never traverse the edge proxy. Empty base URL/secret
+            # disables the integration (operators using an external IdP) — the
+            # /api/manage/users endpoints then return 503 and first-run skips the
+            # bundled-admin bootstrap.
+            - name: KEYCLOAK_BASE_URL
+              value: "http://keycloak:8080/auth"
+            - name: KEYCLOAK_REALM
+              value: "stube"
+            - name: KEYCLOAK_ADMIN_CLIENT_ID
+              value: "stube-manager"
+            - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: stube-keycloak, key: client-secret } }
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 3

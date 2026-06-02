@@ -5,6 +5,7 @@ import { SetupWizard } from './pages/SetupWizard';
 import { LibraryPage } from './pages/LibraryPage';
 import { ImportPage } from './pages/ImportPage';
 import { JobsPage } from './pages/JobsPage';
+import { UsersPage } from './pages/UsersPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFound } from './pages/NotFound';
 
@@ -44,6 +45,14 @@ export function App() {
         element={
           <Layout>
             <JobsPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/manage/users"
+        element={
+          <Layout>
+            <UsersPage />
           </Layout>
         }
       />

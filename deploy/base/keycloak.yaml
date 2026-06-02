@@ -1,0 +1,178 @@
+# ── Bundled Keycloak: the appliance identity provider ───────────────────────
+#
+# A neutral, self-contained OIDC provider so the bundle ships login out of the
+# box — no external IdP required. Realm is the generic 'stube' (NOT a tenant
+# realm). Postgres-backed (the same bundled postgres as everything else), served
+# behind Traefik under /auth, and reachable in-cluster as the 'keycloak' Service.
+#
+# ISSUER MODEL (the Keycloak-behind-a-proxy gotcha):
+#   Tokens carry iss = <public-origin>/auth/realms/stube (a FRONTEND value), and
+#   the Go services validate with coreos/go-oidc, which (a) fetches
+#   {OIDC_ISSUER}/.well-known/openid-configuration, (b) requires the doc's
+#   `issuer` to EQUAL OIDC_ISSUER, and (c) checks the token `iss` against it.
+#   So OIDC_ISSUER MUST be the public issuer AND that URL must be resolvable
+#   in-cluster. We therefore PIN Keycloak's hostname to the public origin
+#   (KC_HOSTNAME) so the issuer is fixed regardless of which host requested
+#   discovery, and the cluster resolves that host back to the ingress
+#   (split-horizon). The all-in-one wires this automatically via a CoreDNS
+#   rewrite to the keycloak Service (see deploy/allinone/entrypoint.sh); on a
+#   real cluster the operator points OIDC_ISSUER + KC_HOSTNAME + the ingress
+#   host at the same name and relies on cluster DNS / hostAliases. See the
+#   stube-keycloak-config ConfigMap below for the two values to override.
+#
+# The realm is imported from the keycloak-realm ConfigMap (--import-realm), so
+# deploy/base is the single source of truth for the client/role contract — the
+# image just needs to be a Keycloak distribution; nothing realm-specific is
+# baked into it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stube-keycloak-config
+  labels: { app: keycloak, app.kubernetes.io/part-of: stube }
+data:
+  # The public origin the browser reaches Stube at (scheme + host[:port]),
+  # WITHOUT the /auth path — Keycloak appends KC_HTTP_RELATIVE_PATH itself.
+  # Override together with ingress host + stube-env OIDC_ISSUER. The demo
+  # overlay shows the pattern (it patches the ingress host + merges OIDC_ISSUER).
+  KC_HOSTNAME: "http://stube.example.com/auth"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels: { app: keycloak, role: identity, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: keycloak } }
+  strategy:
+    # Keycloak holds a JPA/Liquibase changelog lock during DB migration; two
+    # pods racing the migration can deadlock. Recreate keeps exactly one.
+    type: Recreate
+  template:
+    metadata:
+      labels: { app: keycloak, role: identity }
+    spec:
+      # The bundled postgres has no 'keycloak' database (it bootstraps only
+      # POSTGRES_DB=stube), so create it before Keycloak's JPA store connects.
+      # Idempotent: skips creation when the database already exists.
+      initContainers:
+        - name: create-keycloak-db
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do
+                echo "waiting for postgres…"; sleep 2
+              done
+              if psql -h postgres -U "$PGUSER" -tAc \
+                   "SELECT 1 FROM pg_database WHERE datname='keycloak'" \
+                   | grep -q 1; then
+                echo "database keycloak already exists"
+              else
+                echo "creating database keycloak"
+                createdb -h postgres -U "$PGUSER" keycloak
+              fi
+          env:
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+      containers:
+        - name: keycloak
+          image: ghcr.io/nalet/stube/keycloak:latest
+          # `start` (not start-dev) for the production assembly; --import-realm
+          # ingests the mounted realm on first boot (no-op once the realm exists).
+          # --optimized would require a prior `kc.sh build`; we keep the simple
+          # boot-time build so the bundle stays operator-editable.
+          args: ["start", "--import-realm"]
+          ports:
+            - { containerPort: 8080, name: http }
+          env:
+            # ── Postgres store (shared bundled postgres, separate DB) ──
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: postgres
+            - name: KC_DB_URL_DATABASE
+              value: keycloak
+            - name: KC_DB_USERNAME
+              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+            - name: KC_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+            # ── HTTP / edge-proxy ──
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # Served under /auth so the issuer is <host>/auth/realms/stube and the
+            # Traefik /auth prefix maps 1:1 (no path rewrite, no double prefix).
+            - name: KC_HTTP_RELATIVE_PATH
+              value: /auth
+            # Trust X-Forwarded-* from Traefik so Keycloak builds correct
+            # external URLs and treats the edge TLS as the client connection.
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            # Pin the frontend hostname so the issuer (a frontend value) is
+            # FIXED to the public origin regardless of the request's Host —
+            # this is what keeps the token `iss` and the discovery `issuer`
+            # identical for both browser logins and in-cluster validation.
+            - name: KC_HOSTNAME
+              valueFrom: { configMapKeyRef: { name: stube-keycloak-config, key: KC_HOSTNAME } }
+            # Don't require the request Host to match KC_HOSTNAME — the same pod
+            # answers on the in-cluster name (keycloak:8080) and the public host.
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            # Health + metrics endpoints (/auth/health/*). Needed for the probe.
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            # ── Bootstrap admin (temporary master-realm admin) ──
+            # Used only to bootstrap; the stube-realm 'admin' user (realm-admin)
+            # is the operational account and is created by the realm import. The
+            # bundled admin password is forced to change on first login.
+            - name: KEYCLOAK_ADMIN
+              valueFrom: { secretKeyRef: { name: stube-keycloak-admin, key: username } }
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: stube-keycloak-admin, key: password } }
+            # The realm import substitutes these ${VAR} placeholders in
+            # stube-realm.json from the environment, so neither the confidential
+            # service-account secret nor the realm-admin bootstrap password lives
+            # in the (world-readable) imported JSON:
+            #   ${STUBE_MANAGER_SECRET}  -> stube-manager client secret
+            #   ${STUBE_ADMIN_PASSWORD}  -> stube-realm 'admin' user password
+            #                               (temporary:true => forced change on
+            #                               first login)
+            - name: STUBE_MANAGER_SECRET
+              valueFrom: { secretKeyRef: { name: stube-keycloak, key: client-secret } }
+            - name: STUBE_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: stube-keycloak-admin, key: realm-admin-password } }
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /auth/health/ready, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /auth/health/live, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: "2", memory: 1Gi }
+      volumes:
+        - name: realm-import
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels: { app: keycloak }
+spec:
+  selector: { app: keycloak }
+  ports: [{ name: http, port: 8080, targetPort: http }]

@@ -9,6 +9,7 @@ import (
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/config"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/events"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/k8s"
+	"github.com/nalet/stube/platform/katalog-manager-api/internal/keycloak"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
 )
 
@@ -23,6 +24,11 @@ type API struct {
 	// ConfigMap, the stube-stream-signing Secret) and rolls the affected
 	// Deployments. It is never nil: outside a cluster it is a no-op client.
 	K8s *k8s.Client
+	// Keycloak is the Admin REST client backing the /api/manage/users surface
+	// and the first-run bundled-admin bootstrap. It is never nil: when the
+	// integration is unconfigured it is a disabled client whose methods return
+	// keycloak.ErrDisabled (mapped to 503).
+	Keycloak *keycloak.Client
 	// Version is the build/version string reported by setup status.
 	Version string
 }

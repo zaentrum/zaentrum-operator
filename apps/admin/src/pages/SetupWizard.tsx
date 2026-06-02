@@ -25,10 +25,28 @@ const STEPS: Step[] = [
   { id: 'review', title: 'Review' },
 ];
 
-type Form = SetupRequest;
+// The bundled identity provider ships a built-in `admin` account. First-run
+// setup just gives it a password. Operators who already run their own IdP can
+// switch the Sign-in step into "advanced" mode and point Stube at it instead.
+interface Form {
+  displayName: string;
+  /** Password for the bundled IdP's built-in `admin` user. */
+  adminPassword: string;
+  /** Local confirm field — never sent to the server. */
+  adminPasswordConfirm: string;
+  /** When true, use an external OIDC provider instead of the bundled one. */
+  useExternalOidc: boolean;
+  oidcIssuer: string;
+  oidcClientId: string;
+  libraryPath: string;
+  streamSigningKey: string;
+}
 
 const EMPTY: Form = {
   displayName: '',
+  adminPassword: '',
+  adminPasswordConfirm: '',
+  useExternalOidc: false,
   oidcIssuer: '',
   oidcClientId: '',
   libraryPath: '',
@@ -42,12 +60,20 @@ function validate(step: number, f: Form): Record<string, string> {
     if (!f.displayName.trim()) e.displayName = 'Give your server a name.';
   }
   if (step === 1) {
-    if (!f.oidcIssuer.trim()) {
-      e.oidcIssuer = 'The OIDC issuer URL is required.';
-    } else if (!/^https?:\/\//i.test(f.oidcIssuer.trim())) {
-      e.oidcIssuer = 'Must be an absolute URL (https://…).';
+    if (f.useExternalOidc) {
+      if (!f.oidcIssuer.trim()) {
+        e.oidcIssuer = 'The OIDC issuer URL is required.';
+      } else if (!/^https?:\/\//i.test(f.oidcIssuer.trim())) {
+        e.oidcIssuer = 'Must be an absolute URL (https://…).';
+      }
+      if (!f.oidcClientId.trim()) e.oidcClientId = 'The client ID is required.';
+    } else {
+      if (f.adminPassword.length < 8) {
+        e.adminPassword = 'Use at least 8 characters.';
+      } else if (f.adminPassword !== f.adminPasswordConfirm) {
+        e.adminPasswordConfirm = 'Passwords do not match.';
+      }
     }
-    if (!f.oidcClientId.trim()) e.oidcClientId = 'The client ID is required.';
   }
   if (step === 2) {
     if (!f.libraryPath.trim()) {
@@ -57,7 +83,7 @@ function validate(step: number, f: Form): Record<string, string> {
     }
   }
   if (step === 3 && f.streamSigningKey) {
-    // Optional, but if provided it should look like a key (hex, >= 32 chars).
+    // Optional, but if provided it should look like a key (hex, >= 16 chars).
     if (f.streamSigningKey.length < 16) {
       e.streamSigningKey = 'Looks too short — leave blank to auto-generate.';
     }
@@ -91,11 +117,21 @@ export function SetupWizard() {
     try {
       const body: SetupRequest = {
         displayName: form.displayName.trim(),
-        oidcIssuer: form.oidcIssuer.trim(),
-        oidcClientId: form.oidcClientId.trim(),
         libraryPath: form.libraryPath.trim(),
         // Omit the key when blank so the server generates and keeps it.
         ...(form.streamSigningKey ? { streamSigningKey: form.streamSigningKey } : {}),
+        ...(form.useExternalOidc
+          ? {
+              // External IdP: hand over the issuer + client; the bundled admin
+              // password is not used.
+              oidcIssuer: form.oidcIssuer.trim(),
+              oidcClientId: form.oidcClientId.trim(),
+            }
+          : {
+              // Bundled IdP: set the built-in admin password. Leave oidcIssuer
+              // empty so the server knows to use the bundled provider.
+              adminPassword: form.adminPassword,
+            }),
       };
       await api.setup(body);
       navigate('/', { replace: true });
@@ -229,29 +265,71 @@ function SignInStep({ form, errors, set }: StepProps) {
       <StepHeading
         icon={<ShieldCheck size={18} />}
         title="Sign-in"
-        blurb="Stube delegates sign-in to your identity provider over OpenID Connect. Point it at your issuer and the client it should use."
+        blurb="Stube ships with a built-in identity provider and an admin account. Set its password to finish — no external services needed."
       />
-      <div className="flex flex-col gap-s-4">
-        <Field
-          label="OIDC issuer"
-          mono
-          placeholder="https://id.example.com/realms/main"
-          value={form.oidcIssuer}
-          error={errors.oidcIssuer}
-          hint="The discovery base URL. Stube resolves /.well-known/openid-configuration under it."
-          onChange={(e) => set({ oidcIssuer: e.target.value })}
-          autoFocus
-        />
-        <Field
-          label="Client ID"
-          mono
-          placeholder="stube"
-          value={form.oidcClientId}
-          error={errors.oidcClientId}
-          hint="The public client your clients (web / mobile / TV) authenticate as."
-          onChange={(e) => set({ oidcClientId: e.target.value })}
-        />
-      </div>
+
+      {!form.useExternalOidc ? (
+        <div className="flex flex-col gap-s-4">
+          <Field
+            label="Admin username"
+            mono
+            value="admin"
+            disabled
+            hint="The bundled identity provider's built-in administrator account."
+            onChange={() => undefined}
+          />
+          <Field
+            label="Admin password"
+            type="password"
+            placeholder="At least 8 characters"
+            value={form.adminPassword}
+            error={errors.adminPassword}
+            hint="You'll sign in to Stube as admin with this password."
+            onChange={(e) => set({ adminPassword: e.target.value })}
+            autoFocus
+          />
+          <Field
+            label="Confirm password"
+            type="password"
+            placeholder="Re-enter the password"
+            value={form.adminPasswordConfirm}
+            error={errors.adminPasswordConfirm}
+            onChange={(e) => set({ adminPasswordConfirm: e.target.value })}
+          />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-s-4">
+          <Field
+            label="OIDC issuer"
+            mono
+            placeholder="https://id.example.com/realms/main"
+            value={form.oidcIssuer}
+            error={errors.oidcIssuer}
+            hint="The discovery base URL. Stube resolves /.well-known/openid-configuration under it."
+            onChange={(e) => set({ oidcIssuer: e.target.value })}
+            autoFocus
+          />
+          <Field
+            label="Client ID"
+            mono
+            placeholder="stube"
+            value={form.oidcClientId}
+            error={errors.oidcClientId}
+            hint="The public client your clients (web / mobile / TV) authenticate as."
+            onChange={(e) => set({ oidcClientId: e.target.value })}
+          />
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => set({ useExternalOidc: !form.useExternalOidc })}
+        className="focus-ring mt-s-4 rounded text-sm text-cloud-blue hover:underline"
+      >
+        {form.useExternalOidc
+          ? '← Use the bundled identity provider'
+          : 'Advanced: use my own OIDC provider →'}
+      </button>
     </div>
   );
 }
@@ -297,7 +375,7 @@ function StreamingStep({
         label="Stream signing key (optional)"
         mono
         placeholder="leave blank to auto-generate"
-        value={form.streamSigningKey ?? ''}
+        value={form.streamSigningKey}
         error={errors.streamSigningKey}
         hint="Keep this secret. It is shared between the product API and the stream origin; a mismatch causes playback 403s."
         onChange={(e) => set({ streamSigningKey: e.target.value })}
@@ -356,8 +434,19 @@ function ReviewStep({ form }: { form: Form }) {
       />
       <div className="rounded-md border border-border bg-bg-2 px-s-4">
         <ReviewRow label="Server name" value={form.displayName || '—'} />
-        <ReviewRow label="OIDC issuer" value={form.oidcIssuer || '—'} mono />
-        <ReviewRow label="Client ID" value={form.oidcClientId || '—'} mono />
+        {form.useExternalOidc ? (
+          <>
+            <ReviewRow label="Sign-in" value="External OIDC provider" />
+            <ReviewRow label="OIDC issuer" value={form.oidcIssuer || '—'} mono />
+            <ReviewRow label="Client ID" value={form.oidcClientId || '—'} mono />
+          </>
+        ) : (
+          <>
+            <ReviewRow label="Sign-in" value="Bundled identity provider" />
+            <ReviewRow label="Admin account" value="admin" mono />
+            <ReviewRow label="Admin password" value={form.adminPassword ? '••••••••' : '—'} />
+          </>
+        )}
         <ReviewRow label="Library path" value={form.libraryPath || '—'} mono />
         <ReviewRow label="Stream signing key" value={keyDisplay} mono />
       </div>

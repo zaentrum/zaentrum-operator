@@ -11,6 +11,12 @@
 //   POST /api/manage/import/scan  body { path } -> ImportJob
 //   GET  /api/manage/jobs         -> { jobs: Job[] }
 //
+//   GET    /api/manage/users                      -> User[]
+//   POST   /api/manage/users                       body NewUser -> { id }
+//   PUT    /api/manage/users/{id}                  body Partial<UserUpdate>
+//   DELETE /api/manage/users/{id}
+//   POST   /api/manage/users/{id}/reset-password   body { password, temporary? }
+//
 // The base path is configurable so the SPA can run behind /manage with the
 // API on the same origin (default) or against a remote dev backend.
 
@@ -34,9 +40,17 @@ export interface SetupStatus {
 
 export interface SetupRequest {
   displayName: string;
-  oidcIssuer: string;
-  oidcClientId: string;
   libraryPath: string;
+  /** Password for the bundled identity provider's built-in `admin` user.
+   *  Required unless the operator opts into an external OIDC provider. */
+  adminPassword?: string;
+  /** Advanced: point Stube at an external OIDC provider instead of the
+   *  bundled one. Leave blank to use the bundled IdP. When set, the bundled
+   *  `admin` user is not used and `adminPassword` is ignored. */
+  oidcIssuer?: string;
+  /** Client ID at the external OIDC provider. Only meaningful with
+   *  `oidcIssuer`. */
+  oidcClientId?: string;
   /** Optional. If omitted the server generates one and keeps it secret. */
   streamSigningKey?: string;
 }
@@ -47,7 +61,8 @@ export interface SetupResult {
 
 /** Non-secret config returned by GET /config. The stream signing key is a
  *  secret and is never echoed back — the server only reports whether one is
- *  present via `streamSigningKeySet`. */
+ *  present via `streamSigningKeySet`. An empty `oidcIssuer` means the bundled
+ *  identity provider is in use. */
 export interface ManageConfig {
   displayName: string;
   oidcIssuer: string;
@@ -56,6 +71,34 @@ export interface ManageConfig {
   streamSigningKeySet: boolean;
   version: string;
 }
+
+// ── Users ───────────────────────────────────────────────────────────────
+//
+// Backed by the bundled identity provider via the manage-API. The shape
+// mirrors the Keycloak user representation the manage-API translates to/from.
+
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  enabled: boolean;
+}
+
+/** Body for POST /users. The password is optional — omit it to create the
+ *  account without credentials and set one later via reset-password. */
+export interface NewUser {
+  username: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  password?: string;
+}
+
+/** Body for PUT /users/{id}. Every field is optional — only the provided
+ *  fields are updated. Username is immutable server-side and not editable. */
+export type UserUpdate = Partial<Omit<User, 'id' | 'username'>>;
 
 export interface LibraryItem {
   id: string;
@@ -205,6 +248,47 @@ export const api = {
 
   jobs(signal?: AbortSignal): Promise<JobsPage> {
     return request<JobsPage>('/jobs', { signal });
+  },
+
+  // ── Users ──────────────────────────────────────────────────────────────
+
+  listUsers(signal?: AbortSignal): Promise<User[]> {
+    return request<User[]>('/users', { signal });
+  },
+
+  createUser(body: NewUser, signal?: AbortSignal): Promise<{ id: string }> {
+    return request<{ id: string }>('/users', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    });
+  },
+
+  updateUser(id: string, body: UserUpdate, signal?: AbortSignal): Promise<void> {
+    return request<void>(`/users/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+      signal,
+    });
+  },
+
+  deleteUser(id: string, signal?: AbortSignal): Promise<void> {
+    return request<void>(`/users/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      signal,
+    });
+  },
+
+  resetUserPassword(
+    id: string,
+    body: { password: string; temporary?: boolean },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return request<void>(`/users/${encodeURIComponent(id)}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    });
   },
 };
 

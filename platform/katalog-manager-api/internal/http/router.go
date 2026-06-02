@@ -61,6 +61,14 @@ func NewRouter(a *API, verifier *auth.Verifier) (http.Handler, error) {
 	mgmt.Post("/items/{id}/package", a.Package)
 	mgmt.Post("/items/{id}/enrich", a.Enrich)
 
+	// Platform user management, backed by the Keycloak Admin REST API. Returns
+	// 503 when the Keycloak integration is unconfigured (no bundled IdP).
+	mgmt.Get("/users", a.ListUsers)
+	mgmt.Post("/users", a.CreateUser)
+	mgmt.Put("/users/{id}", a.UpdateUser)
+	mgmt.Delete("/users/{id}", a.DeleteUser)
+	mgmt.Post("/users/{id}/reset-password", a.ResetUserPassword)
+
 	r.Mount("/api/manage", mgmt)
 	return r, nil
 }

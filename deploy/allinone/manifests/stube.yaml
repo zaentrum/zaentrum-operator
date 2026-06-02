@@ -60,17 +60,225 @@ subjects:
 ---
 apiVersion: v1
 data:
+  stube-realm.json: |
+    {
+      "realm": "stube",
+      "enabled": true,
+      "displayName": "Stube",
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "editUsernameAllowed": false,
+      "defaultSignatureAlgorithm": "RS256",
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "offlineSessionIdleTimeout": 2592000,
+      "oauth2DeviceCodeLifespan": 600,
+      "oauth2DevicePollingInterval": 5,
+      "defaultDefaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "defaultOptionalClientScopes": [
+        "offline_access",
+        "address",
+        "phone",
+        "microprofile-jwt"
+      ],
+      "clients": [
+        {
+          "clientId": "chino-web",
+          "name": "Chino Web",
+          "description": "Web SPA — Authorization Code + PKCE and the OAuth 2.0 Device Authorization Grant. Public client; neutral wildcard redirects for the unknown appliance host.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "redirectUris": ["*"],
+          "webOrigins": ["*"],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "oauth2.device.authorization.grant.enabled": "true",
+            "post.logout.redirect.uris": "+"
+          },
+          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "protocolMappers": [
+            {
+              "name": "audience-chino",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.custom.audience": "chino",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "chino-tv",
+          "name": "Chino TV",
+          "description": "TV client — OAuth 2.0 Device Authorization Grant only (no browser redirect on the device). Public client.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "oauth2.device.authorization.grant.enabled": "true"
+          },
+          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "protocolMappers": [
+            {
+              "name": "audience-chino",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.custom.audience": "chino",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "chino-mobile",
+          "name": "Chino Mobile",
+          "description": "Mobile client — Authorization Code + PKCE (AppAuth) plus the Device Authorization Grant. Public client; neutral wildcard redirects.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "bearerOnly": false,
+          "frontchannelLogout": true,
+          "redirectUris": ["*"],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "oauth2.device.authorization.grant.enabled": "true",
+            "post.logout.redirect.uris": "+"
+          },
+          "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+          "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+          "protocolMappers": [
+            {
+              "name": "audience-chino",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.custom.audience": "chino",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "stube-manager",
+          "name": "Stube Manager (service account)",
+          "description": "Confidential service-account client. katalog-manager-api uses client_credentials to call the Admin REST API (manage/view/query users + first-run admin bootstrap).",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "bearerOnly": false,
+          "secret": "${STUBE_MANAGER_SECRET}",
+          "attributes": {
+            "client.secret.creation.time": "0"
+          }
+        }
+      ],
+      "users": [
+        {
+          "username": "admin",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Stube",
+          "lastName": "Admin",
+          "email": "admin@stube.local",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "${STUBE_ADMIN_PASSWORD}",
+              "temporary": true
+            }
+          ],
+          "realmRoles": ["default-roles-stube"],
+          "clientRoles": {
+            "realm-management": ["realm-admin"]
+          }
+        },
+        {
+          "username": "service-account-stube-manager",
+          "enabled": true,
+          "serviceAccountClientId": "stube-manager",
+          "clientRoles": {
+            "realm-management": ["manage-users", "view-users", "query-users"]
+          }
+        }
+      ]
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    app: keycloak
+    app.kubernetes.io/part-of: stube
+  name: keycloak-realm
+  namespace: stube
+---
+apiVersion: v1
+data:
   ADMIN_SUBJECTS: ""
   KAFKA_BROKERS: kafka:9092
   KATALOG_BASE_URL: http://katalog-api
   MEDIA_ROOT: /var/lib/stube/media
   OIDC_AUDIENCE: chino
   OIDC_ENABLED: "true"
-  OIDC_ISSUER: ""
+  OIDC_ISSUER: http://stube.example.com/auth/realms/stube
   STREAM_BASE_URL: http://chino-stream
 kind: ConfigMap
 metadata:
-  name: stube-env-gg5t7h6c58
+  name: stube-env-9b9b2d8574
+  namespace: stube
+---
+apiVersion: v1
+data:
+  KC_HOSTNAME: http://stube.example.com/auth
+kind: ConfigMap
+metadata:
+  labels:
+    app: keycloak
+    app.kubernetes.io/part-of: stube
+  name: stube-keycloak-config
   namespace: stube
 ---
 apiVersion: v1
@@ -80,6 +288,26 @@ data:
 kind: Secret
 metadata:
   name: stube-db-k88fgb59hk
+  namespace: stube
+type: Opaque
+---
+apiVersion: v1
+data:
+  password: ZGV2
+  realm-admin-password: ZGV2
+  username: YWRtaW4=
+kind: Secret
+metadata:
+  name: stube-keycloak-admin-75tt9m4mhm
+  namespace: stube
+type: Opaque
+---
+apiVersion: v1
+data:
+  client-secret: c3R1YmUtbWFuYWdlci1kZXYtY2hhbmdlLW1l
+kind: Secret
+metadata:
+  name: stube-keycloak-m2g5bdg8c7
   namespace: stube
 type: Opaque
 ---
@@ -196,6 +424,21 @@ spec:
     targetPort: 8080
   selector:
     app: katalog-manager-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: keycloak
+  name: keycloak
+  namespace: stube
+spec:
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+  selector:
+    app: keycloak
 ---
 apiVersion: v1
 kind: Service
@@ -346,7 +589,7 @@ spec:
               name: stube-stream-signing-55c926tf47
         envFrom:
         - configMapRef:
-            name: stube-env-gg5t7h6c58
+            name: stube-env-9b9b2d8574
         image: ghcr.io/nalet/stube/chino-api:latest
         name: app
         ports:
@@ -398,12 +641,12 @@ spec:
           valueFrom:
             configMapKeyRef:
               key: OIDC_ISSUER
-              name: stube-env-gg5t7h6c58
+              name: stube-env-9b9b2d8574
         - name: OIDC_AUDIENCE
           valueFrom:
             configMapKeyRef:
               key: OIDC_AUDIENCE
-              name: stube-env-gg5t7h6c58
+              name: stube-env-9b9b2d8574
         - name: AUTH_ENABLED
           value: "true"
         - name: STREAM_SIGNING_KEY
@@ -607,12 +850,12 @@ spec:
           valueFrom:
             configMapKeyRef:
               key: OIDC_ISSUER
-              name: stube-env-gg5t7h6c58
+              name: stube-env-9b9b2d8574
         - name: KATALOG_API_OIDC_AUDIENCE
           valueFrom:
             configMapKeyRef:
               key: OIDC_AUDIENCE
-              name: stube-env-gg5t7h6c58
+              name: stube-env-9b9b2d8574
         - name: DB_USER
           valueFrom:
             secretKeyRef:
@@ -688,9 +931,20 @@ spec:
               key: key
               name: stube-stream-signing-55c926tf47
               optional: true
+        - name: KEYCLOAK_BASE_URL
+          value: http://keycloak:8080/auth
+        - name: KEYCLOAK_REALM
+          value: stube
+        - name: KEYCLOAK_ADMIN_CLIENT_ID
+          value: stube-manager
+        - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: client-secret
+              name: stube-keycloak-m2g5bdg8c7
         envFrom:
         - configMapRef:
-            name: stube-env-gg5t7h6c58
+            name: stube-env-9b9b2d8574
         image: ghcr.io/nalet/stube/katalog-manager-api:latest
         livenessProbe:
           httpGet:
@@ -716,6 +970,152 @@ spec:
             cpu: 50m
             memory: 96Mi
       serviceAccountName: katalog-manager-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: keycloak
+    app.kubernetes.io/part-of: stube
+    role: identity
+  name: keycloak
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: keycloak
+        role: identity
+    spec:
+      containers:
+      - args:
+        - start
+        - --import-realm
+        env:
+        - name: KC_DB
+          value: postgres
+        - name: KC_DB_URL_HOST
+          value: postgres
+        - name: KC_DB_URL_DATABASE
+          value: keycloak
+        - name: KC_DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: stube-db-k88fgb59hk
+        - name: KC_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: stube-db-k88fgb59hk
+        - name: KC_HTTP_ENABLED
+          value: "true"
+        - name: KC_HTTP_RELATIVE_PATH
+          value: /auth
+        - name: KC_PROXY_HEADERS
+          value: xforwarded
+        - name: KC_HOSTNAME
+          valueFrom:
+            configMapKeyRef:
+              key: KC_HOSTNAME
+              name: stube-keycloak-config
+        - name: KC_HOSTNAME_STRICT
+          value: "false"
+        - name: KC_HEALTH_ENABLED
+          value: "true"
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: stube-keycloak-admin-75tt9m4mhm
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: stube-keycloak-admin-75tt9m4mhm
+        - name: STUBE_MANAGER_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: client-secret
+              name: stube-keycloak-m2g5bdg8c7
+        - name: STUBE_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: realm-admin-password
+              name: stube-keycloak-admin-75tt9m4mhm
+        image: ghcr.io/nalet/stube/keycloak:latest
+        livenessProbe:
+          failureThreshold: 6
+          httpGet:
+            path: /auth/health/live
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+        name: keycloak
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          failureThreshold: 30
+          httpGet:
+            path: /auth/health/ready
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: "2"
+            memory: 1Gi
+          requests:
+            cpu: 200m
+            memory: 512Mi
+        volumeMounts:
+        - mountPath: /opt/keycloak/data/import
+          name: realm-import
+          readOnly: true
+      initContainers:
+      - args:
+        - |
+          set -eu
+          until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do
+            echo "waiting for postgres…"; sleep 2
+          done
+          if psql -h postgres -U "$PGUSER" -tAc \
+               "SELECT 1 FROM pg_database WHERE datname='keycloak'" \
+               | grep -q 1; then
+            echo "database keycloak already exists"
+          else
+            echo "creating database keycloak"
+            createdb -h postgres -U "$PGUSER" keycloak
+          fi
+        command:
+        - /bin/sh
+        - -c
+        env:
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: stube-db-k88fgb59hk
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: stube-db-k88fgb59hk
+        image: postgres:16-alpine
+        name: create-keycloak-db
+      volumes:
+      - configMap:
+          name: keycloak-realm
+        name: realm-import
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -827,6 +1227,13 @@ spec:
             port:
               number: 80
         path: /api
+        pathType: Prefix
+      - backend:
+          service:
+            name: keycloak
+            port:
+              number: 8080
+        path: /auth
         pathType: Prefix
       - backend:
           service:

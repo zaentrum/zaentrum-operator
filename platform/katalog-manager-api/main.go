@@ -20,6 +20,7 @@ import (
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/events"
 	managerhttp "github.com/nalet/stube/platform/katalog-manager-api/internal/http"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/k8s"
+	"github.com/nalet/stube/platform/katalog-manager-api/internal/keycloak"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
 )
 
@@ -86,11 +87,19 @@ func main() {
 	k8sClient := k8s.New()
 	slog.Info("k8s config propagation", "enabled", k8sClient.Enabled(), "namespace", k8sClient.Namespace())
 
+	// Keycloak Admin client backing /api/manage/users and the first-run
+	// bundled-admin bootstrap. Never nil: when KEYCLOAK_* is unset it is a
+	// disabled client whose methods return ErrDisabled (mapped to 503), so
+	// deployments using an external OIDC issuer run unchanged.
+	kcClient := keycloak.New(cfg.KeycloakBaseURL, cfg.KeycloakRealm, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret)
+	slog.Info("keycloak admin integration", "enabled", kcClient.Enabled(), "realm", cfg.KeycloakRealm)
+
 	api := &managerhttp.API{
 		Cfg:      cfg,
 		Store:    st,
 		Producer: producer,
 		K8s:      k8sClient,
+		Keycloak: kcClient,
 		Version:  version,
 	}
 

@@ -20,6 +20,7 @@ spec:
         #   /api/manage -> katalog-manager-api  (neutral write API)
         #   /manage     -> admin                (management UI, SPA)
         #   /api        -> chino-api            (product BFF)
+        #   /auth       -> keycloak             (bundled IdP; issuer base path)
         #   /           -> chino-web            (the main app, static SPA)
         paths:
           - path: /api/manage
@@ -40,6 +41,15 @@ spec:
               service:
                 name: chino-api
                 port: { number: 80 }
+          # Bundled Keycloak. Served at /auth (KC_HTTP_RELATIVE_PATH=/auth) so
+          # the issuer is <host>/auth/realms/stube and the prefix maps 1:1 with
+          # no rewrite. More specific than '/', so it precedes the catch-all.
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port: { number: 8080 }
           - path: /
             pathType: Prefix
             backend:

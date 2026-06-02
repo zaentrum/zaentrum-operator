@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/nalet/stube/platform/katalog-manager-api/internal/keycloak"
 	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
 )
 
@@ -29,12 +31,21 @@ type setupChecks struct {
 
 // setupRequest is the body of POST /api/manage/setup. streamSigningKey is
 // optional — when absent the server generates one and persists it.
+//
+// adminPassword is optional and only meaningful when the bundled Keycloak is
+// active (KEYCLOAK_* configured). On first run, when supplied, it sets the
+// bundled 'admin' account's password and display name so the operator leaves
+// the wizard with a secured identity provider. It is never persisted to the DB
+// and never echoed back. When an operator supplies an EXTERNAL oidcIssuer that
+// bypasses the bundled IdP, the Keycloak client is disabled and this field is a
+// no-op.
 type setupRequest struct {
 	DisplayName      string `json:"displayName"`
 	OIDCIssuer       string `json:"oidcIssuer"`
 	OIDCClientID     string `json:"oidcClientId"`
 	LibraryPath      string `json:"libraryPath"`
 	StreamSigningKey string `json:"streamSigningKey,omitempty"`
+	AdminPassword    string `json:"adminPassword,omitempty"`
 }
 
 // setupResponse is the body of a successful POST /api/manage/setup. configured
@@ -59,6 +70,23 @@ type propagationInfo struct {
 	Restarts []string `json:"restarts"`
 	Skipped  []string `json:"skipped,omitempty"`
 	Errors   []string `json:"errors,omitempty"`
+	// IdentityProvider summarises the bundled-Keycloak admin bootstrap (set the
+	// 'admin' password + display name on first run). Nil when the Keycloak
+	// integration is disabled (external oidcIssuer) — that path is reported in
+	// Skipped instead.
+	IdentityProvider *idpBootstrapInfo `json:"identityProvider,omitempty"`
+}
+
+// idpBootstrapInfo reports the outcome of seeding the bundled Keycloak 'admin'
+// account during first-run setup. It never carries the password.
+type idpBootstrapInfo struct {
+	// PasswordSet is true when the admin password was (re)set this run.
+	PasswordSet bool `json:"passwordSet"`
+	// DisplayNameSet is true when the admin display name (first name) was set.
+	DisplayNameSet bool `json:"displayNameSet"`
+	// Errors carries best-effort failures so the UI can warn without failing
+	// the whole wizard.
+	Errors []string `json:"errors,omitempty"`
 }
 
 // SetupStatus reports whether first-run setup has completed plus the live
@@ -159,6 +187,14 @@ func (a *API) Setup(w http.ResponseWriter, r *http.Request) {
 		LibraryPath:  req.LibraryPath,
 	}, key)
 
+	// Bootstrap the bundled Keycloak's 'admin' account on first run. The
+	// bundled IdP makes its issuer available at boot, so by the time setup
+	// runs we can seed the admin password + display name via the Admin REST
+	// API. This is best-effort and folds into the same propagation envelope:
+	// it is a no-op when the Keycloak integration is disabled (operator using
+	// an external oidcIssuer) or when no adminPassword was supplied.
+	a.bootstrapBundledAdmin(ctx, req.AdminPassword, req.DisplayName, &info)
+
 	writeJSON(w, http.StatusOK, setupResponse{Configured: true, Propagation: info})
 }
 
@@ -242,6 +278,75 @@ func (a *API) propagateSetup(ctx context.Context, prev store.Config, prevKey str
 		info.Restarts = append(info.Restarts, dep)
 	}
 	return info
+}
+
+// bundledAdminUsername is the username of the bundled Keycloak's seed admin
+// account. First-run setup secures it by setting its password and display name.
+const bundledAdminUsername = "admin"
+
+// bootstrapBundledAdmin secures the bundled Keycloak 'admin' account on first
+// run: it sets the supplied password and the operator's display name as the
+// admin's first name. It is best-effort and folds its outcome into the shared
+// propagationInfo — it never fails the wizard.
+//
+// It is a no-op (recorded in Skipped) when:
+//   - the Keycloak integration is disabled, i.e. the operator supplied an
+//     external oidcIssuer that bypasses the bundled IdP (KEYCLOAK_* unset); or
+//   - no admin password was supplied (nothing to seed).
+//
+// It is idempotent: re-running setup just re-applies the same password / name
+// to the existing account.
+func (a *API) bootstrapBundledAdmin(ctx context.Context, adminPassword, displayName string, info *propagationInfo) {
+	if a.Keycloak == nil || !a.Keycloak.Enabled() {
+		info.Skipped = append(info.Skipped,
+			"bundled keycloak admin bootstrap skipped; external oidc issuer in use")
+		return
+	}
+	adminPassword = strings.TrimSpace(adminPassword)
+	if adminPassword == "" {
+		info.Skipped = append(info.Skipped,
+			"bundled keycloak admin bootstrap skipped; no adminPassword supplied")
+		return
+	}
+
+	boot := &idpBootstrapInfo{}
+
+	// Resolve the bundled 'admin' account's id. If it isn't present the bundled
+	// IdP isn't the one this manager is pointed at — record and bail.
+	id, err := a.Keycloak.FindIDByUsername(ctx, bundledAdminUsername)
+	if err != nil {
+		if errors.Is(err, keycloak.ErrNotFound) {
+			boot.Errors = append(boot.Errors, "bundled admin account not found in realm")
+		} else {
+			boot.Errors = append(boot.Errors, "resolve admin id: "+err.Error())
+			slog.Error("setup: resolve bundled admin failed", "err", err)
+		}
+		info.IdentityProvider = boot
+		return
+	}
+
+	// Set the admin password (non-temporary: the operator chose it in the
+	// wizard, so they should not be forced to change it on next login).
+	if err := a.Keycloak.ResetPassword(ctx, id, adminPassword, false); err != nil {
+		boot.Errors = append(boot.Errors, "set admin password: "+err.Error())
+		slog.Error("setup: set bundled admin password failed", "err", err)
+	} else {
+		boot.PasswordSet = true
+	}
+
+	// Set the display name (first name) so the admin console greets the
+	// operator by the install's display name. Best-effort, decoupled from the
+	// password set above.
+	if name := strings.TrimSpace(displayName); name != "" {
+		if err := a.Keycloak.Update(ctx, id, keycloak.UpdateInput{FirstName: &name}); err != nil {
+			boot.Errors = append(boot.Errors, "set admin display name: "+err.Error())
+			slog.Error("setup: set bundled admin display name failed", "err", err)
+		} else {
+			boot.DisplayNameSet = true
+		}
+	}
+
+	info.IdentityProvider = boot
 }
 
 // libraryConfigured reports whether a library path has been persisted. The
