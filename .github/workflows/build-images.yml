@@ -1,0 +1,205 @@
+# Build the Stube component images and push them to GitHub Container Registry.
+#
+# Each component is built with Buildx + docker/build-push-action and published as
+#   ghcr.io/nalet/stube/<svc>:latest
+#   ghcr.io/nalet/stube/<svc>:<git-sha>
+#
+# Path filtering keeps PRs cheap: a component only builds when its own sources
+# (or this workflow / the shared deploy bits) change. On `main` we always build
+# every component so the registry has a coherent set of images for a release.
+#
+# Platforms: linux/amd64 only for now. arm64 is a future matrix axis — see the
+# commented `platforms` lines below.
+name: build-images
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+  # Allow a manual full rebuild from the Actions tab.
+  workflow_dispatch: {}
+
+# GITHUB_TOKEN needs write access to packages (GHCR) and read access to the repo.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/nalet/stube
+
+# A newer push to the same branch/PR cancels in-flight builds.
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Decide which components changed ──────────────────────────────────────
+  # On pull_request we honour the per-component path filters. On push to main
+  # (and on workflow_dispatch) every filter is forced true so the whole set is
+  # rebuilt. The matrix job reads these outputs to skip unchanged components.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      chino-web: ${{ steps.decide.outputs.chino-web }}
+      chino-api: ${{ steps.decide.outputs.chino-api }}
+      chino-stream: ${{ steps.decide.outputs.chino-stream }}
+      katalog-api: ${{ steps.decide.outputs.katalog-api }}
+      katalog-manager-api: ${{ steps.decide.outputs.katalog-manager-api }}
+      admin: ${{ steps.decide.outputs.admin }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Per-component path filter. Shared paths (this workflow + deploy/) mark
+      # everything dirty so a change to the build plumbing rebuilds all images.
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shared: &shared
+              - '.github/workflows/build-images.yml'
+              - 'deploy/**'
+            chino-web:
+              - *shared
+              - 'apps/chino/web/**'
+            chino-api:
+              - *shared
+              - 'services/chino-api/**'
+            chino-stream:
+              - *shared
+              - 'services/chino-stream/**'
+            katalog-api:
+              - *shared
+              - 'platform/katalog-api/**'
+            katalog-manager-api:
+              - *shared
+              - 'platform/katalog-manager-api/**'
+            admin:
+              - *shared
+              - 'apps/admin/**'
+
+      # On main / manual dispatch, build everything; on PRs, honour the filter.
+      - id: decide
+        env:
+          FORCE_ALL: ${{ github.event_name != 'pull_request' }}
+          F_CHINO_WEB: ${{ steps.filter.outputs.chino-web }}
+          F_CHINO_API: ${{ steps.filter.outputs.chino-api }}
+          F_CHINO_STREAM: ${{ steps.filter.outputs.chino-stream }}
+          F_KATALOG_API: ${{ steps.filter.outputs.katalog-api }}
+          F_KATALOG_MANAGER_API: ${{ steps.filter.outputs.katalog-manager-api }}
+          F_ADMIN: ${{ steps.filter.outputs.admin }}
+        run: |
+          set -euo pipefail
+          emit() {
+            local name="$1" changed="$2"
+            if [ "$FORCE_ALL" = "true" ] || [ "$changed" = "true" ]; then
+              echo "$name=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$name=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          emit chino-web           "$F_CHINO_WEB"
+          emit chino-api           "$F_CHINO_API"
+          emit chino-stream        "$F_CHINO_STREAM"
+          emit katalog-api         "$F_KATALOG_API"
+          emit katalog-manager-api "$F_KATALOG_MANAGER_API"
+          emit admin               "$F_ADMIN"
+
+  # ── Build + push each changed component ──────────────────────────────────
+  build:
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - svc: chino-web
+            context: apps/chino/web
+            changed: ${{ needs.changes.outputs.chino-web }}
+          - svc: chino-api
+            context: services/chino-api
+            changed: ${{ needs.changes.outputs.chino-api }}
+          - svc: chino-stream
+            context: services/chino-stream
+            changed: ${{ needs.changes.outputs.chino-stream }}
+          - svc: katalog-api
+            context: platform/katalog-api
+            changed: ${{ needs.changes.outputs.katalog-api }}
+          - svc: katalog-manager-api
+            context: platform/katalog-manager-api
+            changed: ${{ needs.changes.outputs.katalog-manager-api }}
+          - svc: admin
+            context: apps/admin
+            changed: ${{ needs.changes.outputs.admin }}
+    steps:
+      - name: Skip unchanged component
+        if: matrix.changed != 'true'
+        run: echo "::notice::${{ matrix.svc }} unchanged for this event — skipping build."
+
+      - uses: actions/checkout@v4
+        if: matrix.changed == 'true'
+
+      # A component is only buildable once a real Dockerfile lands in its
+      # context. Scaffold dirs still carry only a .gitkeep — detect that and
+      # skip cleanly instead of failing the matrix leg.
+      - name: Check for Dockerfile
+        id: dockerfile
+        if: matrix.changed == 'true'
+        run: |
+          if [ -f "${{ matrix.context }}/Dockerfile" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.context }}/Dockerfile not present yet — skipping build."
+          fi
+
+      - name: Set up QEMU
+        if: matrix.changed == 'true' && steps.dockerfile.outputs.present == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: matrix.changed == 'true' && steps.dockerfile.outputs.present == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Don't attempt to log in (and therefore never push) on PRs from forks,
+        # which have a read-only GITHUB_TOKEN. We still build to validate.
+        if: >-
+          matrix.changed == 'true' &&
+          steps.dockerfile.outputs.present == 'true' &&
+          github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags + labels)
+        id: meta
+        if: matrix.changed == 'true' && steps.dockerfile.outputs.present == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.svc }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+
+      - name: Build and push ${{ matrix.svc }}
+        if: matrix.changed == 'true' && steps.dockerfile.outputs.present == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          # PRs build but never push (validation only); main/dispatch push.
+          push: ${{ github.event_name != 'pull_request' }}
+          # amd64 today. To also ship arm64, add the platform here and uncomment
+          # the QEMU step above stays as the cross-build emulator:
+          #   platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.sha }}
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.svc }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.svc }}

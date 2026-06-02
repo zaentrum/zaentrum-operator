@@ -11,12 +11,25 @@ package store
 
 import (
 	"context"
+	"embed"
 	"errors"
+	"fmt"
+	"io/fs"
 	"log/slog"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// catalogMigrations holds the neutral catalog-schema DDL. These are the tables
+// the read API (katalog-api) SELECTs and the import/processing path writes —
+// the physical tables CAP used to own as com_nalet_katalog_*, renamed here to
+// the katalog_* prefix. Each file is an idempotent CREATE TABLE IF NOT EXISTS
+// (+ indexes / seed rows), applied in lexical filename order on every boot.
+//
+//go:embed migrations/catalog/*.sql
+var catalogMigrations embed.FS
 
 // Store wraps the pgx pool.
 type Store struct {
@@ -62,18 +75,27 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.Pool.Ping(ctx)
 }
 
-// EnsureSchema creates the management-plane's own tables if they don't exist.
-// Only the config table is owned outright by this service; the catalog item
-// tables are shared (the read API reads them, this service writes them) and
-// are created by the platform's migration tooling, not here — so this only
-// touches `manager_config`.
+// EnsureSchema creates this service's own tables (manager_config) AND the
+// shared catalog tables it is now the owner of.
+//
+// The catalog tables (katalog_*) used to be generated and owned by CAP. CAP is
+// gone, so this service — the sole writer to the catalog — now applies the
+// neutral catalog migrations on boot. The read API only SELECTs these tables,
+// so creating them here is safe and keeps a fresh database self-bootstrapping.
+//
+// Order matters: katalog_items must exist before the FK-referencing tables and
+// the overall-status rollup view that reads it, so the embedded migrations are
+// applied in lexical filename order (001_, 002_, …). Every statement is
+// idempotent (CREATE TABLE/INDEX/VIEW IF NOT EXISTS / CREATE OR REPLACE VIEW /
+// INSERT … ON CONFLICT), so this is safe to call on every boot. The whole run
+// happens before the server starts serving.
 //
 // Idempotent: safe to call on every boot.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	if s == nil || s.Pool == nil {
 		return ErrNoPool
 	}
-	const ddl = `
+	const managerConfigDDL = `
 CREATE TABLE IF NOT EXISTS manager_config (
 	-- single-row table; id is pinned to 1 so UPSERT is trivial.
 	id              INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -88,8 +110,44 @@ CREATE TABLE IF NOT EXISTS manager_config (
 	created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );`
-	_, err := s.Pool.Exec(ctx, ddl)
-	return err
+	if _, err := s.Pool.Exec(ctx, managerConfigDDL); err != nil {
+		return fmt.Errorf("ensure manager_config: %w", err)
+	}
+
+	return s.applyCatalogMigrations(ctx)
+}
+
+// applyCatalogMigrations reads the embedded catalog migration files, sorts them
+// by filename, and applies each one in its own statement batch. Each file is
+// idempotent so this is safe to run on every boot without a tracking table.
+func (s *Store) applyCatalogMigrations(ctx context.Context) error {
+	entries, err := fs.ReadDir(catalogMigrations, "migrations/catalog")
+	if err != nil {
+		return fmt.Errorf("read catalog migrations: %w", err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	// Lexical order == migration order (001_, 002_, …); FK-referenced tables
+	// and the rollup view come after katalog_items.
+	sort.Strings(names)
+
+	for _, name := range names {
+		body, err := catalogMigrations.ReadFile("migrations/catalog/" + name)
+		if err != nil {
+			return fmt.Errorf("read catalog migration %s: %w", name, err)
+		}
+		if _, err := s.Pool.Exec(ctx, string(body)); err != nil {
+			return fmt.Errorf("apply catalog migration %s: %w", name, err)
+		}
+		slog.Debug("applied catalog migration", "file", name)
+	}
+	return nil
 }
 
 // isNoRows is a small helper so callers don't import pgx just for the sentinel.
