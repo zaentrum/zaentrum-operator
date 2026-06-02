@@ -85,7 +85,8 @@ spec:
             # /api/manage/users endpoints then return 503 and first-run skips the
             # bundled-admin bootstrap.
             - name: KEYCLOAK_BASE_URL
-              value: "http://keycloak:8080/auth"
+              # keycloak Service listens on :80 (-> container :8080), so use :80.
+              value: "http://keycloak/auth"
             - name: KEYCLOAK_REALM
               value: "stube"
             - name: KEYCLOAK_ADMIN_CLIENT_ID

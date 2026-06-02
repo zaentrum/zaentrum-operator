@@ -1152,7 +1152,7 @@ spec:
               name: stube-stream-signing-55c926tf47
               optional: true
         - name: KEYCLOAK_BASE_URL
-          value: http://keycloak:8080/auth
+          value: http://keycloak/auth
         - name: KEYCLOAK_REALM
           value: stube
         - name: KEYCLOAK_ADMIN_CLIENT_ID
