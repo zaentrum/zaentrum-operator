@@ -1,0 +1,47 @@
+# ── RBAC for katalog-manager-api config propagation ──
+# The management plane runs the first-run setup wizard. After it persists the
+# operator's config + generates the stream signing key, it propagates those
+# values out to the runtime objects the sibling services read at STARTUP — the
+# stube-env ConfigMap and the stube-stream-signing Secret — and rolls the
+# affected Deployments so the new values take effect.
+#
+# To do that in-cluster (via the Kubernetes REST API, stdlib net/http only — no
+# client-go) it needs a ServiceAccount with a tightly-scoped, namespace-local
+# Role: read + patch the two named-shape objects and restart deployments. No
+# cluster-scoped permissions, no create/delete on workloads.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: katalog-manager-api
+  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: stube }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: katalog-manager-api-config
+  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: stube }
+rules:
+  # ConfigMaps + Secrets: read current state (to diff for idempotency) and
+  # strategic-merge patch the OIDC issuer/audience, media root and stream
+  # signing key into stube-env / stube-stream-signing.
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "patch", "update"]
+  # Deployments: read + patch only (set the restart annotation). No create or
+  # delete — the manager never owns the workload lifecycle, it only rolls pods.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: katalog-manager-api-config
+  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: stube }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: katalog-manager-api-config
+subjects:
+  - kind: ServiceAccount
+    name: katalog-manager-api
