@@ -30,10 +30,12 @@ if [ -f "$MANIFEST_DIR/stube.yaml" ]; then
 fi
 
 echo ">> starting k3s (single node, Traefik ingress on :80)"
-# Disable components an appliance does not need; keep Traefik (our :80 ingress)
-# and local-path (the default StorageClass that backs every PVC).
+# Keep servicelb (klipper): it is what binds Traefik's LoadBalancer Service to
+# the container's :80 — without it the Service stays <pending> and nothing
+# answers on :80, so `-p 80:80` reaches a dead port. Keep Traefik (our ingress)
+# and local-path (default StorageClass backing every PVC). metrics-server is the
+# only thing an appliance can safely drop.
 k3s server \
-  --disable=servicelb \
   --disable=metrics-server \
   --write-kubeconfig-mode=644 \
   &
