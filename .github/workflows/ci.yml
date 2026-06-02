@@ -24,5 +24,9 @@ jobs:
           kubectl apply -k deploy/base   # images may be private until first release
           kubectl -n stube get all
 
-  # TODO as code lands: build/lint each component (Go: services/, platform/;
-  # web: apps/chino/web; Gradle: apps/chino/{mobile,androidtv}) with path filters.
+  # Component image build + push (Go: services/, platform/; web: apps/chino/web,
+  # apps/admin) is handled by .github/workflows/build-images.yml with per-
+  # component path filters; the all-in-one bundle by .github/workflows/all-in-one.yml.
+  # This job stays focused on the manifest smoke test.
+  # TODO as code lands: per-component lint/unit-test jobs (Go vet/test, web
+  # typecheck) and Gradle builds for apps/chino/{mobile,androidtv} with path filters.

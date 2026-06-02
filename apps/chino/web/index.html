@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" class="bg-[#0B0F19]">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- chino · logo kit (>c product glyph). SVG primary + raster fallbacks
+         per design-system README (2026-05-27 kit). Theme color matches the
+         token sheet (--bg #0B0F19). -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="mask-icon" href="/favicon.svg" color="#58A6FF" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- JetBrains Mono ExtraBold (800) — required for the >c glyph and
+         the >chino wordmark to render with their canonical letterforms.
+         Preconnect minimises the font-load latency on first paint. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@800&display=swap" rel="stylesheet" />
+    <!-- viewport-fit=cover so env(safe-area-inset-*) reports the real
+         iOS notch / home-indicator dimensions and the player chrome
+         can pad around them. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0F19" />
+    <meta property="og:title" content="chino · by nalet.cloud" />
+    <meta property="og:description" content="Personal streaming library — movies, shows, music." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="/og-image.png" />
+    <!-- PWA: when launched from the iOS Home Screen run in
+         standalone chrome (no Safari URL bar) and use a dark status
+         bar overlay so the bar matches the app background. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="chino" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="chino" />
+    <title>chino · by nalet.cloud</title>
+  </head>
+  <body class="bg-[#0B0F19] text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

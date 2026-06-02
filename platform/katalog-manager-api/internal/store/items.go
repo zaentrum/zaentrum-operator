@@ -50,11 +50,11 @@ func (s *Store) ListItems(ctx context.Context, opts ListOpts) (ListResult, error
 
 	var total int
 	if err := s.Pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM com_nalet_katalog_items "+where, args...).Scan(&total); err != nil {
+		"SELECT COUNT(*) FROM katalog_items "+where, args...).Scan(&total); err != nil {
 		return ListResult{}, fmt.Errorf("count items: %w", err)
 	}
 
-	listSQL := "SELECT " + itemColumns + " FROM com_nalet_katalog_items " + where +
+	listSQL := "SELECT " + itemColumns + " FROM katalog_items " + where +
 		" ORDER BY sorttitle ASC NULLS LAST, id ASC LIMIT " + add(opts.Limit) +
 		" OFFSET " + add(opts.Offset)
 
@@ -84,7 +84,7 @@ func (s *Store) GetItem(ctx context.Context, id string) (Item, error) {
 		return Item{}, ErrNoPool
 	}
 	row := s.Pool.QueryRow(ctx,
-		"SELECT "+itemColumns+" FROM com_nalet_katalog_items WHERE id = $1", id)
+		"SELECT "+itemColumns+" FROM katalog_items WHERE id = $1", id)
 	it, err := scanItem(row)
 	if isNoRows(err) {
 		return Item{}, ErrNotFound
@@ -133,7 +133,7 @@ func (s *Store) UpdateItem(ctx context.Context, id string, u ItemUpdate) (Item, 
 	sets = append(sets, "modifiedat = now()")
 	args = append(args, id)
 
-	sql := "UPDATE com_nalet_katalog_items SET " + strings.Join(sets, ", ") +
+	sql := "UPDATE katalog_items SET " + strings.Join(sets, ", ") +
 		fmt.Sprintf(" WHERE id = $%d RETURNING %s", len(args), itemColumns)
 
 	row := s.Pool.QueryRow(ctx, sql, args...)
@@ -151,7 +151,7 @@ func (s *Store) DeleteItem(ctx context.Context, id string) error {
 		return ErrNoPool
 	}
 	tag, err := s.Pool.Exec(ctx,
-		"DELETE FROM com_nalet_katalog_items WHERE id = $1", id)
+		"DELETE FROM katalog_items WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("delete item: %w", err)
 	}
@@ -179,7 +179,7 @@ func (s *Store) AssetPathExists(ctx context.Context, path string) (bool, error) 
 	var exists bool
 	err := s.Pool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM com_nalet_katalog_playbackassets WHERE path = $1
+			SELECT 1 FROM katalog_playbackassets WHERE path = $1
 		)`, path).Scan(&exists)
 	return exists, err
 }
@@ -204,7 +204,7 @@ func (s *Store) RegisterItem(ctx context.Context, itemType, title, path string) 
 
 	itemID := uuid.NewString()
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO com_nalet_katalog_items
+		INSERT INTO katalog_items
 			(id, type, title, sorttitle, createdat, modifiedat)
 		VALUES ($1, $2, $3, $3, now(), now())`,
 		itemID, itemType, title); err != nil {
@@ -213,7 +213,7 @@ func (s *Store) RegisterItem(ctx context.Context, itemType, title, path string) 
 
 	assetID := uuid.NewString()
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO com_nalet_katalog_playbackassets
+		INSERT INTO katalog_playbackassets
 			(id, item_id, path, isprimary, kind)
 		VALUES ($1, $2, $3, true, 'primary')`,
 		assetID, itemID, path); err != nil {

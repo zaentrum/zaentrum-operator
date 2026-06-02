@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: chino-api
+  version: 0.1.0
+  description: API for the chino product — the video client's backend-for-frontend.
+servers:
+  - url: /api
+paths:
+  /healthz:
+    get:
+      summary: Liveness / readiness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  product: { type: string }
+  /v1/me:
+    get:
+      summary: Echo the caller's OIDC subject
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Unauthorized
+  /v1/items:
+    get:
+      summary: List items for this product (stub during beta)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
