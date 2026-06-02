@@ -47,6 +47,7 @@ jobs:
       katalog-api: ${{ steps.decide.outputs.katalog-api }}
       katalog-manager-api: ${{ steps.decide.outputs.katalog-manager-api }}
       admin: ${{ steps.decide.outputs.admin }}
+      keycloak: ${{ steps.decide.outputs.keycloak }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,6 +78,9 @@ jobs:
             admin:
               - *shared
               - 'apps/admin/**'
+            keycloak:
+              - *shared
+              - 'platform/keycloak/**'
 
       # On main / manual dispatch, build everything; on PRs, honour the filter.
       - id: decide
@@ -88,6 +92,7 @@ jobs:
           F_KATALOG_API: ${{ steps.filter.outputs.katalog-api }}
           F_KATALOG_MANAGER_API: ${{ steps.filter.outputs.katalog-manager-api }}
           F_ADMIN: ${{ steps.filter.outputs.admin }}
+          F_KEYCLOAK: ${{ steps.filter.outputs.keycloak }}
         run: |
           set -euo pipefail
           emit() {
@@ -104,6 +109,7 @@ jobs:
           emit katalog-api         "$F_KATALOG_API"
           emit katalog-manager-api "$F_KATALOG_MANAGER_API"
           emit admin               "$F_ADMIN"
+          emit keycloak            "$F_KEYCLOAK"
 
   # ── Build + push each changed component ──────────────────────────────────
   build:
@@ -131,6 +137,9 @@ jobs:
           - svc: admin
             context: apps/admin
             changed: ${{ needs.changes.outputs.admin }}
+          - svc: keycloak
+            context: platform/keycloak
+            changed: ${{ needs.changes.outputs.keycloak }}
     steps:
       - name: Skip unchanged component
         if: matrix.changed != 'true'
