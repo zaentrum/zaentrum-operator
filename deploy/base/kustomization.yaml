@@ -10,8 +10,11 @@ namespace: stube
 resources:
   - namespace.yaml
   - data.yaml        # postgres + valkey
+  - kafka.yaml       # single-node KRaft event stream (no Zookeeper)
   - platform.yaml    # katalog-api (neutral catalog read API)
+  - manage.yaml      # katalog-manager-api (neutral management/write API)
   - chino.yaml       # chino-api + chino-stream + chino-web
+  - admin.yaml       # management UI (React launchpad, served at /manage)
   - ingress.yaml
 
 configMapGenerator:
@@ -25,6 +28,9 @@ configMapGenerator:
       # In-cluster service DNS — never leaves the namespace.
       - KATALOG_BASE_URL=http://katalog-api
       - STREAM_BASE_URL=http://chino-stream
+      # Internal event stream (single-node KRaft broker). Override to a
+      # managed cluster's bootstrap servers when running at scale.
+      - KAFKA_BROKERS=kafka:9092
       # Empty = no admins until the operator sets Keycloak subs / realm role.
       - ADMIN_SUBJECTS=
 
@@ -47,4 +53,8 @@ images:
   - name: ghcr.io/nalet/stube/chino-stream
     newTag: latest
   - name: ghcr.io/nalet/stube/katalog-api
+    newTag: latest
+  - name: ghcr.io/nalet/stube/katalog-manager-api
+    newTag: latest
+  - name: ghcr.io/nalet/stube/admin
     newTag: latest

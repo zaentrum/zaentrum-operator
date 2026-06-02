@@ -1,0 +1,70 @@
+@import './tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--ff-ui);
+    /* Render UA chrome (form controls, scrollbars) in dark mode. */
+    color-scheme: dark;
+    scrollbar-color: var(--border-2) var(--bg);
+    scrollbar-width: thin;
+  }
+
+  body {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Webkit scrollbar — slim + dark to match the chrome. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-2);
+    border-radius: 5px;
+    border: 2px solid var(--bg);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a4356;
+  }
+
+  /* Native form controls inherit the canvas instead of system white. */
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+
+  a {
+    color: var(--cloud-blue);
+  }
+}
+
+@layer components {
+  /* The chevron-driven monospace wordmark "> stube". */
+  .wordmark {
+    font-family: var(--ff-mono);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+
+  /* Focus ring used across the component kit. */
+  .focus-ring {
+    outline: none;
+  }
+  .focus-ring:focus-visible {
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--cloud-blue);
+  }
+}

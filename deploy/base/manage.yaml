@@ -1,0 +1,68 @@
+# ── katalog-manager-api: the neutral management / write API ──
+# The write side of the catalog: library configuration, item create/update,
+# first-run server setup. Product clients read through katalog-api; the admin
+# UI and operators write through here. Served under /api/manage.
+#
+# Scope guard: this is the catalog's own write path. It never acquires content
+# and has no notion of how files land on disk — that is out of tree.
+#
+# First-run: GET /api/manage/setup/status -> {"configured":bool,...}. While
+# configured=false the app/proxy steers users to the admin wizard at
+# /manage/setup.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-manager-api
+  labels: { app: katalog-manager-api, role: catalog-write, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: katalog-manager-api } }
+  template:
+    metadata:
+      labels: { app: katalog-manager-api, role: catalog-write }
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/nalet/stube/katalog-manager-api:latest
+          ports: [{ containerPort: 8080, name: http }]
+          envFrom:
+            # OIDC_ISSUER / OIDC_AUDIENCE / KAFKA_BROKERS live in stube-env.
+            - configMapRef: { name: stube-env }
+          env:
+            - name: ADDR
+              value: ":8080"
+            # Reads the neutral catalog API in-cluster for cross-checks.
+            - name: KATALOG_API_BASE_URL
+              value: "http://katalog-api"
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+            # Config + catalog write DB.
+            - name: PG_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable"
+            # Optional: present so the manager can mint signed playback URLs
+            # consistent with chino-api / chino-stream. Safe to leave unset.
+            - name: STREAM_SIGNING_KEY
+              valueFrom:
+                secretKeyRef: { name: stube-stream-signing, key: key, optional: true }
+          readinessProbe:
+            httpGet: { path: /api/manage/healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/manage/healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-manager-api
+  labels: { app: katalog-manager-api }
+spec:
+  selector: { app: katalog-manager-api }
+  ports: [{ name: http, port: 80, targetPort: 8080 }]

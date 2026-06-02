@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Stube all-in-one appliance: real Kubernetes, packed in one.
-# Uses k3d (k3s in Docker) to boot a single-node cluster and apply deploy/base.
+# Stube on real Kubernetes, locally: uses k3d (k3s in Docker) to boot a
+# single-node cluster and apply deploy/base.
 #
 #   ./deploy/k3s/up.sh          # create + deploy
 #   ./deploy/k3s/up.sh down     # tear the cluster down
+#
+# Zero-clone alternative: the all-in-one image bundles k3s + deploy/base in one
+# container — no checkout, no k3d, just:
+#   docker run -d --privileged --name stube -p 8080:80 ghcr.io/nalet/stube:latest
+# (see deploy/allinone/README.md). This script is for hacking on the manifests.
 set -euo pipefail
 
 CLUSTER="${STUBE_CLUSTER:-stube}"

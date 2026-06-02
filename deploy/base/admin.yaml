@@ -1,0 +1,39 @@
+# ── admin: the management UI (React launchpad, static SPA) ──
+# Served at /manage. The bundle is built with router basename "/manage" and
+# talks to the management API at /api/manage. nginx serves the static files
+# with SPA fallback to /index.html so deep links survive a hard refresh.
+#
+# The first-run wizard lives at /manage/setup; the app routes there while
+# GET /api/manage/setup/status reports configured=false.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+  labels: { app: admin, role: frontend, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: admin } }
+  template:
+    metadata:
+      labels: { app: admin, role: frontend }
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/nalet/stube/admin:latest
+          ports: [{ containerPort: 8080, name: http }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 1
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin
+  labels: { app: admin }
+spec:
+  selector: { app: admin }
+  ports: [{ name: http, port: 80, targetPort: 8080 }]

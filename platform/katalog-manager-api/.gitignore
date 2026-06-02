@@ -1,0 +1,14 @@
+# Build output
+/katalog-manager-api
+/out/
+*.exe
+
+# Go test / coverage
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

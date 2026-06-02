@@ -1,0 +1,89 @@
+# ── kafka: single-node KRaft broker (no Zookeeper) ──
+# Carries the internal event stream (library change events the management API
+# emits, consumed by enrichment/notification workers). One broker is plenty
+# for an appliance; an operator at scale points services at a managed cluster
+# by overriding KAFKA_BROKERS in the stube-env configMap.
+#
+# KRaft mode: the broker is its own controller (no separate Zookeeper pod).
+# We run a single combined controller+broker node with a fixed node id.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  labels: { app: kafka, role: event-stream, app.kubernetes.io/part-of: stube }
+spec:
+  replicas: 1
+  # Recreate so the single PVC is never double-mounted across a rollout.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: kafka } }
+  template:
+    metadata:
+      labels: { app: kafka, role: event-stream }
+    spec:
+      containers:
+        - name: kafka
+          image: apache/kafka:3.8.0
+          ports:
+            - { containerPort: 9092, name: client }
+            - { containerPort: 9093, name: controller }
+          env:
+            # ── KRaft cluster topology: one combined node, id 1 ──
+            - { name: KAFKA_NODE_ID, value: "1" }
+            - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@127.0.0.1:9093" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            # ── Listeners ──
+            # CLIENT advertised as the in-cluster service DNS "kafka:9092"
+            # so every consumer reaches the broker the same way.
+            - name: KAFKA_LISTENERS
+              value: "CLIENT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "CLIENT://kafka:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CLIENT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "CLIENT" }
+            # ── Single-node durability: nothing to replicate to. ──
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1" }
+            - { name: KAFKA_DEFAULT_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_NUM_PARTITIONS, value: "1" }
+            # Stable cluster id so a restart re-attaches to the existing log dir.
+            - { name: CLUSTER_ID, value: "stube-kraft-0000000000001" }
+            - { name: KAFKA_LOG_DIRS, value: "/var/lib/kafka/data" }
+            # Modest JVM heap for the appliance.
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx512m -Xms512m" }
+          readinessProbe:
+            tcpSocket: { port: client }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: client }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 640Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/kafka/data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: kafka-data }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: kafka-data }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 5Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels: { app: kafka }
+spec:
+  selector: { app: kafka }
+  # Only the client listener is exposed; the controller listener stays
+  # loopback-only (single-node quorum), so it is intentionally not published.
+  ports: [{ name: client, port: 9092, targetPort: client }]
