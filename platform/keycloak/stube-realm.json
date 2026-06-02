@@ -308,7 +308,7 @@
     {
       "clientId": "stube-manager",
       "name": "Stube Manager",
-      "description": "Confidential service-account client used by the Stube manage-api to call the Keycloak Admin REST API (create / view / query users). Secret is injected at runtime; the value below is a placeholder overwritten on import via env substitution. NOT for interactive login.",
+      "description": "Confidential service-account client the Stube manage-api uses for the Keycloak Admin REST API. Not for interactive login; secret injected at runtime.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,

@@ -25,6 +25,31 @@ spec:
       # first-run setup flow can propagate config + the generated signing key to
       # stube-env / stube-stream-signing and roll the affected deployments.
       serviceAccountName: katalog-manager-api
+      # Gate startup on the OIDC issuer being reachable. manage-api builds its
+      # token verifier ONCE at boot; if discovery fails (bundled Keycloak not yet
+      # Ready, ~80s) it serves 503 on protected routes forever (no retry/restart).
+      # Wait for the issuer's discovery doc first. Skips cleanly if no issuer is
+      # configured (operator using no IdP) — then protected routes 503 by design.
+      initContainers:
+        - name: wait-for-oidc
+          image: curlimages/curl:8.11.0
+          # Wait on the bundled Keycloak SERVICE name — NOT the issuer host. The
+          # issuer is stube.localhost, and musl libc (Alpine) short-circuits
+          # *.localhost -> 127.0.0.1 (RFC 6761), so curling the issuer here would
+          # hit this pod, not Keycloak. The Go services resolve stube.localhost
+          # via CoreDNS (no short-circuit), so they discover fine once Keycloak is
+          # up. Bounded retry so an operator on an external IdP (no bundled
+          # Keycloak) doesn't block forever — manage-api then discovers its own.
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+                i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+                echo "waiting for bundled keycloak ($i)…"; sleep 3
+              done
+              echo "bundled keycloak ready"
       containers:
         - name: app
           image: ghcr.io/nalet/stube/katalog-manager-api:latest
