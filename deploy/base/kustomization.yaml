@@ -47,8 +47,10 @@ secretGenerator:
       - password=stube-dev-change-me
   - name: stube-stream-signing
     literals:
-      # Regenerate: openssl rand -base64 32
-      - key=dev-only-stream-signing-key-change-me
+      # Dev default — MUST be valid base64 (chino-api/chino-stream base64-decode
+      # it; decodes to 32 bytes here). Regenerate for anything exposed:
+      #   openssl rand -base64 32
+      - key=ZGV2LW9ubHktY2hhbmdlLW1lLW5vdC1mb3ItcHJvZCE=
 
 images:
   - name: ghcr.io/nalet/stube/chino-web

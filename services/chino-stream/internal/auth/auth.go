@@ -6,7 +6,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -34,7 +33,11 @@ func New(ctx context.Context, issuer, audience string, enabled bool) (*Verifier,
 		return &Verifier{enabled: false}, nil
 	}
 	if issuer == "" {
-		return nil, errors.New("oidc issuer is empty")
+		// Setup-pending: no OIDC issuer configured yet (fresh appliance,
+		// before first-run setup). Run with auth DISABLED rather than
+		// crashing; once setup completes the manager patches the ConfigMap
+		// and this pod restarts with a real issuer. Mirrors chino-api.
+		return &Verifier{enabled: false}, nil
 	}
 	// Allow the provider discovery a moderate window so transient IdP
 	// blips at startup don't kill the pod.

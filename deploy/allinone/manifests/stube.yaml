@@ -6,17 +6,71 @@ metadata:
   name: stube
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: katalog-manager-api
+    app.kubernetes.io/part-of: stube
+  name: katalog-manager-api
+  namespace: stube
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app: katalog-manager-api
+    app.kubernetes.io/part-of: stube
+  name: katalog-manager-api-config
+  namespace: stube
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app: katalog-manager-api
+    app.kubernetes.io/part-of: stube
+  name: katalog-manager-api-config
+  namespace: stube
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: katalog-manager-api-config
+subjects:
+- kind: ServiceAccount
+  name: katalog-manager-api
+  namespace: stube
+---
+apiVersion: v1
 data:
   ADMIN_SUBJECTS: ""
   KAFKA_BROKERS: kafka:9092
   KATALOG_BASE_URL: http://katalog-api
+  MEDIA_ROOT: /var/lib/stube/media
   OIDC_AUDIENCE: chino
   OIDC_ENABLED: "true"
   OIDC_ISSUER: ""
   STREAM_BASE_URL: http://chino-stream
 kind: ConfigMap
 metadata:
-  name: stube-env-622d6kcm58
+  name: stube-env-gg5t7h6c58
   namespace: stube
 ---
 apiVersion: v1
@@ -31,10 +85,10 @@ type: Opaque
 ---
 apiVersion: v1
 data:
-  key: ZGV2LW9ubHktc3RyZWFtLXNpZ25pbmcta2V5LWNoYW5nZS1tZQ==
+  key: WkdWMkxXOXViSGt0WTJoaGJtZGxMVzFsTFc1dmRDMW1iM0l0Y0hKdlpDRT0=
 kind: Secret
 metadata:
-  name: stube-stream-signing-7tt6mktkc4
+  name: stube-stream-signing-55c926tf47
   namespace: stube
 type: Opaque
 ---
@@ -289,10 +343,10 @@ spec:
           valueFrom:
             secretKeyRef:
               key: key
-              name: stube-stream-signing-7tt6mktkc4
+              name: stube-stream-signing-55c926tf47
         envFrom:
         - configMapRef:
-            name: stube-env-622d6kcm58
+            name: stube-env-gg5t7h6c58
         image: ghcr.io/nalet/stube/chino-api:latest
         name: app
         ports:
@@ -344,19 +398,19 @@ spec:
           valueFrom:
             configMapKeyRef:
               key: OIDC_ISSUER
-              name: stube-env-622d6kcm58
+              name: stube-env-gg5t7h6c58
         - name: OIDC_AUDIENCE
           valueFrom:
             configMapKeyRef:
               key: OIDC_AUDIENCE
-              name: stube-env-622d6kcm58
+              name: stube-env-gg5t7h6c58
         - name: AUTH_ENABLED
           value: "true"
         - name: STREAM_SIGNING_KEY
           valueFrom:
             secretKeyRef:
               key: key
-              name: stube-stream-signing-7tt6mktkc4
+              name: stube-stream-signing-55c926tf47
         - name: USE_NVENC
           value: "false"
         - name: TRANSCODE_PRESET
@@ -553,12 +607,12 @@ spec:
           valueFrom:
             configMapKeyRef:
               key: OIDC_ISSUER
-              name: stube-env-622d6kcm58
+              name: stube-env-gg5t7h6c58
         - name: KATALOG_API_OIDC_AUDIENCE
           valueFrom:
             configMapKeyRef:
               key: OIDC_AUDIENCE
-              name: stube-env-622d6kcm58
+              name: stube-env-gg5t7h6c58
         - name: DB_USER
           valueFrom:
             secretKeyRef:
@@ -632,15 +686,15 @@ spec:
           valueFrom:
             secretKeyRef:
               key: key
-              name: stube-stream-signing-7tt6mktkc4
+              name: stube-stream-signing-55c926tf47
               optional: true
         envFrom:
         - configMapRef:
-            name: stube-env-622d6kcm58
+            name: stube-env-gg5t7h6c58
         image: ghcr.io/nalet/stube/katalog-manager-api:latest
         livenessProbe:
           httpGet:
-            path: /api/manage/healthz
+            path: /healthz
             port: http
           initialDelaySeconds: 10
           periodSeconds: 30
@@ -650,7 +704,7 @@ spec:
           name: http
         readinessProbe:
           httpGet:
-            path: /api/manage/healthz
+            path: /healthz
             port: http
           initialDelaySeconds: 3
           periodSeconds: 10
@@ -661,6 +715,7 @@ spec:
           requests:
             cpu: 50m
             memory: 96Mi
+      serviceAccountName: katalog-manager-api
 ---
 apiVersion: apps/v1
 kind: Deployment

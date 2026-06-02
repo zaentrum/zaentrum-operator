@@ -51,11 +51,11 @@ spec:
               valueFrom:
                 secretKeyRef: { name: stube-stream-signing, key: key, optional: true }
           readinessProbe:
-            httpGet: { path: /api/manage/healthz, port: http }
+            httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /api/manage/healthz, port: http }
+            httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 10
             periodSeconds: 30
           resources:
