@@ -828,6 +828,19 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - |
+          i=0
+          until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+            i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+            echo "waiting for bundled keycloak ($i)…"; sleep 3
+          done
+          echo "bundled keycloak ready"
+        image: curlimages/curl:8.11.0
+        name: wait-for-oidc
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -906,6 +919,19 @@ spec:
           readOnly: true
         - mountPath: /var/cache/stube-hls
           name: hls-cache
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - |
+          i=0
+          until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+            i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+            echo "waiting for bundled keycloak ($i)…"; sleep 3
+          done
+          echo "bundled keycloak ready"
+        image: curlimages/curl:8.11.0
+        name: wait-for-oidc
       volumes:
       - name: media
         persistentVolumeClaim:
