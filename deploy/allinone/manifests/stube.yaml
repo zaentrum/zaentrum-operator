@@ -400,7 +400,7 @@ data:
         {
           "clientId": "stube-manager",
           "name": "Stube Manager",
-          "description": "Confidential service-account client used by the Stube manage-api to call the Keycloak Admin REST API (create / view / query users). Secret is injected at runtime; the value below is a placeholder overwritten on import via env substitution. NOT for interactive login.",
+          "description": "Confidential service-account client the Stube manage-api uses for the Keycloak Admin REST API. Not for interactive login; secret injected at runtime.",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": false,
@@ -655,7 +655,7 @@ metadata:
 spec:
   ports:
   - name: http
-    port: 8080
+    port: 80
     targetPort: http
   selector:
     app: keycloak
@@ -1189,6 +1189,19 @@ spec:
           requests:
             cpu: 50m
             memory: 96Mi
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - |
+          i=0
+          until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+            i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
+            echo "waiting for bundled keycloak ($i)…"; sleep 3
+          done
+          echo "bundled keycloak ready"
+        image: curlimages/curl:8.11.0
+        name: wait-for-oidc
       serviceAccountName: katalog-manager-api
 ---
 apiVersion: apps/v1
@@ -1274,19 +1287,21 @@ spec:
           failureThreshold: 6
           httpGet:
             path: /auth/health/live
-            port: http
-          initialDelaySeconds: 60
+            port: mgmt
+          initialDelaySeconds: 90
           periodSeconds: 30
           timeoutSeconds: 5
         name: keycloak
         ports:
         - containerPort: 8080
           name: http
+        - containerPort: 9000
+          name: mgmt
         readinessProbe:
           failureThreshold: 30
           httpGet:
             path: /auth/health/ready
-            port: http
+            port: mgmt
           initialDelaySeconds: 20
           periodSeconds: 10
           timeoutSeconds: 5
@@ -1452,7 +1467,7 @@ spec:
           service:
             name: keycloak
             port:
-              number: 8080
+              number: 80
         path: /auth
         pathType: Prefix
       - backend:

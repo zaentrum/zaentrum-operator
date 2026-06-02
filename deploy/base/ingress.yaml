@@ -54,7 +54,7 @@ spec:
             backend:
               service:
                 name: keycloak
-                port: { number: 8080 }
+                port: { number: 80 }
           - path: /
             pathType: Prefix
             backend:

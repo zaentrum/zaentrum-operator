@@ -88,6 +88,7 @@ spec:
           args: ["start", "--import-realm"]
           ports:
             - { containerPort: 8080, name: http }
+            - { containerPort: 9000, name: mgmt }   # KC 26 management iface (health/metrics)
           env:
             # ── Postgres store (shared bundled postgres, separate DB) ──
             - name: KC_DB
@@ -148,15 +149,20 @@ spec:
             - name: realm-import
               mountPath: /opt/keycloak/data/import
               readOnly: true
+          # KC 26 serves health on the MANAGEMENT port (9000) — and that interface
+          # INHERITS KC_HTTP_RELATIVE_PATH, so the path is /auth/health/* (verified:
+          # :9000/auth/health/ready -> 200, :9000/health/ready -> 404). Probing the
+          # http port (8080) 404s and the pod never goes Ready (no /auth endpoint
+          # for Traefik). So: management port 9000, path /auth/health/*.
           readinessProbe:
-            httpGet: { path: /auth/health/ready, port: http }
+            httpGet: { path: /auth/health/ready, port: mgmt }
             initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 30
           livenessProbe:
-            httpGet: { path: /auth/health/live, port: http }
-            initialDelaySeconds: 60
+            httpGet: { path: /auth/health/live, port: mgmt }
+            initialDelaySeconds: 90
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 6
@@ -175,4 +181,7 @@ metadata:
   labels: { app: keycloak }
 spec:
   selector: { app: keycloak }
-  ports: [{ name: http, port: 8080, targetPort: http }]
+  # Service on :80 (-> container :8080) so the issuer http://<host>/auth (port 80)
+  # resolves in-cluster too: the all-in-one CoreDNS rewrite points the issuer host
+  # straight at this Service (bypassing Traefik), so it must answer on :80.
+  ports: [{ name: http, port: 80, targetPort: http }]
