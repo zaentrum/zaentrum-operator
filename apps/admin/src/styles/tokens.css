@@ -1,0 +1,38 @@
+/* nalet.cloud design system — tokens
+ *
+ * Vendored copy of standards/design-system/tokens.css. Every rule in the
+ * admin UI (and the Tailwind theme in tailwind.config.ts) is built on top
+ * of these tokens. Keep in sync with the upstream sheet.
+ *
+ * Source: standards/design-system/tokens.css (last reviewed 2026-05-22).
+ */
+
+:root {
+  /* canvas */
+  --bg:          #0B0F19;
+  --bg-2:        #0D1117;
+  --surface:     #11161F;
+  --surface-2:   #161B26;
+  --border:      #1F2633;
+  --border-2:    #2A3142;
+
+  /* foreground */
+  --fg:          #E6E6E6;
+  --fg-2:        #C9D1D9;
+  --fg-muted:    #AEB8C2;
+  --fg-dim:      #6E7787;
+
+  /* brand & signal */
+  --cloud-blue:    #58A6FF;  /* chevron, links, primary cta */
+  --cloud-cyan:    #00A4DC;  /* cursor, active stroke      */
+  --signal-green:  #2EA043;  /* ok / running               */
+  --signal-amber:  #F2B233;  /* warn / delayed             */
+
+  /* type */
+  --ff-ui:   'Inter', system-ui, sans-serif;
+  --ff-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* space (4-base) */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px; --s-8: 64px;
+}

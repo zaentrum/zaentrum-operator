@@ -1,0 +1,782 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/part-of: stube
+  name: stube
+---
+apiVersion: v1
+data:
+  ADMIN_SUBJECTS: ""
+  KAFKA_BROKERS: kafka:9092
+  KATALOG_BASE_URL: http://katalog-api
+  OIDC_AUDIENCE: chino
+  OIDC_ENABLED: "true"
+  OIDC_ISSUER: ""
+  STREAM_BASE_URL: http://chino-stream
+kind: ConfigMap
+metadata:
+  name: stube-env-622d6kcm58
+  namespace: stube
+---
+apiVersion: v1
+data:
+  password: c3R1YmUtZGV2LWNoYW5nZS1tZQ==
+  user: c3R1YmU=
+kind: Secret
+metadata:
+  name: stube-db-k88fgb59hk
+  namespace: stube
+type: Opaque
+---
+apiVersion: v1
+data:
+  key: ZGV2LW9ubHktc3RyZWFtLXNpZ25pbmcta2V5LWNoYW5nZS1tZQ==
+kind: Secret
+metadata:
+  name: stube-stream-signing-7tt6mktkc4
+  namespace: stube
+type: Opaque
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: admin
+  name: admin
+  namespace: stube
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: admin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: chino-api
+  name: chino-api
+  namespace: stube
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: chino-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: chino-stream
+  name: chino-stream
+  namespace: stube
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: chino-stream
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: chino-web
+  name: chino-web
+  namespace: stube
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: chino-web
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: kafka
+  name: kafka
+  namespace: stube
+spec:
+  ports:
+  - name: client
+    port: 9092
+    targetPort: client
+  selector:
+    app: kafka
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: katalog-api
+  name: katalog-api
+  namespace: stube
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: katalog-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: katalog-manager-api
+  name: katalog-manager-api
+  namespace: stube
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: katalog-manager-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: postgres
+  name: postgres
+  namespace: stube
+spec:
+  ports:
+  - name: pg
+    port: 5432
+    targetPort: pg
+  selector:
+    app: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: valkey
+  name: valkey
+  namespace: stube
+spec:
+  ports:
+  - name: valkey
+    port: 6379
+    targetPort: valkey
+  selector:
+    app: valkey
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+  namespace: stube
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media
+  namespace: stube
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: stube
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: admin
+    app.kubernetes.io/part-of: stube
+    role: frontend
+  name: admin
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin
+  template:
+    metadata:
+      labels:
+        app: admin
+        role: frontend
+    spec:
+      containers:
+      - image: ghcr.io/nalet/stube/admin:latest
+        name: app
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 1
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 25m
+            memory: 32Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: chino-api
+    app.kubernetes.io/part-of: stube
+    role: backend
+  name: chino-api
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chino-api
+  template:
+    metadata:
+      labels:
+        app: chino-api
+        role: backend
+    spec:
+      containers:
+      - env:
+        - name: ADDR
+          value: :8080
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: stube-db-k88fgb59hk
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: stube-db-k88fgb59hk
+        - name: PG_URL
+          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+        - name: STREAM_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              key: key
+              name: stube-stream-signing-7tt6mktkc4
+        envFrom:
+        - configMapRef:
+            name: stube-env-622d6kcm58
+        image: ghcr.io/nalet/stube/chino-api:latest
+        name: app
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /api/healthz
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: chino-stream
+    app.kubernetes.io/part-of: stube
+    role: stream
+  name: chino-stream
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chino-stream
+  template:
+    metadata:
+      labels:
+        app: chino-stream
+        role: stream
+    spec:
+      containers:
+      - env:
+        - name: LISTEN_ADDR
+          value: :8080
+        - name: KATALOG_API_BASE_URL
+          value: http://katalog-api
+        - name: MEDIA_ROOT
+          value: /var/lib/stube/media
+        - name: OIDC_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              key: OIDC_ISSUER
+              name: stube-env-622d6kcm58
+        - name: OIDC_AUDIENCE
+          valueFrom:
+            configMapKeyRef:
+              key: OIDC_AUDIENCE
+              name: stube-env-622d6kcm58
+        - name: AUTH_ENABLED
+          value: "true"
+        - name: STREAM_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              key: key
+              name: stube-stream-signing-7tt6mktkc4
+        - name: USE_NVENC
+          value: "false"
+        - name: TRANSCODE_PRESET
+          value: veryfast
+        - name: HLS_CACHE_DIR
+          value: /var/cache/stube-hls
+        - name: FFMPEG_MAX_CONCURRENT
+          value: "2"
+        image: ghcr.io/nalet/stube/chino-stream:latest
+        name: chino-stream
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: "2"
+            memory: 2Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - mountPath: /var/lib/stube/media
+          name: media
+          readOnly: true
+        - mountPath: /var/cache/stube-hls
+          name: hls-cache
+      volumes:
+      - name: media
+        persistentVolumeClaim:
+          claimName: media
+      - emptyDir:
+          sizeLimit: 5Gi
+        name: hls-cache
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: chino-web
+    app.kubernetes.io/part-of: stube
+    role: frontend
+  name: chino-web
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chino-web
+  template:
+    metadata:
+      labels:
+        app: chino-web
+        role: frontend
+    spec:
+      containers:
+      - image: ghcr.io/nalet/stube/chino-web:latest
+        name: app
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 1
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 25m
+            memory: 32Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kafka
+    app.kubernetes.io/part-of: stube
+    role: event-stream
+  name: kafka
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: kafka
+        role: event-stream
+    spec:
+      containers:
+      - env:
+        - name: KAFKA_NODE_ID
+          value: "1"
+        - name: KAFKA_PROCESS_ROLES
+          value: broker,controller
+        - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+          value: 1@127.0.0.1:9093
+        - name: KAFKA_CONTROLLER_LISTENER_NAMES
+          value: CONTROLLER
+        - name: KAFKA_LISTENERS
+          value: CLIENT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: CLIENT://kafka:9092
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: CLIENT:PLAINTEXT,CONTROLLER:PLAINTEXT
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: CLIENT
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "1"
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_NUM_PARTITIONS
+          value: "1"
+        - name: CLUSTER_ID
+          value: stube-kraft-0000000000001
+        - name: KAFKA_LOG_DIRS
+          value: /var/lib/kafka/data
+        - name: KAFKA_HEAP_OPTS
+          value: -Xmx512m -Xms512m
+        image: apache/kafka:3.8.0
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          tcpSocket:
+            port: client
+        name: kafka
+        ports:
+        - containerPort: 9092
+          name: client
+        - containerPort: 9093
+          name: controller
+        readinessProbe:
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          tcpSocket:
+            port: client
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 640Mi
+        volumeMounts:
+        - mountPath: /var/lib/kafka/data
+          name: data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: kafka-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: katalog-api
+    app.kubernetes.io/part-of: stube
+    role: catalog-read
+  name: katalog-api
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: katalog-api
+  template:
+    metadata:
+      labels:
+        app: katalog-api
+        role: catalog-read
+    spec:
+      containers:
+      - env:
+        - name: KATALOG_API_ADDR
+          value: :8080
+        - name: KATALOG_API_OIDC_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              key: OIDC_ISSUER
+              name: stube-env-622d6kcm58
+        - name: KATALOG_API_OIDC_AUDIENCE
+          valueFrom:
+            configMapKeyRef:
+              key: OIDC_AUDIENCE
+              name: stube-env-622d6kcm58
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: stube-db-k88fgb59hk
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: stube-db-k88fgb59hk
+        - name: KATALOG_API_PG_URL
+          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+        image: ghcr.io/nalet/stube/katalog-api:latest
+        name: katalog-api
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: katalog-manager-api
+    app.kubernetes.io/part-of: stube
+    role: catalog-write
+  name: katalog-manager-api
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: katalog-manager-api
+  template:
+    metadata:
+      labels:
+        app: katalog-manager-api
+        role: catalog-write
+    spec:
+      containers:
+      - env:
+        - name: ADDR
+          value: :8080
+        - name: KATALOG_API_BASE_URL
+          value: http://katalog-api
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: stube-db-k88fgb59hk
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: stube-db-k88fgb59hk
+        - name: PG_URL
+          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+        - name: STREAM_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              key: key
+              name: stube-stream-signing-7tt6mktkc4
+              optional: true
+        envFrom:
+        - configMapRef:
+            name: stube-env-622d6kcm58
+        image: ghcr.io/nalet/stube/katalog-manager-api:latest
+        livenessProbe:
+          httpGet:
+            path: /api/manage/healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        name: app
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /api/manage/healthz
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 384Mi
+          requests:
+            cpu: 50m
+            memory: 96Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: stube
+  name: postgres
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: stube-db-k88fgb59hk
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: stube-db-k88fgb59hk
+        - name: POSTGRES_DB
+          value: stube
+        image: postgres:16-alpine
+        name: postgres
+        ports:
+        - containerPort: 5432
+          name: pg
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - stube
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: postgres-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: valkey
+    app.kubernetes.io/part-of: stube
+  name: valkey
+  namespace: stube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      containers:
+      - image: valkey/valkey:8-alpine
+        name: valkey
+        ports:
+        - containerPort: 6379
+          name: valkey
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
+  name: stube
+  namespace: stube
+spec:
+  rules:
+  - host: stube.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: katalog-manager-api
+            port:
+              number: 80
+        path: /api/manage
+        pathType: Prefix
+      - backend:
+          service:
+            name: admin
+            port:
+              number: 80
+        path: /manage
+        pathType: Prefix
+      - backend:
+          service:
+            name: chino-api
+            port:
+              number: 80
+        path: /api
+        pathType: Prefix
+      - backend:
+          service:
+            name: chino-web
+            port:
+              number: 80
+        path: /
+        pathType: Prefix

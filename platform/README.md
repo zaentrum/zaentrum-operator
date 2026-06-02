@@ -6,14 +6,28 @@ how files arrive on disk is out of scope (and out of this repo). See
 
 | Dir | What | State |
 |---|---|---|
-| `katalog-api` | Read-only catalog REST API. Serves clients. | ✅ migrating |
-| `transcoder` | Transcode (NVENC primary, ffmpeg fallback). | ✅ migrating |
-| `packager` | CMAF/HLS packaging (shaka-style). | ✅ migrating |
-| `metadata-enricher` | Metadata (e.g. TMDB) enrichment. | ✅ migrating |
-| `analyzer` | Media probe / packaging steps. | ✅ migrating |
-| `artwork` | Artwork blobs/derivatives. | ✅ migrating |
-| _import_ | **NEW (to build):** scan a folder of files you own → catalog. Neutral replacement for the acquisition-coupled write path. | 🚧 |
+| `katalog-api` | Read-only catalog REST API. Serves clients. | real |
+| `katalog-manager-api` | **Neutral management / write API + first-run backend.** | real |
+| `transcoder` | Transcode (NVENC primary, ffmpeg fallback). | real |
+| `packager` | CMAF/HLS packaging. | real |
+| `metadata-enricher` | Metadata enrichment from public providers. | real |
+| `analyzer` | Media probe / packaging steps. | real |
+| `artwork` | Artwork blobs/derivatives. | real |
 
-The single new neutral component this project needs is **import**: the catalog write/
-ingest path minus any acquisition knowledge. The private operator's acquisition stack
-becomes just one more producer behind it.
+## katalog-manager-api — the write side, done neutrally
+
+`katalog-api` reads the catalog; **`katalog-manager-api`** is the matching write/management
+plane. It does two jobs:
+
+- **First-run backend.** It implements `GET /api/manage/setup/status`, `POST
+  /api/manage/setup`, and `GET`/`PUT /api/manage/config` — the contract the admin UI
+  (`apps/admin`, served at `/manage`) consumes. Full shape in
+  [docs/architecture.md](../docs/architecture.md#config-contract).
+- **Catalog management.** It registers and manages library entries for media **already on
+  disk**, and drives the processing core (transcoder, packager, enricher, analyzer,
+  artwork) over the bundled event stream.
+
+Crucially, it performs **no acquisition**: it never reaches out for content, never talks to
+indexers or downloaders, and has no notion of fetching media. It manages what you already
+have. That is the whole neutral line — the write path exists, but it knows nothing about how
+files arrived.

@@ -2,32 +2,54 @@
 
 ## What Stube is
 
-A neutral, self-hostable media platform: a catalog core + per-product streaming
-backends + clients. It is content-neutral — the same category as Jellyfin/Plex/Kodi.
-You bring a library you own; Stube catalogs, processes (transcode/package), and streams
-it to its clients.
+A neutral, self-hostable media client + server for a library **you own and are entitled to
+stream**. It is a catalog core + per-product streaming backends + clients. Stube is
+content-neutral: you bring files you already have, and Stube catalogs them, processes them
+(transcode/package), and streams them to its clients. It never acquires content.
 
 ```mermaid
 flowchart TD
   subgraph clients["apps/ — clients (skins of one core)"]
-    web["chino-web"]; mob["chino-mobile"]; tv["chino-androidtv"]
+    web["chino-web"]; mob["chino-mobile"]; tv["chino-androidtv"]; admin["admin (/manage)"]
   end
   subgraph product["services/ — per product"]
     api["chino-api (BFF)"]; stream["chino-stream (HLS/CMAF origin)"]
   end
   subgraph core["platform/ — neutral catalog core"]
-    kapi["katalog-api (read)"]; proc["transcoder · packager · enricher · analyzer · artwork"]
-    imp["import (scan files you own)"]
+    kapi["katalog-api (read)"]
+    kmgr["katalog-manager-api (manage / write + first-run)"]
+    proc["transcoder · packager · enricher · analyzer · artwork"]
   end
-  store[("Postgres · object/file store")]
-  clients --> api
+  bundled[("bundled: Postgres · Valkey · Kafka")]
+  store[("media / object store")]
+  web --> api
+  mob --> api
+  tv --> api
+  admin --> kmgr
   clients --> stream
   api --> kapi
   stream --> kapi
+  kmgr --> kapi
+  kmgr --> bundled
+  proc --> bundled
   proc --> store
-  imp --> store
-  kapi --> store
+  kapi --> bundled
 ```
+
+## Front door and route map
+
+One ingress/proxy fronts the whole product on port 80:
+
+| Path | Backend | What it is |
+|---|---|---|
+| `/` | `chino-web` | the main app (static SPA) |
+| `/manage` | admin UI (`apps/admin`) | the React launchpad (SPA, router basename `/manage`) |
+| `/api` | `chino-api` | the product BFF |
+| `/api/manage` | `katalog-manager-api` | the neutral management / write API |
+
+**First-run:** `katalog-manager-api` exposes `GET /api/manage/setup/status`. While it
+returns `configured: false`, the app sends every visitor to the first-run wizard at
+`/manage/setup`. See the [config contract](#config-contract).
 
 ## Scope — the neutral line {#scope}
 
@@ -36,73 +58,106 @@ content was acquired* lives **outside this repo**, in a private deployment.
 
 | In this repo (neutral) | Never in this repo (private to an operator) |
 |---|---|
-| clients, `chino-api`, `chino-stream` | automated downloaders, indexers, the *arr stack |
-| `katalog-api` (read), transcoder, packager, enricher, analyzer, artwork | acquisition control plane / "wanted items" automation |
-| a neutral **import** path (scan files you already own) | anything that fetches copyrighted content |
+| clients, `chino-api`, `chino-stream` | any tool that fetches or downloads content |
+| `katalog-api` (read), `katalog-manager-api` (manage/write) | any control plane that decides what to go and get |
+| transcoder, packager, enricher, analyzer, artwork | anything that reaches out to indexers or trackers |
 
-This isn't cosmetic: a media client/server is allowed on app stores precisely *because*
-it's content-neutral. Bundling acquisition would re-import the IP problem and is against
-store and host policy.
+The catalog write path is the neutral `katalog-manager-api`: it registers and manages
+library entries for files that are **already on disk**. How those files got there is not
+Stube's concern and never will be.
+
+This isn't cosmetic. A media client/server is distributable on app stores precisely
+*because* it is content-neutral. Bundling acquisition would re-import the IP problem and is
+against store and host policy.
 
 ## Relationship to the private nalet deployment
 
-`github.com/nalet/stube` is the **canonical, public source of truth**. The operator's
-real deployment (on OKD, behind Keycloak, fed by a private acquisition stack) consumes
-this repo and adds, *out of tree*:
+`github.com/nalet/stube` is the **canonical, public source of truth**. The operator's real
+deployment (behind their own identity provider, with their own library) consumes this repo
+and adds, *out of tree*:
 
-- the acquisition stack (separate private repos that **write into** the catalog),
-- the OpenShift-specific deploy overlay (Routes, SCCs, ServiceMonitor, GrafanaDashboard,
-  the internal image registry),
-- real config (its own OIDC issuer, content library) — supplied as **env / `/api/config`,
-  never code.
+- a platform-specific deploy overlay (ingress class, storage class, monitoring),
+- real config (its own OIDC issuer, library path) — supplied as **data** via the first-run
+  setup or env, **never code**.
 
-So nothing nalet-specific lives here. Config is data; the platform is neutral.
+So nothing operator-specific lives here. Config is data; the platform is neutral. Images
+are published under `ghcr.io/nalet/stube/<service>` and OIDC is wired by discovery from the
+issuer you configure.
+
+## Config contract {#config-contract}
+
+`katalog-manager-api` implements this; the admin UI consumes it. **Keep them identical.**
+
+```
+GET  /api/manage/setup/status
+     -> { configured: boolean,
+          version: string,
+          checks: { database: bool, kafka: bool, library: bool } }
+
+POST /api/manage/setup
+     body { displayName, oidcIssuer, oidcClientId, libraryPath, streamSigningKey? }
+     -> persists config (generates streamSigningKey if absent)
+     -> { configured: true }
+
+GET  /api/manage/config   -> current non-secret config
+PUT  /api/manage/config   -> update
+```
+
+`streamSigningKey` is the shared secret minted by `chino-api` and verified by
+`chino-stream`. If setup omits it, `katalog-manager-api` generates one so the two services
+agree out of the box; a mismatch is the classic "artwork loads but playback returns 403"
+symptom.
 
 ## Deploy model — one source, many targets
 
 `deploy/` is the single source of truth. The **base** is vanilla Kubernetes (Deployment +
-Service + **Ingress**) — no OpenShift `Route`, no `ServiceMonitor`/`GrafanaDashboard`.
+Service + **Ingress**) — no platform-specific objects.
 
 ```mermaid
 flowchart LR
   base["deploy/base — vanilla k8s (kustomize)"]
-  base --> helm["any cluster: kubectl apply -k"]
-  base --> k3s["k3s / k3d appliance — 'packed in one'"]
-  base --> demo["overlays/demo → demo-stube"]
-  base -. "private, out of tree" .-> okd["+ OKD overlay (Routes/SCC) — operator"]
+  allinone["deploy/allinone — k3s in one container"]
+  base --> scaleout["scale out: kubectl apply -k deploy/base on any cluster"]
+  base --> allinone
+  base --> demo["overlays/demo → public CC demo"]
   base -. "CI only" .-> kind["kind — smoke-test manifests"]
 ```
 
-- **Appliance** (`deploy/k3s`) — k3s/k3d single-node cluster, the literal all-in-one.
-- **Compose** (`deploy/compose`) — lighter alternative for a NAS, same images.
+- **All-in-one** (`deploy/allinone`) — a single privileged container that runs **k3s
+  in-process** and applies the base. This is the `docker run … ghcr.io/nalet/stube:latest`
+  experience: one image, one port, a complete server. **Postgres, Valkey, and Kafka are
+  bundled** inside it, so there is nothing external to install.
+- **Scale out** (`deploy/base`) — the same manifests on a real Kubernetes cluster via
+  `kubectl apply -k deploy/base`. Bring your own Postgres/Valkey/Kafka or run the bundled
+  ones; the manifests do not change.
+- **Demo** (`overlays/demo`) — a public demo that serves Creative-Commons / public-domain
+  content only (see [self-hosting.md](self-hosting.md#demo)). Unchanged by the all-in-one
+  work.
 - **kind** — used in CI to smoke-test the manifests, **not** as a runtime.
 - GPU (NVENC) is **optional**: base defaults to software ffmpeg; a GPU overlay adds the
-  device-plugin request. The single-box appliance also slims the processing event bus
-  (Kafka → embeddable queue) — Kafka stays in the operator's platform deploy.
+  device request.
 
 ## License {#license}
 
-**Chosen: [MPL-2.0](../LICENSE).** Rationale below. The clients ship to app stores, which
-constrained the choice:
+**Chosen: [MPL-2.0](../LICENSE).** The clients ship to mobile app stores, which constrained
+the choice:
 
-- **GPL-2.0 / AGPL-3.0** — category norm (Jellyfin GPLv2; Immich AGPL). Strong copyleft,
-  but **GPL is incompatible with the Apple App Store** terms, and the iOS client (KMP)
-  is in scope.
-- **MPL-2.0** — file-level copyleft, app-store compatible (used by Firefox). Good middle.
-- **Apache-2.0 / MIT** — permissive, zero friction, weakest protection.
+- **Strong copyleft (GPL/AGPL family)** — strong protection, but conflicts with mobile app
+  store distribution terms, and the iOS client (KMP) is in scope.
+- **MPL-2.0** — file-level copyleft, app-store compatible. Good middle ground.
+- **Permissive (Apache-2.0 / MIT)** — zero friction, weakest protection.
 
 **Decision: MPL-2.0** for the whole monorepo — protects the platform (file-level copyleft)
-while keeping the clients store-distributable. (Alternative considered: split AGPL-server /
-MPL-clients for stronger server copyleft — rejected for now to keep one license across the
-monorepo.)
+while keeping the clients store-distributable.
 
 ## Pre-public gates
 
 Before the repo is flipped public on GitHub:
 
-1. ~~License chosen and applied~~ ✅ MPL-2.0.
-2. **No nalet specifics in tree** — verified: neutral images, env-driven OIDC, no
-   hardcoded issuer/admin subjects/registry creds (the migration de-nalets each file).
-3. **Clean git history** — this repo starts from a fresh initial commit (no imported
-   private history), so there is no historical secret to scrub. Keep it that way.
-4. **Demo serves only distributable content** (see [self-hosting.md](self-hosting.md)).
+1. License chosen and applied — done (MPL-2.0).
+2. **No operator specifics in tree** — neutral images (`ghcr.io/nalet/stube/<service>`),
+   OIDC by discovery from a configured issuer, no hardcoded issuers/admin subjects/registry
+   creds.
+3. **Clean git history** — fresh initial commit, no imported private history. Keep it that
+   way.
+4. **Demo serves only distributable content** (see [self-hosting.md](self-hosting.md#demo)).

@@ -1,0 +1,36 @@
+# Single front door for the compose stack. Mirrors the k8s route map.
+# Caddy auto-orders by specificity, but we spell each prefix out so the intent
+# is obvious and matches the Ingress exactly:
+#
+#   /api/manage*  -> katalog-manager-api  (neutral write API)
+#   /manage*      -> admin                (management UI, SPA)
+#   /api*         -> chino-api            (product BFF)
+#   /             -> chino-web            (the main app, static SPA)
+#
+# Listens on :80 inside the container; docker-compose publishes it on :8080.
+:80 {
+	# Neutral management / write API. Most specific, so it wins over /api.
+	handle /api/manage* {
+		reverse_proxy katalog-manager-api:8080
+	}
+
+	# Management UI. The SPA owns its own /manage/* routing (incl. /manage/setup).
+	handle /manage* {
+		reverse_proxy admin:8080
+	}
+
+	# Product BFF. Long-form playback streams through here, so don't time the
+	# upstream out while the browser is sitting on a full buffer.
+	handle /api* {
+		reverse_proxy chino-api:8080 {
+			transport http {
+				read_timeout 14400s
+			}
+		}
+	}
+
+	# The main app. Catch-all.
+	handle {
+		reverse_proxy chino-web:8080
+	}
+}

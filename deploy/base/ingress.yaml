@@ -13,7 +13,27 @@ spec:
   rules:
     - host: stube.example.com
       http:
+        # ── Order matters ──
+        # Ingress path matching is longest-prefix on most controllers, but we
+        # list most-specific first so the intent is unambiguous and so simpler
+        # routers (Traefik, the all-in-one) keep the same precedence:
+        #   /api/manage -> katalog-manager-api  (neutral write API)
+        #   /manage     -> admin                (management UI, SPA)
+        #   /api        -> chino-api            (product BFF)
+        #   /           -> chino-web            (the main app, static SPA)
         paths:
+          - path: /api/manage
+            pathType: Prefix
+            backend:
+              service:
+                name: katalog-manager-api
+                port: { number: 80 }
+          - path: /manage
+            pathType: Prefix
+            backend:
+              service:
+                name: admin
+                port: { number: 80 }
           - path: /api
             pathType: Prefix
             backend:
