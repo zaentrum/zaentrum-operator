@@ -1,0 +1,245 @@
+# Build + push the Stube operator's OLM bundle image (and, when opm is
+# available, an opm catalog/index image that references it).
+#
+# This is deliberately a SEPARATE workflow from build-images.yml, which builds
+# the operator *controller* image (ghcr.io/nalet/stube/operator) in its matrix.
+# Here we build the OLM *bundle* image:
+#   ghcr.io/nalet/stube/operator-bundle:latest        (default branch)
+#   ghcr.io/nalet/stube/operator-bundle:<git-sha>
+#   ghcr.io/nalet/stube/operator-bundle:<git-tag>     (on tag pushes)
+# from operator/bundle/bundle.Dockerfile with context operator/bundle (the
+# Dockerfile COPYs ./manifests and ./metadata relative to that context).
+#
+# It also (best-effort, never required) assembles an opm-built catalog/index
+# image so a CatalogSource can point at the bundle:
+#   ghcr.io/nalet/stube/operator-catalog:latest
+#   ghcr.io/nalet/stube/operator-catalog:<git-sha>
+#   ghcr.io/nalet/stube/operator-catalog:<git-tag>
+#
+# NOTE: the bundle is still a Stage-3 WIP skeleton (see operator/bundle/README.md
+# and the `stube.io/bundle-stage: wip-stage-3` marker). This CI publishes the
+# structurally-valid image; it does not assert the bundle contents are final.
+name: operator-bundle
+
+on:
+  push:
+    branches: [main]
+    # Build the bundle image whenever the bundle, the operator install
+    # manifests it packages, or this workflow change. (On tag pushes the path
+    # filter below is ignored by GitHub, so tags always build.)
+    paths:
+      - 'operator/bundle/**'
+      - 'operator/config/**'
+      - '.github/workflows/operator-bundle.yml'
+    tags: ['v*']
+  # PRs that touch the bundle build (and validate) it, but never push.
+  pull_request:
+    paths:
+      - 'operator/bundle/**'
+      - 'operator/config/**'
+      - '.github/workflows/operator-bundle.yml'
+  # Allow a manual rebuild from the Actions tab.
+  workflow_dispatch: {}
+
+# Mirror the existing image workflows' auth: read the repo, write packages (GHCR).
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/nalet/stube
+  BUNDLE_IMAGE: ghcr.io/nalet/stube/operator-bundle
+  CATALOG_IMAGE: ghcr.io/nalet/stube/operator-catalog
+
+# A newer push to the same branch/PR/tag cancels in-flight builds.
+concurrency:
+  group: operator-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Build + push the OLM bundle image ────────────────────────────────────
+  bundle:
+    runs-on: ubuntu-latest
+    outputs:
+      # The fully-qualified, by-digest reference of the pushed bundle, consumed
+      # by the catalog job so opm pins the exact image it indexed.
+      digest: ${{ steps.build.outputs.digest }}
+      pushed: ${{ steps.build.outcome == 'success' && github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Validate the bundle metadata before building. operator-sdk's bundle
+      # validator is the standard check; if it isn't installable on the runner
+      # we don't fail the build (the bundle is a documented Stage-3 WIP), we
+      # just note it.
+      - name: Validate bundle (operator-sdk, best-effort)
+        run: |
+          set -uo pipefail
+          echo "::group::install operator-sdk"
+          OSDK_VERSION="v1.39.2"
+          OSDK_URL="https://github.com/operator-framework/operator-sdk/releases/download/${OSDK_VERSION}/operator-sdk_linux_amd64"
+          if curl -sSfL "$OSDK_URL" -o /usr/local/bin/operator-sdk; then
+            chmod +x /usr/local/bin/operator-sdk
+            echo "::endgroup::"
+            echo "::group::operator-sdk bundle validate"
+            # The bundle is a WIP skeleton; surface problems as warnings, not a
+            # hard failure, until Stage 3 fills the CSV/CRD in.
+            operator-sdk bundle validate ./operator/bundle || \
+              echo "::warning::operator-sdk bundle validate reported issues (bundle is Stage-3 WIP)"
+            echo "::endgroup::"
+          else
+            echo "::endgroup::"
+            echo "::warning::could not download operator-sdk ${OSDK_VERSION}; skipping bundle validation"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Don't log in (and therefore never push) on PRs — fork PRs have a
+        # read-only GITHUB_TOKEN. We still build the image to validate it.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BUNDLE_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=ref,event=tag
+
+      - name: Build and push operator-bundle
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: operator/bundle
+          file: operator/bundle/bundle.Dockerfile
+          # PRs build for validation only; main / tags / dispatch push.
+          push: ${{ github.event_name != 'pull_request' }}
+          # OLM bundle images are FROM scratch + LABELs + COPY; they carry no
+          # executable layers, so a single platform is correct here.
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha,scope=operator-bundle
+          cache-to: type=gha,mode=max,scope=operator-bundle
+
+  # ── Build + push an opm catalog/index image referencing the bundle ───────
+  # Best-effort and non-blocking: a CatalogSource can point at
+  # ghcr.io/nalet/stube/operator-catalog to make the bundle installable via a
+  # Subscription. We only run this once the bundle has actually been pushed (so
+  # opm can pin it by digest); PRs skip it. If opm or the catalog build fails it
+  # does NOT fail the workflow — the bundle image is the required artefact.
+  catalog:
+    needs: bundle
+    if: needs.bundle.outputs.pushed == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install opm
+        run: |
+          set -euo pipefail
+          OPM_VERSION="v1.47.0"
+          OPM_URL="https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/linux-amd64-opm"
+          curl -sSfL "$OPM_URL" -o /usr/local/bin/opm
+          chmod +x /usr/local/bin/opm
+          opm version
+
+      - name: Compute tags
+        id: tags
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # latest (default branch only) + long sha, mirroring the bundle tags.
+          tags="${CATALOG_IMAGE}:sha-${SHA}"
+          if [ "$REF_TYPE" = "tag" ]; then
+            tags="${tags} ${CATALOG_IMAGE}:${REF_NAME}"
+          fi
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            tags="${tags} ${CATALOG_IMAGE}:latest"
+          fi
+          echo "list=${tags}" >> "$GITHUB_OUTPUT"
+          echo "primary=${CATALOG_IMAGE}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build catalog (opm, file-based catalog)
+        env:
+          # Pin the bundle by the digest the bundle job pushed, so the catalog
+          # references the exact image it indexed (falls back to :latest if the
+          # digest output was unavailable).
+          BUNDLE_DIGEST: ${{ needs.bundle.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BUNDLE_DIGEST}" ]; then
+            BUNDLE_REF="${BUNDLE_IMAGE}@${BUNDLE_DIGEST}"
+          else
+            BUNDLE_REF="${BUNDLE_IMAGE}:latest"
+          fi
+          echo "Indexing bundle: ${BUNDLE_REF}"
+
+          # File-based catalog (opm's current format). Render the bundle into a
+          # declarative catalog, add the package + stable channel, validate it,
+          # then build a tiny image around it using opm's generated Dockerfile.
+          mkdir -p catalog
+          opm render "${BUNDLE_REF}" --output=yaml > catalog/bundle.yaml
+
+          # Package + channel head. The package/channel must match the bundle's
+          # annotations (package=stube-operator, channel=stable). opm derives the
+          # bundle name from the rendered CSV; pull it back out so the channel
+          # entry points at the real bundle name.
+          BUNDLE_NAME="$(awk '/^schema: olm.bundle$/{f=1} f&&/^name:/{print $2; exit}' catalog/bundle.yaml)"
+          if [ -z "${BUNDLE_NAME}" ]; then
+            echo "::warning::could not determine bundle name from rendered catalog; leaving channel head empty"
+          fi
+          cat > catalog/package.yaml <<EOF
+          ---
+          schema: olm.package
+          name: stube-operator
+          defaultChannel: stable
+          ---
+          schema: olm.channel
+          package: stube-operator
+          name: stable
+          entries:
+            - name: ${BUNDLE_NAME}
+          EOF
+
+          opm validate catalog
+          # opm generates a correct Dockerfile for the catalog dir next to it.
+          opm generate dockerfile catalog
+
+      - name: Build and push operator-catalog
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: catalog.Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.tags.outputs.list }}
+          provenance: false
