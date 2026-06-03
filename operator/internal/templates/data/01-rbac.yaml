@@ -22,6 +22,15 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "patch"]
+  # Stube CR: the instance/update surface (GET/PATCH /api/manage/instance) reads
+  # the CR + merge-patches its spec (channel / update.mode / apply). Read +
+  # patch only; the operator owns create/delete + status.
+  - apiGroups: ["stube.io"]
+    resources: ["stubes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["stube.io"]
+    resources: ["stubes/status"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

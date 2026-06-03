@@ -6,6 +6,7 @@ import { LibraryPage } from './pages/LibraryPage';
 import { ImportPage } from './pages/ImportPage';
 import { JobsPage } from './pages/JobsPage';
 import { UsersPage } from './pages/UsersPage';
+import { UpdatesPage } from './pages/UpdatesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFound } from './pages/NotFound';
 
@@ -53,6 +54,14 @@ export function App() {
         element={
           <Layout>
             <UsersPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/manage/updates"
+        element={
+          <Layout>
+            <UpdatesPage />
           </Layout>
         }
       />

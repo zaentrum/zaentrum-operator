@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,6 +30,13 @@ import (
 	"os"
 	"time"
 )
+
+// ErrDisabled is returned by methods that have no meaningful no-op fallback
+// (e.g. GetStube, which must return data) when the client has no in-cluster
+// credentials. Callers map it to 503 so the admin UI can explain the management
+// plane is not running in a cluster. Unlike the propagation methods (which
+// degrade to a logged no-op), reads cannot fabricate a result.
+var ErrDisabled = errors.New("k8s: in-cluster credentials absent; not running in a cluster")
 
 // saDir is the standard mount path for the in-cluster ServiceAccount token,
 // CA bundle and namespace. Kept as a var so tests can point it elsewhere.
@@ -179,15 +187,105 @@ func (c *Client) RestartDeployment(ctx context.Context, name string) error {
 	return c.patch(ctx, path, body)
 }
 
+// stubeGVR is the group/version/resource path segment for the Stube custom
+// resource. The CR is NAMESPACED, so the full path is
+// /apis/stube.io/v1alpha1/namespaces/{ns}/stubes/{name}.
+const stubeGVR = "/apis/stube.io/v1alpha1"
+
+// GetStube reads the named Stube custom resource from the given namespace and
+// returns the raw decoded object (a generic map so this package stays free of
+// the operator's typed API and the k8s.io modules). The management plane maps
+// the spec/status fields it needs onto its own view.
+//
+// Unlike the propagation methods, a read has no sensible no-op fallback: on a
+// disabled client it returns ErrDisabled so the caller can answer 503.
+func (c *Client) GetStube(ctx context.Context, namespace, name string) (map[string]any, error) {
+	if !c.Enabled() {
+		return nil, ErrDisabled
+	}
+	path := fmt.Sprintf("%s/namespaces/%s/stubes/%s", stubeGVR, namespace, name)
+	return c.get(ctx, path)
+}
+
+// PatchStube applies a strategic-merge patch to the named Stube CR's body. The
+// caller supplies the partial object (typically {"spec": {...}}); merge
+// semantics leave untouched fields intact. Returns the updated object so the
+// caller can re-render the view without a follow-up GET. ErrDisabled on a
+// disabled client.
+func (c *Client) PatchStube(ctx context.Context, namespace, name string, patch map[string]any) (map[string]any, error) {
+	if !c.Enabled() {
+		return nil, ErrDisabled
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		return nil, fmt.Errorf("marshal stube patch: %w", err)
+	}
+	path := fmt.Sprintf("%s/namespaces/%s/stubes/%s", stubeGVR, namespace, name)
+	if err := c.patchMerge(ctx, path, body); err != nil {
+		return nil, err
+	}
+	// Re-read so the returned view reflects exactly what the API server stored
+	// (and any defaulting/admission it applied), not just our local patch.
+	return c.get(ctx, path)
+}
+
+// get issues a GET against an absolute API path and decodes the JSON body into a
+// generic map. A 404 is surfaced as a wrapped error so callers can distinguish a
+// missing CR (the operator hasn't created it yet) from a transport failure.
+func (c *Client) get(ctx context.Context, path string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build get request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %w", path, err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("get %s: unexpected status %s: %s", path, resp.Status, bytes.TrimSpace(msg))
+	}
+
+	var obj map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&obj); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return obj, nil
+}
+
 // patch issues a strategic-merge PATCH against an absolute API path and turns a
-// non-2xx response into an error carrying the API server's message.
+// non-2xx response into an error carrying the API server's message. Used for the
+// built-in types (ConfigMap/Secret/Deployment) which register a strategic-merge
+// patch type.
 func (c *Client) patch(ctx context.Context, path string, body []byte) error {
+	return c.patchWithType(ctx, path, body, "application/strategic-merge-patch+json")
+}
+
+// patchMerge issues a JSON merge patch (RFC 7386) against an absolute API path.
+// Custom resources (the Stube CR) do NOT register a strategic-merge patch type,
+// so they must be patched with merge-patch; for our spec patches (replacing
+// scalar fields under nested objects) merge semantics are exactly what we want.
+func (c *Client) patchMerge(ctx context.Context, path string, body []byte) error {
+	return c.patchWithType(ctx, path, body, "application/merge-patch+json")
+}
+
+// patchWithType issues a PATCH with the given Content-Type and turns a non-2xx
+// response into an error carrying the API server's message.
+func (c *Client) patchWithType(ctx context.Context, path string, body []byte, contentType string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.host+path, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build patch request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/strategic-merge-patch+json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)

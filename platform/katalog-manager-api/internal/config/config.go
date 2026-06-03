@@ -63,6 +63,13 @@ type Config struct {
 	// is sourced from the 'stube-keycloak' Secret (key client-secret) in the
 	// cluster. Empty (together with an empty base URL) disables the client.
 	KeycloakAdminClientSecret string
+
+	// StubeCRName is the name of the Stube custom resource the instance/update
+	// surface reads and patches. Defaults to 'stube' (one CR per install).
+	StubeCRName string
+	// StubeCRNamespace is the namespace the Stube CR lives in. Defaults to
+	// 'stube'. The CR is namespaced (not cluster-scoped).
+	StubeCRNamespace string
 }
 
 // Load reads env vars and returns a Config with defaults so the server can
@@ -82,6 +89,9 @@ func Load() Config {
 		KeycloakRealm:             envOr("KEYCLOAK_REALM", "stube"),
 		KeycloakAdminClientID:     envOr("KEYCLOAK_ADMIN_CLIENT_ID", "stube-manager"),
 		KeycloakAdminClientSecret: os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"),
+
+		StubeCRName:      envOr("STUBE_CR_NAME", "stube"),
+		StubeCRNamespace: envOr("STUBE_CR_NAMESPACE", "stube"),
 	}
 }
 

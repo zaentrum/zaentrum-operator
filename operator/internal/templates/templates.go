@@ -51,15 +51,15 @@ type Values struct {
 
 	// Issuer is the fully-resolved OIDC issuer URL (derived from Hostname in
 	// bundled mode when spec.identity.issuer is empty).
-	Issuer       string
-	ClientID     string
-	Audience     string
-	Bundled      bool // identity.mode == bundled
-	KCHostname   string
+	Issuer     string
+	ClientID   string
+	Audience   string
+	Bundled    bool // identity.mode == bundled
+	KCHostname string
 
-	MediaSize  string
-	ClassName  string // optional StorageClass; "" means cluster default
-	HasClass   bool
+	MediaSize string
+	ClassName string // optional StorageClass; "" means cluster default
+	HasClass  bool
 
 	GPU   bool
 	Kafka bool

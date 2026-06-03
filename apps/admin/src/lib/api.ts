@@ -17,6 +17,9 @@
 //   DELETE /api/manage/users/{id}
 //   POST   /api/manage/users/{id}/reset-password   body { password, temporary? }
 //
+//   GET    /api/manage/instance   -> InstanceView
+//   PATCH  /api/manage/instance   body InstancePatch -> InstanceView
+//
 // The base path is configurable so the SPA can run behind /manage with the
 // API on the same origin (default) or against a remote dev backend.
 
@@ -142,6 +145,60 @@ export interface ImportJob {
   jobId: string;
   path: string;
   state: JobState;
+}
+
+// ── Instance / updates ─────────────────────────────────────────────────────
+//
+// Backed by the operator-managed Stube CR (stube.io/v1alpha1) via the
+// manage-API, which reads/patches the CR with its in-cluster k8s client.
+// The release train and applied tag live in the CR spec; the operator's
+// Stage-2 reconciler discovers the newest in-channel tag and reports it back
+// in status.
+
+/** Release train consulted by the operator's auto-update logic. */
+export type Channel = 'stable' | 'edge';
+
+/** Whether the operator may bump the applied version on its own. */
+export type UpdateMode = 'manual' | 'auto';
+
+/** Per-Deployment readiness from status.components. */
+export interface ComponentStatus {
+  /** Deployment name. */
+  name: string;
+  /** True when all replicas are available. */
+  ready: boolean;
+  /** Primary container image (with tag) currently applied. */
+  image: string;
+}
+
+/** Flattened view of the Stube CR spec + status the Updates page renders. */
+export interface InstanceView {
+  /** spec.channel — the selected release train. */
+  channel: Channel;
+  /** spec.version — the image tag the operator is asked to apply
+   *  ("latest" or a pinned tag). */
+  version: string;
+  /** status.currentVersion — the tag most recently rolled out. */
+  currentVersion: string;
+  /** status.availableUpdate — newest in-channel tag the operator discovered.
+   *  When it differs from currentVersion an update is available. */
+  availableUpdate: string;
+  /** spec.update.mode. */
+  updateMode: UpdateMode;
+  /** status.phase — coarse lifecycle string. */
+  phase: string;
+  /** status.components — per-Deployment readiness. */
+  components: ComponentStatus[];
+}
+
+/** Body for PATCH /instance. Every field is optional.
+ *  - channel / updateMode patch the CR spec.
+ *  - apply: true sets spec.version = status.availableUpdate, triggering the
+ *    operator to roll the discovered update. */
+export interface InstancePatch {
+  channel?: Channel;
+  updateMode?: UpdateMode;
+  apply?: boolean;
 }
 
 // ── Error type ───────────────────────────────────────────────────────────
@@ -296,6 +353,23 @@ export const api = {
   ): Promise<void> {
     return request<void>(`/users/${encodeURIComponent(id)}/reset-password`, {
       method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    });
+  },
+
+  // ── Instance / updates ───────────────────────────────────────────────────
+
+  /** Read the flattened view of the Stube CR spec + status. */
+  getInstance(signal?: AbortSignal): Promise<InstanceView> {
+    return request<InstanceView>('/instance', { signal });
+  },
+
+  /** Patch the CR spec: set channel / update.mode, or apply:true to roll the
+   *  discovered update. Returns the updated view. */
+  patchInstance(body: InstancePatch, signal?: AbortSignal): Promise<InstanceView> {
+    return request<InstanceView>('/instance', {
+      method: 'PATCH',
       body: JSON.stringify(body),
       signal,
     });

@@ -7,6 +7,7 @@ import {
   FolderInput,
   ListChecks,
   Radio,
+  RefreshCw,
   Settings,
   Tags,
   Users,
@@ -57,6 +58,12 @@ const TILES: Tile[] = [
     title: 'Users',
     blurb: 'Manage who can sign in and what they can reach.',
     icon: Users,
+  },
+  {
+    to: '/manage/updates',
+    title: 'Updates',
+    blurb: 'Track the running version, switch channels and roll out updates.',
+    icon: RefreshCw,
   },
   {
     to: '/settings',
