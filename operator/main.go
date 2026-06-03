@@ -16,6 +16,7 @@ import (
 
 	stubev1alpha1 "github.com/nalet/stube/operator/api/v1alpha1"
 	"github.com/nalet/stube/operator/internal/controller"
+	"github.com/nalet/stube/operator/internal/updates"
 )
 
 var (
@@ -53,9 +54,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// RELEASES_URL points the Stage-2 auto-update logic at the published
+	// channel document; empty falls back to the canonical raw GitHub URL.
+	releasesURL := os.Getenv("RELEASES_URL")
+	if releasesURL == "" {
+		releasesURL = updates.DefaultReleasesURL
+	}
+
 	if err := (&controller.StubeReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		ReleasesURL: releasesURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Stube")
 		os.Exit(1)

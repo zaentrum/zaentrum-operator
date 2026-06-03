@@ -7,11 +7,11 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,6 +19,7 @@ import (
 
 	stubev1alpha1 "github.com/nalet/stube/operator/api/v1alpha1"
 	"github.com/nalet/stube/operator/internal/templates"
+	"github.com/nalet/stube/operator/internal/updates"
 )
 
 const (
@@ -34,6 +35,12 @@ const (
 type StubeReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// ReleasesURL is the channel document the reconciler consults for Stage-2
+	// auto-update discovery. Empty falls back to updates.DefaultReleasesURL.
+	ReleasesURL string
+	// Updates fetches/parses the channel document. The zero value is usable.
+	Updates updates.Client
 }
 
 // +kubebuilder:rbac:groups=stube.io,resources=stubes,verbs=get;list;watch;create;update;patch;delete
@@ -57,8 +64,18 @@ func (r *StubeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Stage 2 — release-channel discovery. Resolve spec.channel to its target
+	// tag from the published releases.json, then decide the tag to render this
+	// pass. Discovery is best-effort: any failure leaves status.availableUpdate
+	// unchanged and falls back to the spec/"latest" render so reconcile never
+	// blocks on the network.
+	decision := r.resolveUpdate(ctx, &stube)
+
 	// Render the platform from the embedded templates with CR-driven values.
+	// The decision's render tag overrides spec.version so auto-mode rolls the
+	// channel target in this very pass.
 	vals := templates.NewValues(&stube)
+	vals.Version = decision.RenderTag
 	objs, err := templates.Render(vals)
 	if err != nil {
 		r.setApplied(&stube, metav1.ConditionFalse, "RenderFailed", err.Error())
@@ -87,18 +104,12 @@ func (r *StubeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	// currentVersion is the tag actually applied this pass; availableUpdate is
+	// the channel target when it differs (manual mode surfaces it; auto mode
+	// already rolled it into RenderTag so it collapses to "").
 	stube.Status.CurrentVersion = vals.Version
+	stube.Status.AvailableUpdate = decision.AvailableUpdate
 	stube.Status.ObservedGeneration = stube.Generation
-
-	// Stage 2 — auto-update. The channel/update.mode fields are stored on the
-	// spec and surfaced into status; the actual tag-discovery + bump logic
-	// lands in S2. For now we only wire the fields through.
-	// TODO(S2): when spec.update.mode == "auto", query the configured
-	// channel (spec.channel) for the newest in-channel tag, set
-	// status.availableUpdate, and (if newer) bump the applied image tag.
-	if stube.Status.AvailableUpdate == "" {
-		stube.Status.AvailableUpdate = ""
-	}
 
 	if allReady {
 		stube.Status.Phase = "Ready"
@@ -114,6 +125,44 @@ func (r *StubeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	logger.Info("reconciled stube", "objects", len(objs), "phase", stube.Status.Phase, "version", vals.Version)
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// resolveUpdate performs Stage-2 channel discovery for one reconcile pass and
+// returns the render/availableUpdate decision. It never returns an error:
+// network or parse failures are logged and degrade to a spec/"latest" render
+// with no surfaced update, so a flaky channel endpoint can never block a
+// reconcile.
+func (r *StubeReconciler) resolveUpdate(ctx context.Context, stube *stubev1alpha1.Stube) updates.Decision {
+	logger := log.FromContext(ctx)
+
+	spec := stube.Spec
+	auto := spec.Update.Mode == stubev1alpha1.UpdateAuto
+
+	// A pinned spec.version opts out of channel tracking; skip the network.
+	if updates.IsPinned(spec.Version) {
+		return updates.Decide(spec.Version, auto, "")
+	}
+
+	channel := string(spec.Channel)
+	if channel == "" {
+		channel = string(stubev1alpha1.ChannelStable)
+	}
+
+	rel, err := r.Updates.Fetch(ctx, r.ReleasesURL)
+	if err != nil {
+		logger.Info("release-channel discovery skipped (fetch failed)",
+			"channel", channel, "error", err.Error())
+		return updates.Decide(spec.Version, auto, "")
+	}
+
+	target, err := rel.Resolve(channel)
+	if err != nil {
+		logger.Info("release-channel discovery skipped (resolve failed)",
+			"channel", channel, "error", err.Error())
+		return updates.Decide(spec.Version, auto, "")
+	}
+
+	return updates.Decide(spec.Version, auto, target)
 }
 
 // applyAll applies every rendered object via server-side apply. Server-side

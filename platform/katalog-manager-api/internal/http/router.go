@@ -47,6 +47,13 @@ func NewRouter(a *API, verifier *auth.Verifier) (http.Handler, error) {
 	mgmt.Get("/config", a.GetConfig)
 	mgmt.Put("/config", a.UpdateConfig)
 
+	// Instance + update control (Stage 2). Reads/patches the Stube CR via the
+	// in-cluster client: GET projects spec+status; PATCH sets channel /
+	// update.mode and, with apply:true, pins spec.version to the available
+	// update so the operator rolls it. 503 when running outside a cluster.
+	mgmt.Get("/instance", a.Instance)
+	mgmt.Patch("/instance", a.PatchInstance)
+
 	// Import scan — register files the operator already owns. No acquisition.
 	mgmt.Post("/import/scan", a.ImportScan)
 

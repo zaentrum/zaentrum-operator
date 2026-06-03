@@ -5,6 +5,7 @@ import {
   FolderInput,
   LayoutGrid,
   ListChecks,
+  RefreshCw,
   Settings,
   Tags,
   Users,
@@ -25,6 +26,7 @@ const NAV: NavItem[] = [
   { to: '/import', label: 'Import', icon: <FolderInput size={16} /> },
   { to: '/jobs', label: 'Jobs', icon: <ListChecks size={16} /> },
   { to: '/manage/users', label: 'Users', icon: <Users size={16} /> },
+  { to: '/manage/updates', label: 'Updates', icon: <RefreshCw size={16} /> },
   { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
 ];
 
