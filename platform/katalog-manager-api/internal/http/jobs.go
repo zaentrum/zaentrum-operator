@@ -7,7 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/events"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/events"
 )
 
 // Jobs returns the recent job history (scans + processing dispatches),

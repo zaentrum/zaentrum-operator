@@ -17,9 +17,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	stubev1alpha1 "github.com/nalet/stube/operator/api/v1alpha1"
-	"github.com/nalet/stube/operator/internal/templates"
-	"github.com/nalet/stube/operator/internal/updates"
+	stubev1alpha1 "github.com/zaentrum/stube/operator/api/v1alpha1"
+	"github.com/zaentrum/stube/operator/internal/templates"
+	"github.com/zaentrum/stube/operator/internal/updates"
 )
 
 const (

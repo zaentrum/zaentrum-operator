@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
-	"github.com/nalet/stube/services/chino-api/internal/metrics"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/metrics"
 )
 
 const maxTelemetryBody = 256 * 1024 // 256 KB per batch.

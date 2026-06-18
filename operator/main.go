@@ -14,9 +14,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	stubev1alpha1 "github.com/nalet/stube/operator/api/v1alpha1"
-	"github.com/nalet/stube/operator/internal/controller"
-	"github.com/nalet/stube/operator/internal/updates"
+	stubev1alpha1 "github.com/zaentrum/stube/operator/api/v1alpha1"
+	"github.com/zaentrum/stube/operator/internal/controller"
+	"github.com/zaentrum/stube/operator/internal/updates"
 )
 
 var (

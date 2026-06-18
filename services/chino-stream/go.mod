@@ -1,4 +1,4 @@
-module github.com/nalet/stube/services/chino-stream
+module github.com/zaentrum/stube/services/chino-stream
 
 go 1.23.0
 

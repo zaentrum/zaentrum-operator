@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/keycloak"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/keycloak"
 )
 
 // The user-management surface (GET/POST/PUT/DELETE /api/manage/users and the

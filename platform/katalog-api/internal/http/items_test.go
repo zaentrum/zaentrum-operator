@@ -4,7 +4,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/nalet/stube/platform/katalog-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/store"
 )
 
 // parseListOpts is the surface chino-api hits via every browse URL; the

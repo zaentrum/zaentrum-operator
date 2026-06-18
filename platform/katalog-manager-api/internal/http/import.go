@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/store"
 )
 
 // videoExts is the set of container extensions the scan treats as playable

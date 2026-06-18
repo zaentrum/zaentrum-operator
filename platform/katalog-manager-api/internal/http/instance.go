@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/k8s"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/k8s"
 )
 
 // instanceView is the response of GET /api/manage/instance and the body

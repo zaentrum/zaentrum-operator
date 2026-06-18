@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/config"
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/events"
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/k8s"
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/keycloak"
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/config"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/events"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/k8s"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/keycloak"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/store"
 )
 
 // API bundles the dependencies every handler needs. One value is shared

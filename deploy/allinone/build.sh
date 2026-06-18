@@ -7,7 +7,7 @@
 # manifest IS the install.
 #
 #   ./deploy/allinone/build.sh                 # render + docker build :latest
-#   IMAGE=ghcr.io/nalet/stube:v1 ./build.sh    # custom tag
+#   IMAGE=ghcr.io/zaentrum/stube:v1 ./build.sh    # custom tag
 #   ./deploy/allinone/build.sh render          # render manifests only (no build)
 set -euo pipefail
 
@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 BASE="$ROOT/deploy/base"
 OUT="$HERE/manifests"
-IMAGE="${IMAGE:-ghcr.io/nalet/stube:latest}"
+IMAGE="${IMAGE:-ghcr.io/zaentrum/stube:latest}"
 
 # The appliance boots the Stube OPERATOR, which reconciles the whole platform
 # from a Stube CR — rather than baking the rendered platform manifests directly.

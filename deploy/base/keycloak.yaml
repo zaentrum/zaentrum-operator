@@ -80,7 +80,7 @@ spec:
               valueFrom: { secretKeyRef: { name: stube-db, key: password } }
       containers:
         - name: keycloak
-          image: ghcr.io/nalet/stube/keycloak:latest
+          image: ghcr.io/zaentrum/stube/keycloak:latest
           # `start` (not start-dev) for the production assembly; --import-realm
           # ingests the mounted realm on first boot (no-op once the realm exists).
           # --optimized would require a prior `kc.sh build`; we keep the simple

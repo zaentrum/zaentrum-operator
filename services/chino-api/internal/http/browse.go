@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/nalet/stube/services/chino-api/internal/katalog"
+	"github.com/zaentrum/stube/services/chino-api/internal/katalog"
 )
 
 // buildBrowseFilter forwards chino-web's browse query parameters

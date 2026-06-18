@@ -1,8 +1,8 @@
 # Build the Stube component images and push them to GitHub Container Registry.
 #
 # Each component is built with Buildx + docker/build-push-action and published as
-#   ghcr.io/nalet/stube/<svc>:latest
-#   ghcr.io/nalet/stube/<svc>:<git-sha>
+#   ghcr.io/zaentrum/stube/<svc>:latest
+#   ghcr.io/zaentrum/stube/<svc>:<git-sha>
 #
 # Path filtering keeps PRs cheap: a component only builds when its own sources
 # (or this workflow / the shared deploy bits) change. On `main` we always build
@@ -26,7 +26,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/nalet/stube
+  IMAGE_PREFIX: ghcr.io/zaentrum/stube
 
 # A newer push to the same branch/PR cancels in-flight builds.
 concurrency:

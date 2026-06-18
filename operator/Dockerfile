@@ -1,5 +1,5 @@
 # Multi-stage build for the Stube operator.
-# Final image: distroless static (nonroot), published as ghcr.io/nalet/stube/operator.
+# Final image: distroless static (nonroot), published as ghcr.io/zaentrum/stube/operator.
 FROM golang:1.24 AS build
 WORKDIR /workspace
 

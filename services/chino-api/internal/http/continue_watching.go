@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
-	"github.com/nalet/stube/services/chino-api/internal/katalog"
-	"github.com/nalet/stube/services/chino-api/internal/store"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/katalog"
+	"github.com/zaentrum/stube/services/chino-api/internal/store"
 )
 
 // continueWatchingItem extends a katalog.Item with the user's saved

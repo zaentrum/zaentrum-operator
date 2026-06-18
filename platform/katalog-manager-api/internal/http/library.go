@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/store"
 )
 
 // Library returns a paged list of catalog items for the management console.

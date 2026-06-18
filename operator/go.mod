@@ -1,4 +1,4 @@
-module github.com/nalet/stube/operator
+module github.com/zaentrum/stube/operator
 
 go 1.24.0
 

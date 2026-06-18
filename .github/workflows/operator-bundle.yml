@@ -2,19 +2,19 @@
 # available, an opm catalog/index image that references it).
 #
 # This is deliberately a SEPARATE workflow from build-images.yml, which builds
-# the operator *controller* image (ghcr.io/nalet/stube/operator) in its matrix.
+# the operator *controller* image (ghcr.io/zaentrum/stube/operator) in its matrix.
 # Here we build the OLM *bundle* image:
-#   ghcr.io/nalet/stube/operator-bundle:latest        (default branch)
-#   ghcr.io/nalet/stube/operator-bundle:<git-sha>
-#   ghcr.io/nalet/stube/operator-bundle:<git-tag>     (on tag pushes)
+#   ghcr.io/zaentrum/stube/operator-bundle:latest        (default branch)
+#   ghcr.io/zaentrum/stube/operator-bundle:<git-sha>
+#   ghcr.io/zaentrum/stube/operator-bundle:<git-tag>     (on tag pushes)
 # from operator/bundle/bundle.Dockerfile with context operator/bundle (the
 # Dockerfile COPYs ./manifests and ./metadata relative to that context).
 #
 # It also (best-effort, never required) assembles an opm-built catalog/index
 # image so a CatalogSource can point at the bundle:
-#   ghcr.io/nalet/stube/operator-catalog:latest
-#   ghcr.io/nalet/stube/operator-catalog:<git-sha>
-#   ghcr.io/nalet/stube/operator-catalog:<git-tag>
+#   ghcr.io/zaentrum/stube/operator-catalog:latest
+#   ghcr.io/zaentrum/stube/operator-catalog:<git-sha>
+#   ghcr.io/zaentrum/stube/operator-catalog:<git-tag>
 #
 # NOTE: the bundle is still a Stage-3 WIP skeleton (see operator/bundle/README.md
 # and the `stube.io/bundle-stage: wip-stage-3` marker). This CI publishes the
@@ -48,9 +48,9 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/nalet/stube
-  BUNDLE_IMAGE: ghcr.io/nalet/stube/operator-bundle
-  CATALOG_IMAGE: ghcr.io/nalet/stube/operator-catalog
+  IMAGE_PREFIX: ghcr.io/zaentrum/stube
+  BUNDLE_IMAGE: ghcr.io/zaentrum/stube/operator-bundle
+  CATALOG_IMAGE: ghcr.io/zaentrum/stube/operator-catalog
 
 # A newer push to the same branch/PR/tag cancels in-flight builds.
 concurrency:
@@ -138,7 +138,7 @@ jobs:
 
   # ── Build + push an opm catalog/index image referencing the bundle ───────
   # Best-effort and non-blocking: a CatalogSource can point at
-  # ghcr.io/nalet/stube/operator-catalog to make the bundle installable via a
+  # ghcr.io/zaentrum/stube/operator-catalog to make the bundle installable via a
   # Subscription. We only run this once the bundle has actually been pushed (so
   # opm can pin it by digest); PRs skip it. If opm or the catalog build fails it
   # does NOT fail the workflow — the bundle image is the required artefact.

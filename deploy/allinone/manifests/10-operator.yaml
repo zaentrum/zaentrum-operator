@@ -54,7 +54,7 @@ spec:
                 version:
                   type: string
                   default: latest
-                  description: Image tag applied to every ghcr.io/nalet/stube/* image.
+                  description: Image tag applied to every ghcr.io/zaentrum/stube/* image.
                 hostname:
                   type: string
                   default: stube.localhost
@@ -276,7 +276,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/nalet/stube/operator:latest
+          image: ghcr.io/zaentrum/stube/operator:latest
           command: ["/manager"]
           args:
             - --leader-elect

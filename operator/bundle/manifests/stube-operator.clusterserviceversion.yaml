@@ -6,14 +6,14 @@ metadata:
   annotations:
     capabilities: Basic Install
     categories: Streaming & Messaging
-    containerImage: ghcr.io/nalet/stube/operator:latest
+    containerImage: ghcr.io/zaentrum/stube/operator:latest
     description: >-
       Stube is a neutral, self-hostable media client + server for a library you
       own and are entitled to stream. The operator reconciles a single Stube
       custom resource into the full platform (catalog core, per-product
       streaming backends, clients, bundled Postgres/Valkey/Kafka and OIDC).
-    repository: https://github.com/nalet/stube
-    support: https://github.com/nalet/stube/issues
+    repository: https://github.com/zaentrum/stube
+    support: https://github.com/zaentrum/stube/issues
     # alm-examples is the CR sample OperatorHub renders in the "Create instance"
     # form. Mirrors operator/config/samples/stube_v1alpha1_stube.yaml.
     alm-examples: |-
@@ -81,9 +81,9 @@ spec:
     name: Stube
   links:
     - name: Source
-      url: https://github.com/nalet/stube
+      url: https://github.com/zaentrum/stube
     - name: Documentation
-      url: https://github.com/nalet/stube/blob/main/docs/operator.md
+      url: https://github.com/zaentrum/stube/blob/main/docs/operator.md
   # MPL-2.0, matching the repo LICENSE.
   installModes:
     - type: OwnNamespace
@@ -114,7 +114,7 @@ spec:
               - urn:alm:descriptor:com.tectonic.ui:select:edge
           - path: version
             displayName: Version
-            description: Image tag applied to every ghcr.io/nalet/stube/* image.
+            description: Image tag applied to every ghcr.io/zaentrum/stube/* image.
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:text
           - path: update.mode
@@ -218,7 +218,7 @@ spec:
                     type: RuntimeDefault
                 containers:
                   - name: manager
-                    image: ghcr.io/nalet/stube/operator:latest
+                    image: ghcr.io/zaentrum/stube/operator:latest
                     command: ["/manager"]
                     args:
                       - --leader-elect
@@ -254,8 +254,8 @@ spec:
                 terminationGracePeriodSeconds: 10
   # ── relatedImages ──────────────────────────────────────────────────────────
   # For disconnected/mirrored installs. The operator image is pinned here; the
-  # full neutral ghcr.io/nalet/stube/<service> set is resolved by the operator
+  # full neutral ghcr.io/zaentrum/stube/<service> set is resolved by the operator
   # at the same release tag (spec.version) it reconciles.
   relatedImages:
     - name: operator
-      image: ghcr.io/nalet/stube/operator:latest
+      image: ghcr.io/zaentrum/stube/operator:latest

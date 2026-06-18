@@ -1,4 +1,4 @@
-module github.com/nalet/stube/platform/katalog-manager-api
+module github.com/zaentrum/stube/platform/katalog-manager-api
 
 go 1.23.0
 

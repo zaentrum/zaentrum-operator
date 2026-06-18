@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Read-only catalog REST API for the stube platform.
-# Published as ghcr.io/nalet/stube/katalog-api.
+# Published as ghcr.io/zaentrum/stube/katalog-api.
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum* ./

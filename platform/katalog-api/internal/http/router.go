@@ -8,9 +8,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/nalet/stube/platform/katalog-api/internal/auth"
-	"github.com/nalet/stube/platform/katalog-api/internal/config"
-	"github.com/nalet/stube/platform/katalog-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/auth"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/config"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/store"
 )
 
 // NewRouter wires the chi router with the standard middleware stack +

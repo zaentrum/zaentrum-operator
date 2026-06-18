@@ -27,7 +27,7 @@ import (
 
 // DefaultReleasesURL is the canonical published channel document. It is also
 // the default the controller falls back to when RELEASES_URL is unset.
-const DefaultReleasesURL = "https://raw.githubusercontent.com/nalet/stube/main/releases.json"
+const DefaultReleasesURL = "https://raw.githubusercontent.com/zaentrum/stube/main/releases.json"
 
 // fetchTimeout bounds a single releases.json fetch so a slow or hung endpoint
 // can never stall a reconcile.

@@ -21,8 +21,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-stream/internal/catalog"
-	"github.com/nalet/stube/services/chino-stream/internal/metrics"
+	"github.com/zaentrum/stube/services/chino-stream/internal/catalog"
+	"github.com/zaentrum/stube/services/chino-stream/internal/metrics"
 )
 
 const passthroughBuf = 64 * 1024

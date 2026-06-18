@@ -3,7 +3,7 @@
 # Bundles a single-node k3s (real Kubernetes) plus the rendered deploy/base
 # manifests. k3s auto-applies anything under its server manifests dir on boot,
 # so starting the container installs Stube. Application images are pulled from
-# ghcr.io/nalet/stube on first boot (see README for offline/airgap baking).
+# ghcr.io/zaentrum/stube on first boot (see README for offline/airgap baking).
 #
 # Build it with deploy/allinone/build.sh (renders manifests first).
 FROM rancher/k3s:v1.31.5-k3s1

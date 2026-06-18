@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/nalet/stube/services/chino-api/internal/config"
+	"github.com/zaentrum/stube/services/chino-api/internal/config"
 )
 
 // appConfig serves the unauthenticated, CORS-open discovery document that
