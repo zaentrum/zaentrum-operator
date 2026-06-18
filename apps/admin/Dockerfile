@@ -17,4 +17,4 @@ EXPOSE 8080
 
 LABEL org.opencontainers.image.title="stube-admin"
 LABEL org.opencontainers.image.description="Stube admin UI — first-run setup + day-2 management."
-LABEL org.opencontainers.image.source="https://github.com/nalet/stube"
+LABEL org.opencontainers.image.source="https://github.com/zaentrum/stube"

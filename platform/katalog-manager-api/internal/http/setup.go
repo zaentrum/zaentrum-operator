@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/keycloak"
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/keycloak"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/store"
 )
 
 // setupStatus is the response of GET /api/manage/setup/status. The admin UI

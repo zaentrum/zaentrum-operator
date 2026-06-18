@@ -7,9 +7,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
-	"github.com/nalet/stube/services/chino-api/internal/katalog"
-	"github.com/nalet/stube/services/chino-api/internal/store"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/katalog"
+	"github.com/zaentrum/stube/services/chino-api/internal/store"
 )
 
 // postWatched marks an item as fully watched for the current user.

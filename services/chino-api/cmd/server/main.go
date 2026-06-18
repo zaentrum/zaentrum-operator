@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nalet/stube/services/chino-api/internal/config"
-	chinohttp "github.com/nalet/stube/services/chino-api/internal/http"
-	"github.com/nalet/stube/services/chino-api/internal/store"
+	"github.com/zaentrum/stube/services/chino-api/internal/config"
+	chinohttp "github.com/zaentrum/stube/services/chino-api/internal/http"
+	"github.com/zaentrum/stube/services/chino-api/internal/store"
 )
 
 func main() {

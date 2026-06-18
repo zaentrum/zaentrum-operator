@@ -72,7 +72,7 @@ against store and host policy.
 
 ## Relationship to the private nalet deployment
 
-`github.com/nalet/stube` is the **canonical, public source of truth**. The operator's real
+`github.com/zaentrum/stube` is the **canonical, public source of truth**. The operator's real
 deployment (behind their own identity provider, with their own library) consumes this repo
 and adds, *out of tree*:
 
@@ -81,7 +81,7 @@ and adds, *out of tree*:
   setup or env, **never code**.
 
 So nothing operator-specific lives here. Config is data; the platform is neutral. Images
-are published under `ghcr.io/nalet/stube/<service>` and OIDC is wired by discovery from the
+are published under `ghcr.io/zaentrum/stube/<service>` and OIDC is wired by discovery from the
 issuer you configure.
 
 ## Config contract {#config-contract}
@@ -124,7 +124,7 @@ flowchart LR
 ```
 
 - **All-in-one** (`deploy/allinone`) — a single privileged container that runs **k3s
-  in-process** and applies the base. This is the `docker run … ghcr.io/nalet/stube:latest`
+  in-process** and applies the base. This is the `docker run … ghcr.io/zaentrum/stube:latest`
   experience: one image, one port, a complete server. **Postgres, Valkey, and Kafka are
   bundled** inside it, so there is nothing external to install.
 - **Scale out** (`deploy/base`) — the same manifests on a real Kubernetes cluster via
@@ -155,7 +155,7 @@ while keeping the clients store-distributable.
 Before the repo is flipped public on GitHub:
 
 1. License chosen and applied — done (MPL-2.0).
-2. **No operator specifics in tree** — neutral images (`ghcr.io/nalet/stube/<service>`),
+2. **No operator specifics in tree** — neutral images (`ghcr.io/zaentrum/stube/<service>`),
    OIDC by discovery from a configured issuer, no hardcoded issuers/admin subjects/registry
    creds.
 3. **Clean git history** — fresh initial commit, no imported private history. Keep it that

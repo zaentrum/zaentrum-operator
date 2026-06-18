@@ -1,4 +1,4 @@
-# Stube all-in-one (`ghcr.io/nalet/stube`)
+# Stube all-in-one (`ghcr.io/zaentrum/stube`)
 
 A whole Stube cluster in **one container** — a neutral media client + server for
 a library you own and are entitled to stream. The image bundles a single-node
@@ -10,7 +10,7 @@ installs Stube. This is the zero-clone option: nothing to check out, one
 ## Run it
 
 ```bash
-docker run -d --privileged --name stube -p 8080:80 ghcr.io/nalet/stube:latest
+docker run -d --privileged --name stube -p 8080:80 ghcr.io/zaentrum/stube:latest
 ```
 
 Then open <http://localhost:8080>. First boot pulls the application images
@@ -42,7 +42,7 @@ host directory at k3s's storage path:
 ```bash
 docker run -d --privileged --name stube -p 8080:80 \
   -v stube-data:/var/lib/rancher/k3s/storage \
-  ghcr.io/nalet/stube:latest
+  ghcr.io/zaentrum/stube:latest
 ```
 
 Put your own library files where the stream service expects them (the `media`
@@ -71,7 +71,7 @@ docker exec -it stube k3s kubectl -n stube logs deploy/katalog-manager-api
 
 ## Where the images come from
 
-Application images are pulled from **`ghcr.io/nalet/stube/<service>`** on first
+Application images are pulled from **`ghcr.io/zaentrum/stube/<service>`** on first
 boot (`chino-web`, `chino-api`, `chino-stream`, `katalog-api`,
 `katalog-manager-api`, `admin`), plus the upstream `postgres`, `valkey`, and
 `apache/kafka` images. The box needs outbound network for the first start;
@@ -85,12 +85,12 @@ it tries to pull:
 
 ```bash
 # 1. Collect the images this release uses (on a connected machine):
-imgs="ghcr.io/nalet/stube/chino-web:latest \
-ghcr.io/nalet/stube/chino-api:latest \
-ghcr.io/nalet/stube/chino-stream:latest \
-ghcr.io/nalet/stube/katalog-api:latest \
-ghcr.io/nalet/stube/katalog-manager-api:latest \
-ghcr.io/nalet/stube/admin:latest \
+imgs="ghcr.io/zaentrum/stube/chino-web:latest \
+ghcr.io/zaentrum/stube/chino-api:latest \
+ghcr.io/zaentrum/stube/chino-stream:latest \
+ghcr.io/zaentrum/stube/katalog-api:latest \
+ghcr.io/zaentrum/stube/katalog-manager-api:latest \
+ghcr.io/zaentrum/stube/admin:latest \
 postgres:16-alpine valkey/valkey:8-alpine apache/kafka:3.8.0"
 for i in $imgs; do docker pull "$i"; done
 docker save $imgs -o stube-airgap.tar
@@ -109,7 +109,7 @@ registry traffic.
 
 ```bash
 ./deploy/allinone/build.sh            # render deploy/base -> manifests/, then docker build
-IMAGE=ghcr.io/nalet/stube:v1 ./deploy/allinone/build.sh
+IMAGE=ghcr.io/zaentrum/stube:v1 ./deploy/allinone/build.sh
 ./deploy/allinone/build.sh render     # just re-render manifests/stube.yaml
 ```
 

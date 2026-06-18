@@ -8,10 +8,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/nalet/stube/services/chino-stream/internal/auth"
-	"github.com/nalet/stube/services/chino-stream/internal/catalog"
-	"github.com/nalet/stube/services/chino-stream/internal/metrics"
-	"github.com/nalet/stube/services/chino-stream/internal/play"
+	"github.com/zaentrum/stube/services/chino-stream/internal/auth"
+	"github.com/zaentrum/stube/services/chino-stream/internal/catalog"
+	"github.com/zaentrum/stube/services/chino-stream/internal/metrics"
+	"github.com/zaentrum/stube/services/chino-stream/internal/play"
 )
 
 type Deps struct {

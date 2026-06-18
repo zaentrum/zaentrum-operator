@@ -7,7 +7,7 @@ the platform you want; the operator reconciles it and reports progress on the CR
 status.
 
 The operator is published as an [OLM](https://olm.operatorframework.io/) bundle
-(`ghcr.io/nalet/stube/operator-bundle`), so it installs the same way on
+(`ghcr.io/zaentrum/stube/operator-bundle`), so it installs the same way on
 OpenShift and on any OLM-enabled Kubernetes cluster.
 
 ## Two ways to run Stube
@@ -15,7 +15,7 @@ OpenShift and on any OLM-enabled Kubernetes cluster.
 There are two supported deployment modes, and `/manage` (the admin UI + setup
 wizard) talks to the operator in both:
 
-1. **All-in-one appliance.** A single container (`ghcr.io/nalet/stube:latest`)
+1. **All-in-one appliance.** A single container (`ghcr.io/zaentrum/stube:latest`)
    runs a full Kubernetes (k3s) in-process with the operator already bundled
    inside it. You start one container and you have the whole product — see
    [self-hosting.md](self-hosting.md). The operator runs inside the appliance and
@@ -42,7 +42,7 @@ to the cluster, install the operator straight from its bundle image:
 
 ```bash
 kubectl create namespace stube-operator
-operator-sdk run bundle ghcr.io/nalet/stube/operator-bundle:v0.1.0 -n stube-operator
+operator-sdk run bundle ghcr.io/zaentrum/stube/operator-bundle:v0.1.0 -n stube-operator
 ```
 
 This creates an ephemeral catalog, a `Subscription`, and installs the
@@ -112,7 +112,7 @@ metadata:
   namespace: openshift-marketplace   # use "olm" on upstream OLM clusters
 spec:
   sourceType: grpc
-  image: ghcr.io/nalet/stube/operator-catalog:v0.1.0
+  image: ghcr.io/zaentrum/stube/operator-catalog:v0.1.0
   displayName: Stube
   publisher: Stube
   updateStrategy:
@@ -155,7 +155,7 @@ One CR drives the whole platform. The fields:
 | Field | Meaning | Default |
 |---|---|---|
 | `spec.channel` | Release train consulted by auto-update (`stable` or `edge`). | `stable` |
-| `spec.version` | Image tag applied to every `ghcr.io/nalet/stube/*` image. | `latest` |
+| `spec.version` | Image tag applied to every `ghcr.io/zaentrum/stube/*` image. | `latest` |
 | `spec.hostname` | Public host — issuer host + ingress host + in-cluster validation host. | `stube.localhost` |
 | `spec.identity.mode` | `bundled` (ship Keycloak) or `external` (your own OIDC). | `bundled` |
 | `spec.identity.issuer` | Issuer URL when `mode: external`. | — |

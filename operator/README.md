@@ -9,7 +9,7 @@ kind: Stube
 metadata: { name: stube, namespace: stube }
 spec:
   channel: stable          # stable | edge  (Stage-2 auto-update train)
-  version: latest          # tag applied to every ghcr.io/nalet/stube/* image
+  version: latest          # tag applied to every ghcr.io/zaentrum/stube/* image
   hostname: stube.localhost
   identity: { mode: bundled, clientId: chino-web, audience: chino }
   storage:  { mediaSize: 50Gi }
@@ -32,7 +32,7 @@ The platform's deployable manifests live in `../deploy/base` (35 objects via
    references them by plain name from every pod (`envFrom` / `configMapKeyRef`
    / `secretKeyRef`).
 2. **CR-driven parameterization.** Image tag → `{{ image "<svc>" }}` (resolves
-   to `ghcr.io/nalet/stube/<svc>:{{.Version}}`) on all 7 stube images; issuer
+   to `ghcr.io/zaentrum/stube/<svc>:{{.Version}}`) on all 7 stube images; issuer
    host → `{{.Hostname}}` (`OIDC_ISSUER`, `KC_HOSTNAME`, ingress host);
    issuer/clientId/audience from `spec.identity`; media PVC size from
    `spec.storage.mediaSize` (+ `storageClassName` when set); GPU overlay gated
@@ -90,7 +90,7 @@ config/crd/              generated CRD
 config/rbac/             ServiceAccount + ClusterRole/Binding (CRUD on all kinds)
 config/manager/          operator Deployment + namespace
 config/samples/          example Stube CR
-Dockerfile               multi-stage, distroless → ghcr.io/nalet/stube/operator
+Dockerfile               multi-stage, distroless → ghcr.io/zaentrum/stube/operator
 ```
 
 ## Install

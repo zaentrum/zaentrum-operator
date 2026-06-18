@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/nalet/stube/operator:latest
+          image: ghcr.io/zaentrum/stube/operator:latest
           command: ["/manager"]
           args:
             - --leader-elect

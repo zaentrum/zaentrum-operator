@@ -17,7 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-stream/internal/pkgmanifest"
+	"github.com/zaentrum/stube/services/chino-stream/internal/pkgmanifest"
 )
 
 // PackagesRoot is where the packager writes the per-item CMAF trees.

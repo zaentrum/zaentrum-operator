@@ -8,9 +8,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
-	"github.com/nalet/stube/services/chino-api/internal/metrics"
-	"github.com/nalet/stube/services/chino-api/internal/store"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/metrics"
+	"github.com/zaentrum/stube/services/chino-api/internal/store"
 )
 
 type progressBody struct {

@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nalet/stube/platform/katalog-api/internal/auth"
-	"github.com/nalet/stube/platform/katalog-api/internal/config"
-	katalogapihttp "github.com/nalet/stube/platform/katalog-api/internal/http"
-	"github.com/nalet/stube/platform/katalog-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/auth"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/config"
+	katalogapihttp "github.com/zaentrum/stube/platform/katalog-api/internal/http"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/store"
 )
 
 func main() {

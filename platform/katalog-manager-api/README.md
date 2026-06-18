@@ -93,15 +93,15 @@ go test ./...
 go run .
 ```
 
-Container image: `ghcr.io/nalet/stube/katalog-manager-api`, listens on `:8080`.
+Container image: `ghcr.io/zaentrum/stube/katalog-manager-api`, listens on `:8080`.
 
 ```sh
-docker build -t ghcr.io/nalet/stube/katalog-manager-api:dev .
+docker build -t ghcr.io/zaentrum/stube/katalog-manager-api:dev .
 ```
 
 ## Service contract notes
 
-- **admin UI** — `ghcr.io/nalet/stube/admin`, nginx static SPA on `:8080`,
+- **admin UI** — `ghcr.io/zaentrum/stube/admin`, nginx static SPA on `:8080`,
   served at `/manage`. Consumes the first-run / config contract above.
 - **kafka** — single-node KRaft (no ZooKeeper), service `kafka:9092`. The
   producer here publishes `stube.processing.task.*`.

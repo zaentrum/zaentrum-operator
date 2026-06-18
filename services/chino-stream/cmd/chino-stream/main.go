@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nalet/stube/services/chino-stream/internal/catalog"
-	streamhttp "github.com/nalet/stube/services/chino-stream/internal/http"
+	"github.com/zaentrum/stube/services/chino-stream/internal/catalog"
+	streamhttp "github.com/zaentrum/stube/services/chino-stream/internal/http"
 )
 
 func main() {

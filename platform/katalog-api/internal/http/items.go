@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/platform/katalog-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-api/internal/store"
 )
 
 // ItemsHandler exposes the read endpoints over the catalog `items` projection.

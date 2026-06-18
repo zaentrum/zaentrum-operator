@@ -9,7 +9,7 @@ web, your phone/tablet, and your TV.
 ## Try it in one command
 
 ```bash
-docker run -d --privileged -p 80:80 --name stube ghcr.io/nalet/stube:latest
+docker run -d --privileged -p 80:80 --name stube ghcr.io/zaentrum/stube:latest
 open http://stube.localhost
 ```
 
@@ -84,7 +84,7 @@ Stube is the platform; the clients are skins over one shared core.
 
 ```bash
 # All-in-one appliance — k3s in one container, everything bundled
-docker run -d --privileged -p 80:80 --name stube ghcr.io/nalet/stube:latest
+docker run -d --privileged -p 80:80 --name stube ghcr.io/zaentrum/stube:latest
 # then: open http://stube.localhost
 
 # Scale out — the same manifests on a real cluster

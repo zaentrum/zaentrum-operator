@@ -19,7 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-stream/internal/catalog"
+	"github.com/zaentrum/stube/services/chino-stream/internal/catalog"
 )
 
 // HLS-on-demand handler. Replaces the previous progressive-MP4 /play

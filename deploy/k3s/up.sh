@@ -7,7 +7,7 @@
 #
 # Zero-clone alternative: the all-in-one image bundles k3s + deploy/base in one
 # container — no checkout, no k3d, just:
-#   docker run -d --privileged --name stube -p 8080:80 ghcr.io/nalet/stube:latest
+#   docker run -d --privileged --name stube -p 8080:80 ghcr.io/zaentrum/stube:latest
 # (see deploy/allinone/README.md). This script is for hacking on the manifests.
 set -euo pipefail
 

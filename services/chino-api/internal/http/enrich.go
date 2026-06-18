@@ -3,8 +3,8 @@ package http
 import (
 	"context"
 
-	"github.com/nalet/stube/services/chino-api/internal/katalog"
-	"github.com/nalet/stube/services/chino-api/internal/store"
+	"github.com/zaentrum/stube/services/chino-api/internal/katalog"
+	"github.com/zaentrum/stube/services/chino-api/internal/store"
 )
 
 // stampWatched annotates each item with the current user's watched_at

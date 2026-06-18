@@ -28,7 +28,7 @@ truth for deployment · `docs/` architecture + self-hosting.
 
 ```bash
 # whole product in one container (k3s in-process, all services bundled)
-docker run -d --privileged --name stube -p 8080:80 ghcr.io/nalet/stube:latest
+docker run -d --privileged --name stube -p 8080:80 ghcr.io/zaentrum/stube:latest
 
 # or the same manifests on any cluster you have a kubeconfig for
 kubectl apply -k deploy/base

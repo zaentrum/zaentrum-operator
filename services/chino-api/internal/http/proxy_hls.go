@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-api/internal/katalog"
+	"github.com/zaentrum/stube/services/chino-api/internal/katalog"
 )
 
 // proxyHLS forwards to /api/play/{id}/<leaf> on katalog-stream.

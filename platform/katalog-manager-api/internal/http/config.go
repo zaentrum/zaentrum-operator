@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/nalet/stube/platform/katalog-manager-api/internal/store"
+	"github.com/zaentrum/stube/platform/katalog-manager-api/internal/store"
 )
 
 // GetConfig returns the current non-secret configuration. The stream signing

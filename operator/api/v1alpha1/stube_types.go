@@ -103,7 +103,7 @@ type StubeSpec struct {
 	// +optional
 	Channel Channel `json:"channel,omitempty"`
 
-	// Version is the image tag applied to every ghcr.io/nalet/stube/* image.
+	// Version is the image tag applied to every ghcr.io/zaentrum/stube/* image.
 	// +kubebuilder:default=latest
 	// +optional
 	Version string `json:"version,omitempty"`

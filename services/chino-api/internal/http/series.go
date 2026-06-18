@@ -6,9 +6,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
-	"github.com/nalet/stube/services/chino-api/internal/katalog"
-	"github.com/nalet/stube/services/chino-api/internal/store"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/katalog"
+	"github.com/zaentrum/stube/services/chino-api/internal/store"
 )
 
 // seriesEpisodes returns every episode of a series, grouped by season.

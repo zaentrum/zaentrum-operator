@@ -1,4 +1,4 @@
-module github.com/nalet/stube/services/chino-api
+module github.com/zaentrum/stube/services/chino-api
 
 go 1.24.0
 

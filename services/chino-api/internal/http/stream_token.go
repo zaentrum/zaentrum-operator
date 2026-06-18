@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
 )
 
 // streamTokenTTL is the lifetime of a minted stream token. Long enough

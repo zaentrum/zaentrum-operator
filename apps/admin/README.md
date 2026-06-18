@@ -122,5 +122,5 @@ bundle under `/manage` and an SPA fallback so deep links resolve. Behind the pla
 ingress, `/api` routes to the backend and the static app is served at `/manage`.
 
 ```bash
-docker build -t ghcr.io/nalet/stube/stube-admin:latest .
+docker build -t ghcr.io/zaentrum/stube/stube-admin:latest .
 ```

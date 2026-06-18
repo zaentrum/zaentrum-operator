@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
 )
 
 // admin endpoints share a single allowlist check. Kept in a package

@@ -53,7 +53,7 @@ spec:
                 version:
                   type: string
                   default: latest
-                  description: Image tag applied to every ghcr.io/nalet/stube/* image.
+                  description: Image tag applied to every ghcr.io/zaentrum/stube/* image.
                 hostname:
                   type: string
                   default: stube.localhost

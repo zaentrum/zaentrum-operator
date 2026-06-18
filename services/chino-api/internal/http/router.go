@@ -10,11 +10,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/nalet/stube/services/chino-api/internal/auth"
-	"github.com/nalet/stube/services/chino-api/internal/config"
-	"github.com/nalet/stube/services/chino-api/internal/katalog"
-	"github.com/nalet/stube/services/chino-api/internal/metrics"
-	"github.com/nalet/stube/services/chino-api/internal/store"
+	"github.com/zaentrum/stube/services/chino-api/internal/auth"
+	"github.com/zaentrum/stube/services/chino-api/internal/config"
+	"github.com/zaentrum/stube/services/chino-api/internal/katalog"
+	"github.com/zaentrum/stube/services/chino-api/internal/metrics"
+	"github.com/zaentrum/stube/services/chino-api/internal/store"
 )
 
 func NewRouter(cfg config.Config, st *store.Store) (http.Handler, error) {
