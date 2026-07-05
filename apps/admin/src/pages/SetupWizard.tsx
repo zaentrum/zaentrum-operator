@@ -24,13 +24,13 @@ import type { Step } from '../components/ui';
 // identity provider (AuthGate gated the app behind a Keycloak login, where
 // Keycloak's own UPDATE_PASSWORD action set the `admin` password on first
 // login). So the wizard does NOT collect an admin password — that is owned by
-// Keycloak, not Stube. It collects the server display name + library path and
+// Keycloak, not Zaentrum. It collects the server display name + library path and
 // POSTs them with the operator's bearer token already attached.
 //
 // The server's POST /api/manage/setup REQUIRES oidcIssuer + oidcClientId. For
 // the bundled IdP we echo back the issuer + public web client the app
 // discovered from GET /api/config; an operator can switch to the advanced path
-// and point Stube at their own external OIDC provider instead.
+// and point Zaentrum at their own external OIDC provider instead.
 const STEPS: Step[] = [
   { id: 'welcome', title: 'Welcome' },
   { id: 'library', title: 'Library' },
@@ -40,7 +40,7 @@ const STEPS: Step[] = [
 
 interface Form {
   displayName: string;
-  /** When true, point Stube at an external OIDC provider instead of the
+  /** When true, point Zaentrum at an external OIDC provider instead of the
    *  bundled one. */
   useExternalOidc: boolean;
   oidcIssuer: string;
@@ -265,7 +265,7 @@ function WelcomeStep({ form, errors, set }: StepProps) {
     <div>
       <StepHeading
         icon={<Sparkles size={18} />}
-        title="Welcome to Stube"
+        title="Welcome to Zaentrum"
         blurb="A neutral media client + server for a library you own and are entitled to stream. You're signed in — let's finish configuring your server."
       />
       <Field
@@ -282,7 +282,7 @@ function WelcomeStep({ form, errors, set }: StepProps) {
         <div className="flex items-start gap-s-2">
           <ShieldCheck size={16} className="mt-px shrink-0 text-cloud-blue" />
           <p className="text-sm text-fg-muted">
-            Sign-in is handled by Stube's bundled identity provider — the one you
+            Sign-in is handled by Zaentrum's bundled identity provider — the one you
             just logged in with. Your <span className="font-mono text-fg-2">admin</span>{' '}
             password is managed there, not here.
           </p>
@@ -304,13 +304,13 @@ function WelcomeStep({ form, errors, set }: StepProps) {
               placeholder="https://id.example.com/realms/main"
               value={form.oidcIssuer}
               error={errors.oidcIssuer}
-              hint="The discovery base URL. Stube resolves /.well-known/openid-configuration under it."
+              hint="The discovery base URL. Zaentrum resolves /.well-known/openid-configuration under it."
               onChange={(e) => set({ oidcIssuer: e.target.value })}
             />
             <Field
               label="Client ID"
               mono
-              placeholder="stube"
+              placeholder="zaentrum"
               value={form.oidcClientId}
               error={errors.oidcClientId}
               hint="The public client your clients (web / mobile / TV) authenticate as."
@@ -336,12 +336,12 @@ function LibraryStep({ form, errors, set }: StepProps) {
       <StepHeading
         icon={<FolderTree size={18} />}
         title="Library"
-        blurb="Where your media files already live, as the server sees them. Stube reads this path — it never downloads or moves content."
+        blurb="Where your media files already live, as the server sees them. Zaentrum reads this path — it never downloads or moves content."
       />
       <Field
         label="Library path"
         mono
-        placeholder="/var/lib/stube/media"
+        placeholder="/var/lib/zaentrum/media"
         value={form.libraryPath}
         error={errors.libraryPath}
         hint="An absolute path inside the server container / host. You scan it from the Import page after setup."

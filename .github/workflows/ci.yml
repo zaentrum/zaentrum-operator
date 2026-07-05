@@ -17,12 +17,12 @@ jobs:
           kubectl kustomize deploy/overlays/demo > /tmp/demo.yaml
           echo "rendered $(grep -c '^kind:' /tmp/base.yaml) base resources"
       - uses: helm/kind-action@v1
-        with: { cluster_name: stube-ci }
+        with: { cluster_name: zaentrum-ci }
       - name: apply base on kind
         run: |
           kubectl apply -k deploy/base --dry-run=server || \
           kubectl apply -k deploy/base   # images may be private until first release
-          kubectl -n stube get all
+          kubectl -n zaentrum get all
 
   # The platform-owned images (apps/admin, platform/keycloak, operator) are built
   # + pushed by .github/workflows/build-images.yml; the all-in-one bundle by

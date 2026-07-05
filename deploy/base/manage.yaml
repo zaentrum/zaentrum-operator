@@ -13,7 +13,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: katalog-manager-api
-  labels: { app: katalog-manager-api, role: catalog-write, app.kubernetes.io/part-of: stube }
+  labels: { app: katalog-manager-api, role: catalog-write, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: katalog-manager-api } }
@@ -23,7 +23,7 @@ spec:
     spec:
       # Runs as the katalog-manager-api ServiceAccount (see rbac.yaml) so the
       # first-run setup flow can propagate config + the generated signing key to
-      # stube-env / stube-stream-signing and roll the affected deployments.
+      # zaentrum-env / zaentrum-stream-signing and roll the affected deployments.
       serviceAccountName: katalog-manager-api
       # Gate startup on the OIDC issuer being reachable. manage-api builds its
       # token verifier ONCE at boot; if discovery fails (bundled Keycloak not yet
@@ -34,9 +34,9 @@ spec:
         - name: wait-for-oidc
           image: curlimages/curl:8.11.0
           # Wait on the bundled Keycloak SERVICE name — NOT the issuer host. The
-          # issuer is stube.localhost, and musl libc (Alpine) short-circuits
+          # issuer is zaentrum.localhost, and musl libc (Alpine) short-circuits
           # *.localhost -> 127.0.0.1 (RFC 6761), so curling the issuer here would
-          # hit this pod, not Keycloak. The Go services resolve stube.localhost
+          # hit this pod, not Keycloak. The Go services resolve zaentrum.localhost
           # via CoreDNS (no short-circuit), so they discover fine once Keycloak is
           # up. Bounded retry so an operator on an external IdP (no bundled
           # Keycloak) doesn't block forever — manage-api then discovers its own.
@@ -45,7 +45,7 @@ spec:
             - -c
             - |
               i=0
-              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+              until curl -sf -o /dev/null http://keycloak/auth/realms/zaentrum/.well-known/openid-configuration; do
                 i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
                 echo "waiting for bundled keycloak ($i)…"; sleep 3
               done
@@ -55,8 +55,8 @@ spec:
           image: ghcr.io/zaentrum/katalog-manager:latest
           ports: [{ containerPort: 8080, name: http }]
           envFrom:
-            # OIDC_ISSUER / OIDC_AUDIENCE / KAFKA_BROKERS live in stube-env.
-            - configMapRef: { name: stube-env }
+            # OIDC_ISSUER / OIDC_AUDIENCE / KAFKA_BROKERS live in zaentrum-env.
+            - configMapRef: { name: zaentrum-env }
           env:
             - name: ADDR
               value: ":8080"
@@ -64,19 +64,19 @@ spec:
             - name: KATALOG_API_BASE_URL
               value: "http://katalog-api"
             - name: DB_USER
-              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: DB_PASSWORD
-              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
             # Config + catalog write DB.
             - name: PG_URL
-              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable"
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/zaentrum?sslmode=disable"
             # Optional: present so the manager can mint signed playback URLs
             # consistent with chino-api / chino-stream. Safe to leave unset.
             - name: STREAM_SIGNING_KEY
               valueFrom:
-                secretKeyRef: { name: stube-stream-signing, key: key, optional: true }
+                secretKeyRef: { name: zaentrum-stream-signing, key: key, optional: true }
             # ── Bundled Keycloak Admin REST integration (USERS_API) ──
-            # The manager calls the Admin API as the confidential 'stube-manager'
+            # The manager calls the Admin API as the confidential 'zaentrum-manager'
             # service account (client_credentials) to manage platform users and,
             # on first run, bootstrap the bundled 'admin' password. The base URL
             # is the IN-CLUSTER Keycloak Service WITH the /auth context path, so
@@ -88,11 +88,11 @@ spec:
               # keycloak Service listens on :80 (-> container :8080), so use :80.
               value: "http://keycloak/auth"
             - name: KEYCLOAK_REALM
-              value: "stube"
+              value: "zaentrum"
             - name: KEYCLOAK_ADMIN_CLIENT_ID
-              value: "stube-manager"
+              value: "zaentrum-manager"
             - name: KEYCLOAK_ADMIN_CLIENT_SECRET
-              valueFrom: { secretKeyRef: { name: stube-keycloak, key: client-secret } }
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak, key: client-secret } }
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 3

@@ -7,12 +7,12 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: keycloak
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 data:
-  stube-realm.json: |
+  zaentrum-realm.json: |
     {
-      "realm": "stube",
-      "displayName": "Stube",
+      "realm": "zaentrum",
+      "displayName": "Zaentrum",
       "enabled": true,
       "sslRequired": "external",
       "registrationAllowed": false,
@@ -39,8 +39,8 @@ data:
         "realm": [
           { "name": "offline_access", "description": "${role_offline-access}", "composite": false, "clientRole": false },
           { "name": "uma_authorization", "description": "${role_uma_authorization}", "composite": false, "clientRole": false },
-          { "name": "stube-user", "description": "Default Stube end user. Granted to interactive accounts on the public clients.", "composite": false, "clientRole": false },
-          { "name": "stube-admin", "description": "Stube administrator. Manage the catalog and other users via the Stube /manage console.", "composite": false, "clientRole": false }
+          { "name": "zaentrum-user", "description": "Default Zaentrum end user. Granted to interactive accounts on the public clients.", "composite": false, "clientRole": false },
+          { "name": "zaentrum-admin", "description": "Zaentrum administrator. Manage the catalog and other users via the Zaentrum /manage console.", "composite": false, "clientRole": false }
         ]
       },
       "clientScopes": [
@@ -160,9 +160,9 @@ data:
           ]
         },
         {
-          "clientId": "stube-manager",
-          "name": "Stube Manager",
-          "description": "Confidential service-account client the Stube manage-api uses for the Keycloak Admin REST API. Not for interactive login; secret injected at runtime.",
+          "clientId": "zaentrum-manager",
+          "name": "Zaentrum Manager",
+          "description": "Confidential service-account client the Zaentrum manage-api uses for the Keycloak Admin REST API. Not for interactive login; secret injected at runtime.",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": false,
@@ -172,7 +172,7 @@ data:
           "serviceAccountsEnabled": true,
           "bearerOnly": false,
           "frontchannelLogout": false,
-          "secret": "${STUBE_MANAGER_SECRET}",
+          "secret": "${ZAENTRUM_MANAGER_SECRET}",
           "redirectUris": [],
           "webOrigins": [],
           "attributes": { "use.refresh.tokens": "false", "client_credentials.use_refresh_token": "false" },
@@ -185,18 +185,18 @@ data:
           "username": "admin",
           "enabled": true,
           "emailVerified": true,
-          "firstName": "Stube",
+          "firstName": "Zaentrum",
           "lastName": "Administrator",
-          "email": "admin@stube.local",
+          "email": "admin@zaentrum.local",
           "requiredActions": ["UPDATE_PASSWORD"],
-          "credentials": [ { "type": "password", "value": "${STUBE_ADMIN_PASSWORD}", "temporary": true } ],
-          "realmRoles": ["stube-admin", "stube-user", "offline_access"],
+          "credentials": [ { "type": "password", "value": "${ZAENTRUM_ADMIN_PASSWORD}", "temporary": true } ],
+          "realmRoles": ["zaentrum-admin", "zaentrum-user", "offline_access"],
           "clientRoles": { "realm-management": ["realm-admin"] }
         },
         {
-          "username": "service-account-stube-manager",
+          "username": "service-account-zaentrum-manager",
           "enabled": true,
-          "serviceAccountClientId": "stube-manager",
+          "serviceAccountClientId": "zaentrum-manager",
           "clientRoles": { "realm-management": ["manage-users", "view-users", "query-users", "view-realm"] }
         }
       ]
@@ -226,7 +226,7 @@ metadata:
   labels:
     app: keycloak
     role: identity
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 spec:
   replicas: 1
   strategy:
@@ -262,12 +262,12 @@ spec:
             - name: PGUSER
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: user
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: password
       containers:
         - name: keycloak
@@ -283,12 +283,12 @@ spec:
             - name: KC_DB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: user
             - name: KC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: password
             - name: KC_HTTP_ENABLED
               value: "true"
@@ -299,7 +299,7 @@ spec:
             - name: KC_HOSTNAME
               valueFrom:
                 configMapKeyRef:
-                  name: stube-keycloak-config
+                  name: zaentrum-keycloak-config
                   key: KC_HOSTNAME
             - name: KC_HOSTNAME_STRICT
               value: "false"
@@ -308,22 +308,22 @@ spec:
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
-                  name: stube-keycloak-admin
+                  name: zaentrum-keycloak-admin
                   key: username
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: stube-keycloak-admin
+                  name: zaentrum-keycloak-admin
                   key: password
-            - name: STUBE_MANAGER_SECRET
+            - name: ZAENTRUM_MANAGER_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: stube-keycloak
+                  name: zaentrum-keycloak
                   key: client-secret
-            - name: STUBE_ADMIN_PASSWORD
+            - name: ZAENTRUM_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: stube-keycloak-admin
+                  name: zaentrum-keycloak-admin
                   key: realm-admin-password
           ports:
             - name: http

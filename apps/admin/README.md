@@ -1,6 +1,6 @@
-# stube-admin
+# zaentrum-admin
 
-The **admin UI for Stube** — first-run setup and day-2 management for a neutral media
+The **admin UI for Zaentrum** — first-run setup and day-2 management for a neutral media
 client + server for a library you own and are entitled to stream.
 
 Served under **`/manage`**. It is a static SPA (React 18 + Vite 6 + TypeScript +
@@ -9,8 +9,8 @@ TailwindCSS 3 + lucide-react + react-router-dom 6) that talks to the **manage-AP
 
 ## Authentication
 
-The whole app is gated behind an OIDC login against Stube's **bundled identity
-provider** (Keycloak realm `stube`), reusing the public `chino-web` client
+The whole app is gated behind an OIDC login against Zaentrum's **bundled identity
+provider** (Keycloak realm `zaentrum`), reusing the public `chino-web` client
 (Authorization Code + PKCE). It mirrors `chino-web`'s runtime-config pattern:
 
 - On boot the SPA fetches the unauthenticated, CORS-open discovery document
@@ -34,7 +34,7 @@ Build-time pins (`VITE_OIDC_AUTHORITY`, `VITE_OIDC_CLIENT_ID`,
 single-tenant deployment hard-pin a realm; when unset the server-reported values
 win.
 
-> Stube is content-neutral. This UI catalogs and configures a library you already have;
+> Zaentrum is content-neutral. This UI catalogs and configures a library you already have;
 > it never acquires content. How files arrive on disk is out of scope.
 
 ## Stack
@@ -52,7 +52,7 @@ Design tokens are vendored from the design system into
 [`src/styles/tokens.css`](src/styles/tokens.css) and exposed to Tailwind via
 [`tailwind.config.ts`](tailwind.config.ts) (`bg`, `surface`, `fg`, `cloud-blue`, …) and
 the 4px spacing scale (`s-1`…`s-8`). Fonts: Inter (UI) + JetBrains Mono (mono / the
-`> stube` wordmark).
+`> zaentrum` wordmark).
 
 ## Develop
 

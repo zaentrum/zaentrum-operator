@@ -2,7 +2,7 @@
 # Carries the internal event stream (library change events the management API
 # emits, consumed by enrichment/notification workers). One broker is plenty
 # for an appliance; an operator at scale points services at a managed cluster
-# by overriding KAFKA_BROKERS in the stube-env configMap.
+# by overriding KAFKA_BROKERS in the zaentrum-env configMap.
 #
 # KRaft mode: the broker is its own controller (no separate Zookeeper pod).
 # We run a single combined controller+broker node with a fixed node id.
@@ -10,7 +10,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kafka
-  labels: { app: kafka, role: event-stream, app.kubernetes.io/part-of: stube }
+  labels: { app: kafka, role: event-stream, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   # Recreate so the single PVC is never double-mounted across a rollout.
@@ -49,7 +49,7 @@ spec:
             - { name: KAFKA_DEFAULT_REPLICATION_FACTOR, value: "1" }
             - { name: KAFKA_NUM_PARTITIONS, value: "1" }
             # Stable cluster id so a restart re-attaches to the existing log dir.
-            - { name: CLUSTER_ID, value: "stube-kraft-0000000000001" }
+            - { name: CLUSTER_ID, value: "zaentrum-kraft-0000000000001" }
             - { name: KAFKA_LOG_DIRS, value: "/var/lib/kafka/data" }
             # Modest JVM heap for the appliance.
             - { name: KAFKA_HEAP_OPTS, value: "-Xmx512m -Xms512m" }

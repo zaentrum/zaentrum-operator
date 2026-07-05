@@ -1,13 +1,13 @@
-// Package templates embeds the Stube platform manifests as Go text/templates
-// and renders them for a given Stube CR.
+// Package templates embeds the Zaentrum platform manifests as Go text/templates
+// and renders them for a given Zaentrum CR.
 //
 // The templates are derived 1:1 from `kubectl kustomize deploy/base` (35
 // objects) with two deliberate edits:
 //
 //  1. UN-kustomized names. Kustomize hashes ConfigMap/Secret names
-//     (stube-env-bc6ctgt9bg, stube-db-k88fgb59hk, …). The operator owns the
-//     full set and applies atomically, so we use STABLE names (stube-env,
-//     stube-db, stube-stream-signing, stube-keycloak, stube-keycloak-admin)
+//     (zaentrum-env-bc6ctgt9bg, zaentrum-db-k88fgb59hk, …). The operator owns the
+//     full set and applies atomically, so we use STABLE names (zaentrum-env,
+//     zaentrum-db, zaentrum-stream-signing, zaentrum-keycloak, zaentrum-keycloak-admin)
 //     and reference them by plain name from every pod.
 //  2. CR-driven fields are parameterized: image tag -> {{.Version}}, the
 //     issuer/host -> {{.Hostname}} / {{.Identity}}, media PVC size ->
@@ -16,8 +16,8 @@
 //
 // Every boot fix from deploy/base is preserved verbatim: keycloak Service on
 // :80, mgmt-port (:9000) /auth/health probes, wait-for-oidc initContainers,
-// base64 stube-stream-signing key, the stube realm ConfigMap, and the
-// CoreDNS-friendly http://<host>/auth/realms/stube issuer.
+// base64 zaentrum-stream-signing key, the zaentrum realm ConfigMap, and the
+// CoreDNS-friendly http://<host>/auth/realms/zaentrum issuer.
 package templates
 
 import (
@@ -32,16 +32,16 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
-	stubev1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 )
 
 //go:embed data/*.yaml
 var fs embed.FS
 
 // FieldManager is the server-side-apply field manager the operator owns.
-const FieldManager = "stube-operator"
+const FieldManager = "zaentrum-operator"
 
-// Values is the flattened, defaulted view of a Stube spec handed to the
+// Values is the flattened, defaulted view of a Zaentrum spec handed to the
 // templates. Defaulting happens in NewValues so templates stay branch-light.
 type Values struct {
 	Namespace string
@@ -63,6 +63,10 @@ type Values struct {
 
 	GPU   bool
 	Kafka bool
+
+	// Replicas holds per-service replica overrides (app-tier Deployments only),
+	// keyed by Deployment name. Unlisted services render replicas: 1.
+	Replicas map[string]int32
 }
 
 // image returns a fully-qualified ghcr.io/zaentrum/<name> reference at the
@@ -71,39 +75,52 @@ func (v Values) image(name string) string {
 	return fmt.Sprintf("ghcr.io/zaentrum/%s:%s", name, v.Version)
 }
 
-// NewValues flattens and defaults a Stube spec into template Values.
-func NewValues(s *stubev1alpha1.Stube) Values {
+// replicas returns the desired replica count for an app-tier Deployment,
+// defaulting to 1. Exposed to templates as the `replicas` function so the CR's
+// spec.replicas map drives scaling (the portal operator console patches it).
+func (v Values) replicas(name string) int32 {
+	if v.Replicas != nil {
+		if n, ok := v.Replicas[name]; ok && n >= 0 {
+			return n
+		}
+	}
+	return 1
+}
+
+// NewValues flattens and defaults a Zaentrum spec into template Values.
+func NewValues(s *zaentrumv1alpha1.Zaentrum) Values {
 	spec := s.Spec
 
 	v := Values{
 		Namespace: s.Namespace,
 		Version:   orDefault(spec.Version, "latest"),
-		Hostname:  orDefault(spec.Hostname, "stube.localhost"),
+		Hostname:  orDefault(spec.Hostname, "zaentrum.localhost"),
 		ClientID:  orDefault(spec.Identity.ClientID, "chino-web"),
 		Audience:  orDefault(spec.Identity.Audience, "chino"),
 		Kafka:     spec.Features.Kafka,
 		GPU:       spec.Features.GPU,
+		Replicas:  spec.Replicas,
 	}
 	if v.Namespace == "" {
-		v.Namespace = "stube"
+		v.Namespace = "zaentrum"
 	}
 
 	mode := spec.Identity.Mode
 	if mode == "" {
-		mode = stubev1alpha1.IdentityBundled
+		mode = zaentrumv1alpha1.IdentityBundled
 	}
-	v.Bundled = mode == stubev1alpha1.IdentityBundled
+	v.Bundled = mode == zaentrumv1alpha1.IdentityBundled
 
 	// Issuer: explicit wins; otherwise derive from hostname in bundled mode.
 	switch {
 	case spec.Identity.Issuer != "":
 		v.Issuer = spec.Identity.Issuer
 	case v.Bundled:
-		v.Issuer = fmt.Sprintf("http://%s/auth/realms/stube", v.Hostname)
+		v.Issuer = fmt.Sprintf("http://%s/auth/realms/zaentrum", v.Hostname)
 	default:
 		// external mode with no issuer is a misconfig; keep a derivable value
 		// so rendering never panics — the controller surfaces the error.
-		v.Issuer = fmt.Sprintf("http://%s/auth/realms/stube", v.Hostname)
+		v.Issuer = fmt.Sprintf("http://%s/auth/realms/zaentrum", v.Hostname)
 	}
 	// KC_HOSTNAME pins the bundled Keycloak's public base to <host>/auth so
 	// the discovery doc issuer == OIDC_ISSUER == token iss.
@@ -149,7 +166,7 @@ var templateNames = []string{
 // must already contain `image` (bound to the concrete Values) because
 // text/template resolves function names at parse time, not execute time.
 func parse(funcs template.FuncMap) (*template.Template, error) {
-	root := template.New("stube").Funcs(funcs)
+	root := template.New("zaentrum").Funcs(funcs)
 	for _, name := range templateNames {
 		b, err := fs.ReadFile(name)
 		if err != nil {
@@ -168,7 +185,8 @@ func parse(funcs template.FuncMap) (*template.Template, error) {
 func Render(v Values) ([]*unstructured.Unstructured, error) {
 	// `image` is bound to v and must be present at parse time.
 	root, err := parse(template.FuncMap{
-		"image": v.image,
+		"image":    v.image,
+		"replicas": v.replicas,
 	})
 	if err != nil {
 		return nil, err

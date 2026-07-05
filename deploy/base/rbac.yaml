@@ -2,7 +2,7 @@
 # The management plane runs the first-run setup wizard. After it persists the
 # operator's config + generates the stream signing key, it propagates those
 # values out to the runtime objects the sibling services read at STARTUP — the
-# stube-env ConfigMap and the stube-stream-signing Secret — and rolls the
+# zaentrum-env ConfigMap and the zaentrum-stream-signing Secret — and rolls the
 # affected Deployments so the new values take effect.
 #
 # To do that in-cluster (via the Kubernetes REST API, stdlib net/http only — no
@@ -13,17 +13,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: katalog-manager-api
-  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: stube }
+  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: zaentrum }
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: katalog-manager-api-config
-  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: stube }
+  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: zaentrum }
 rules:
   # ConfigMaps + Secrets: read current state (to diff for idempotency) and
   # strategic-merge patch the OIDC issuer/audience, media root and stream
-  # signing key into stube-env / stube-stream-signing.
+  # signing key into zaentrum-env / zaentrum-stream-signing.
   - apiGroups: [""]
     resources: ["configmaps", "secrets"]
     verbs: ["get", "list", "patch", "update"]
@@ -32,26 +32,26 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "patch"]
-  # Stube CR: the instance/update surface (GET/PATCH /api/manage/instance) reads
+  # Zaentrum CR: the instance/update surface (GET/PATCH /api/manage/instance) reads
   # the CR (spec + status) and merge-patches its spec — set channel /
   # update.mode and, on "apply", pin spec.version to the available update so the
   # operator rolls it. read + patch/update only; the operator owns create/delete
   # of the CR, the manager only turns the knobs on an existing one.
-  - apiGroups: ["stube.io"]
-    resources: ["stubes"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums"]
     verbs: ["get", "list", "watch", "patch", "update"]
   # The status subresource is read-only here: the manager mirrors
   # currentVersion / availableUpdate / phase / components into its view but
   # never writes status (the operator's reconciler owns it).
-  - apiGroups: ["stube.io"]
-    resources: ["stubes/status"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums/status"]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: katalog-manager-api-config
-  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: stube }
+  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: zaentrum }
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

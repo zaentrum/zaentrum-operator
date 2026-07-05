@@ -1,4 +1,4 @@
-// Package controller implements the Stube platform reconciler.
+// Package controller implements the Zaentrum platform reconciler.
 package controller
 
 import (
@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	stubev1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/templates"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/updates"
 )
@@ -31,8 +31,8 @@ const (
 	condTypeApplied = "ResourcesApplied"
 )
 
-// StubeReconciler reconciles a Stube object into the full platform.
-type StubeReconciler struct {
+// ZaentrumReconciler reconciles a Zaentrum object into the full platform.
+type ZaentrumReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
@@ -43,9 +43,9 @@ type StubeReconciler struct {
 	Updates updates.Client
 }
 
-// +kubebuilder:rbac:groups=stube.io,resources=stubes,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=stube.io,resources=stubes/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=stube.io,resources=stubes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps;secrets;services;serviceaccounts;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
@@ -53,13 +53,13 @@ type StubeReconciler struct {
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile renders the embedded templates for the Stube CR and applies every
+// Reconcile renders the embedded templates for the Zaentrum CR and applies every
 // object via server-side apply, then refreshes status.
-func (r *StubeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var stube stubev1alpha1.Stube
-	if err := r.Get(ctx, req.NamespacedName, &stube); err != nil {
+	var z zaentrumv1alpha1.Zaentrum
+	if err := r.Get(ctx, req.NamespacedName, &z); err != nil {
 		// Deleted: owner references garbage-collect the managed resources.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -69,37 +69,37 @@ func (r *StubeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// pass. Discovery is best-effort: any failure leaves status.availableUpdate
 	// unchanged and falls back to the spec/"latest" render so reconcile never
 	// blocks on the network.
-	decision := r.resolveUpdate(ctx, &stube)
+	decision := r.resolveUpdate(ctx, &z)
 
 	// Render the platform from the embedded templates with CR-driven values.
 	// The decision's render tag overrides spec.version so auto-mode rolls the
 	// channel target in this very pass.
-	vals := templates.NewValues(&stube)
+	vals := templates.NewValues(&z)
 	vals.Version = decision.RenderTag
 	objs, err := templates.Render(vals)
 	if err != nil {
-		r.setApplied(&stube, metav1.ConditionFalse, "RenderFailed", err.Error())
-		stube.Status.Phase = "Error"
-		_ = r.patchStatus(ctx, &stube)
+		r.setApplied(&z, metav1.ConditionFalse, "RenderFailed", err.Error())
+		z.Status.Phase = "Error"
+		_ = r.patchStatus(ctx, &z)
 		return ctrl.Result{}, fmt.Errorf("render templates: %w", err)
 	}
 
-	stube.Status.Phase = "Reconciling"
+	z.Status.Phase = "Reconciling"
 
 	// Apply each object via server-side apply with our field manager. Set the
-	// Stube as owner on namespaced resources so they GC with the CR (the
+	// Zaentrum as owner on namespaced resources so they GC with the CR (the
 	// cluster-scoped Namespace cannot carry a namespaced owner ref, so skip it).
-	if err := r.applyAll(ctx, &stube, objs); err != nil {
-		r.setApplied(&stube, metav1.ConditionFalse, "ApplyFailed", err.Error())
-		stube.Status.Phase = "Error"
-		_ = r.patchStatus(ctx, &stube)
+	if err := r.applyAll(ctx, &z, objs); err != nil {
+		r.setApplied(&z, metav1.ConditionFalse, "ApplyFailed", err.Error())
+		z.Status.Phase = "Error"
+		_ = r.patchStatus(ctx, &z)
 		return ctrl.Result{}, err
 	}
-	r.setApplied(&stube, metav1.ConditionTrue, "Applied",
+	r.setApplied(&z, metav1.ConditionTrue, "Applied",
 		fmt.Sprintf("applied %d objects via server-side apply", len(objs)))
 
 	// Refresh component readiness from the live Deployments and roll status up.
-	allReady, err := r.refreshComponents(ctx, &stube, objs)
+	allReady, err := r.refreshComponents(ctx, &z, objs)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -107,23 +107,23 @@ func (r *StubeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// currentVersion is the tag actually applied this pass; availableUpdate is
 	// the channel target when it differs (manual mode surfaces it; auto mode
 	// already rolled it into RenderTag so it collapses to "").
-	stube.Status.CurrentVersion = vals.Version
-	stube.Status.AvailableUpdate = decision.AvailableUpdate
-	stube.Status.ObservedGeneration = stube.Generation
+	z.Status.CurrentVersion = vals.Version
+	z.Status.AvailableUpdate = decision.AvailableUpdate
+	z.Status.ObservedGeneration = z.Generation
 
 	if allReady {
-		stube.Status.Phase = "Ready"
-		r.setReady(&stube, metav1.ConditionTrue, "AllComponentsReady", "all components are ready")
+		z.Status.Phase = "Ready"
+		r.setReady(&z, metav1.ConditionTrue, "AllComponentsReady", "all components are ready")
 	} else {
-		stube.Status.Phase = "Progressing"
-		r.setReady(&stube, metav1.ConditionFalse, "ComponentsNotReady", "waiting for components to become ready")
+		z.Status.Phase = "Progressing"
+		r.setReady(&z, metav1.ConditionFalse, "ComponentsNotReady", "waiting for components to become ready")
 	}
 
-	if err := r.patchStatus(ctx, &stube); err != nil {
+	if err := r.patchStatus(ctx, &z); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("reconciled stube", "objects", len(objs), "phase", stube.Status.Phase, "version", vals.Version)
+	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
@@ -132,11 +132,11 @@ func (r *StubeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 // network or parse failures are logged and degrade to a spec/"latest" render
 // with no surfaced update, so a flaky channel endpoint can never block a
 // reconcile.
-func (r *StubeReconciler) resolveUpdate(ctx context.Context, stube *stubev1alpha1.Stube) updates.Decision {
+func (r *ZaentrumReconciler) resolveUpdate(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) updates.Decision {
 	logger := log.FromContext(ctx)
 
-	spec := stube.Spec
-	auto := spec.Update.Mode == stubev1alpha1.UpdateAuto
+	spec := z.Spec
+	auto := spec.Update.Mode == zaentrumv1alpha1.UpdateAuto
 
 	// A pinned spec.version opts out of channel tracking; skip the network.
 	if updates.IsPinned(spec.Version) {
@@ -145,7 +145,7 @@ func (r *StubeReconciler) resolveUpdate(ctx context.Context, stube *stubev1alpha
 
 	channel := string(spec.Channel)
 	if channel == "" {
-		channel = string(stubev1alpha1.ChannelStable)
+		channel = string(zaentrumv1alpha1.ChannelStable)
 	}
 
 	rel, err := r.Updates.Fetch(ctx, r.ReleasesURL)
@@ -172,11 +172,11 @@ func (r *StubeReconciler) resolveUpdate(ctx context.Context, stube *stubev1alpha
 // but no longer do. It is idempotent — re-applying identical objects is a
 // no-op — and avoids read-modify-write conflicts. We set Force so the operator
 // reclaims ownership of fields a prior manager (e.g. kubectl) touched.
-func (r *StubeReconciler) applyAll(ctx context.Context, stube *stubev1alpha1.Stube, objs []*unstructured.Unstructured) error {
+func (r *ZaentrumReconciler) applyAll(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, objs []*unstructured.Unstructured) error {
 	for _, obj := range objs {
 		// Own namespaced resources so they cascade-delete with the CR.
 		if obj.GetNamespace() != "" {
-			if err := controllerutil.SetControllerReference(stube, obj, r.Scheme); err != nil {
+			if err := controllerutil.SetControllerReference(z, obj, r.Scheme); err != nil {
 				return fmt.Errorf("set owner ref on %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 			}
 		}
@@ -193,8 +193,8 @@ func (r *StubeReconciler) applyAll(ctx context.Context, stube *stubev1alpha1.Stu
 // refreshComponents reads each managed Deployment and records its readiness +
 // applied image into status.components. Returns true when every Deployment has
 // all desired replicas available.
-func (r *StubeReconciler) refreshComponents(ctx context.Context, stube *stubev1alpha1.Stube, objs []*unstructured.Unstructured) (bool, error) {
-	var comps []stubev1alpha1.ComponentStatus
+func (r *ZaentrumReconciler) refreshComponents(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, objs []*unstructured.Unstructured) (bool, error) {
+	var comps []zaentrumv1alpha1.ComponentStatus
 	allReady := true
 
 	for _, obj := range objs {
@@ -205,7 +205,7 @@ func (r *StubeReconciler) refreshComponents(ctx context.Context, stube *stubev1a
 		var dep appsv1.Deployment
 		err := r.Get(ctx, types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}, &dep)
 		if errors.IsNotFound(err) {
-			comps = append(comps, stubev1alpha1.ComponentStatus{Name: name, Ready: false})
+			comps = append(comps, zaentrumv1alpha1.ComponentStatus{Name: name, Ready: false})
 			allReady = false
 			continue
 		}
@@ -225,52 +225,52 @@ func (r *StubeReconciler) refreshComponents(ctx context.Context, stube *stubev1a
 		if !ready {
 			allReady = false
 		}
-		comps = append(comps, stubev1alpha1.ComponentStatus{Name: name, Ready: ready, Image: image})
+		comps = append(comps, zaentrumv1alpha1.ComponentStatus{Name: name, Ready: ready, Image: image})
 	}
 
-	stube.Status.Components = comps
+	z.Status.Components = comps
 	return allReady, nil
 }
 
-func (r *StubeReconciler) patchStatus(ctx context.Context, stube *stubev1alpha1.Stube) error {
-	return r.Status().Update(ctx, stube)
+func (r *ZaentrumReconciler) patchStatus(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) error {
+	return r.Status().Update(ctx, z)
 }
 
-func (r *StubeReconciler) setReady(stube *stubev1alpha1.Stube, status metav1.ConditionStatus, reason, msg string) {
-	setCondition(stube, condTypeReady, status, reason, msg)
+func (r *ZaentrumReconciler) setReady(z *zaentrumv1alpha1.Zaentrum, status metav1.ConditionStatus, reason, msg string) {
+	setCondition(z, condTypeReady, status, reason, msg)
 }
 
-func (r *StubeReconciler) setApplied(stube *stubev1alpha1.Stube, status metav1.ConditionStatus, reason, msg string) {
-	setCondition(stube, condTypeApplied, status, reason, msg)
+func (r *ZaentrumReconciler) setApplied(z *zaentrumv1alpha1.Zaentrum, status metav1.ConditionStatus, reason, msg string) {
+	setCondition(z, condTypeApplied, status, reason, msg)
 }
 
-func setCondition(stube *stubev1alpha1.Stube, condType string, status metav1.ConditionStatus, reason, msg string) {
+func setCondition(z *zaentrumv1alpha1.Zaentrum, condType string, status metav1.ConditionStatus, reason, msg string) {
 	cond := metav1.Condition{
 		Type:               condType,
 		Status:             status,
 		Reason:             reason,
 		Message:            msg,
-		ObservedGeneration: stube.Generation,
+		ObservedGeneration: z.Generation,
 		LastTransitionTime: metav1.Now(),
 	}
-	for i := range stube.Status.Conditions {
-		if stube.Status.Conditions[i].Type == condType {
+	for i := range z.Status.Conditions {
+		if z.Status.Conditions[i].Type == condType {
 			// Preserve transition time when status is unchanged.
-			if stube.Status.Conditions[i].Status == status {
-				cond.LastTransitionTime = stube.Status.Conditions[i].LastTransitionTime
+			if z.Status.Conditions[i].Status == status {
+				cond.LastTransitionTime = z.Status.Conditions[i].LastTransitionTime
 			}
-			stube.Status.Conditions[i] = cond
+			z.Status.Conditions[i] = cond
 			return
 		}
 	}
-	stube.Status.Conditions = append(stube.Status.Conditions, cond)
+	z.Status.Conditions = append(z.Status.Conditions, cond)
 }
 
-// SetupWithManager wires the reconciler to watch Stube CRs and the Deployments
+// SetupWithManager wires the reconciler to watch Zaentrum CRs and the Deployments
 // it owns (so readiness changes re-trigger a reconcile).
-func (r *StubeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ZaentrumReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&stubev1alpha1.Stube{}).
+		For(&zaentrumv1alpha1.Zaentrum{}).
 		Owns(&appsv1.Deployment{}).
 		Complete(r)
 }

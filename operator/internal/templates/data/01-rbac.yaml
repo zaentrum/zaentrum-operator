@@ -5,7 +5,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: katalog-manager-api
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -14,7 +14,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: katalog-manager-api
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 rules:
   - apiGroups: [""]
     resources: ["configmaps", "secrets"]
@@ -22,14 +22,14 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "patch"]
-  # Stube CR: the instance/update surface (GET/PATCH /api/manage/instance) reads
+  # Zaentrum CR: the instance/update surface (GET/PATCH /api/manage/instance) reads
   # the CR + merge-patches its spec (channel / update.mode / apply). Read +
   # patch only; the operator owns create/delete + status.
-  - apiGroups: ["stube.io"]
-    resources: ["stubes"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums"]
     verbs: ["get", "list", "watch", "patch", "update"]
-  - apiGroups: ["stube.io"]
-    resources: ["stubes/status"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums/status"]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -39,7 +39,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: katalog-manager-api
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

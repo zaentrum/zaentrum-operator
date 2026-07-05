@@ -71,7 +71,7 @@ export function LibraryPage() {
     <>
       <PageHeader
         title="Library"
-        description="Everything Stube has catalogued from your media folders."
+        description="Everything Zaentrum has catalogued from your media folders."
         action={
           <Link to="/import">
             <Button variant="secondary" icon={<FolderInput size={16} />}>

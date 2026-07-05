@@ -44,7 +44,7 @@ export function ImportPage() {
     <>
       <PageHeader
         title="Import"
-        description="Scan a folder so Stube catalogs the media files already on disk."
+        description="Scan a folder so Zaentrum catalogs the media files already on disk."
       />
 
       <div className="grid grid-cols-1 gap-s-5 lg:grid-cols-3">
@@ -52,14 +52,14 @@ export function ImportPage() {
           <CardHeader
             icon={<ScanLine size={18} />}
             title="Scan a folder"
-            description="Point Stube at a directory it can read. It indexes the files it finds — it never downloads or moves anything."
+            description="Point Zaentrum at a directory it can read. It indexes the files it finds — it never downloads or moves anything."
           />
           <CardBody>
             <form onSubmit={submit} className="flex flex-col gap-s-4">
               <Field
                 label="Folder path"
                 mono
-                placeholder="/var/lib/stube/media/movies"
+                placeholder="/var/lib/zaentrum/media/movies"
                 value={path}
                 error={error ?? undefined}
                 hint="An absolute path inside the server, under your configured library root."
@@ -97,13 +97,13 @@ export function ImportPage() {
           <CardHeader icon={<Info size={18} />} title="How import works" />
           <CardBody className="text-sm text-fg-muted">
             <ol className="flex list-decimal flex-col gap-s-2 pl-s-4">
-              <li>You give Stube a folder it can read.</li>
+              <li>You give Zaentrum a folder it can read.</li>
               <li>It catalogs each media file it discovers.</li>
               <li>Enrichment resolves titles, years and artwork.</li>
               <li>Analysis and packaging prepare items for playback.</li>
             </ol>
             <p className="mt-s-4 text-xs text-fg-dim">
-              Stube is content-neutral: it reads files you already own and are entitled to
+              Zaentrum is content-neutral: it reads files you already own and are entitled to
               stream. Acquiring content is out of scope.
             </p>
           </CardBody>

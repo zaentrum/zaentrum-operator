@@ -1,4 +1,4 @@
-# Build + push the Stube operator's OLM bundle image (and, when opm is
+# Build + push the Zaentrum operator's OLM bundle image (and, when opm is
 # available, an opm catalog/index image that references it).
 #
 # This is deliberately a SEPARATE workflow from build-images.yml, which builds
@@ -17,7 +17,7 @@
 #   ghcr.io/zaentrum/operator-catalog:<git-tag>
 #
 # NOTE: the bundle is still a Stage-3 WIP skeleton (see operator/bundle/README.md
-# and the `stube.io/bundle-stage: wip-stage-3` marker). This CI publishes the
+# and the `zaentrum.io/bundle-stage: wip-stage-3` marker). This CI publishes the
 # structurally-valid image; it does not assert the bundle contents are final.
 name: operator-bundle
 
@@ -210,7 +210,7 @@ jobs:
           opm render "${BUNDLE_REF}" --output=yaml > catalog/bundle.yaml
 
           # Package + channel head. The package/channel must match the bundle's
-          # annotations (package=stube-operator, channel=stable). opm derives the
+          # annotations (package=zaentrum-operator, channel=stable). opm derives the
           # bundle name from the rendered CSV; pull it back out so the channel
           # entry points at the real bundle name.
           BUNDLE_NAME="$(awk '/^schema: olm.bundle$/{f=1} f&&/^name:/{print $2; exit}' catalog/bundle.yaml)"
@@ -220,11 +220,11 @@ jobs:
           cat > catalog/package.yaml <<EOF
           ---
           schema: olm.package
-          name: stube-operator
+          name: zaentrum-operator
           defaultChannel: stable
           ---
           schema: olm.channel
-          package: stube-operator
+          package: zaentrum-operator
           name: stable
           entries:
             - name: ${BUNDLE_NAME}

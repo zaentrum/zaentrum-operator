@@ -5,7 +5,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: katalog-api
-  labels: { app: katalog-api, role: catalog-read, app.kubernetes.io/part-of: stube }
+  labels: { app: katalog-api, role: catalog-read, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: katalog-api } }
@@ -21,15 +21,15 @@ spec:
             - name: KATALOG_API_ADDR
               value: ":8080"
             - name: KATALOG_API_OIDC_ISSUER
-              valueFrom: { configMapKeyRef: { name: stube-env, key: OIDC_ISSUER } }
+              valueFrom: { configMapKeyRef: { name: zaentrum-env, key: OIDC_ISSUER } }
             - name: KATALOG_API_OIDC_AUDIENCE
-              valueFrom: { configMapKeyRef: { name: stube-env, key: OIDC_AUDIENCE } }
+              valueFrom: { configMapKeyRef: { name: zaentrum-env, key: OIDC_AUDIENCE } }
             - name: DB_USER
-              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: DB_PASSWORD
-              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
             - name: KATALOG_API_PG_URL
-              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable"
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/zaentrum?sslmode=disable"
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 3

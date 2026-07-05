@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: stube-env
+  name: zaentrum-env
   namespace: {{ .Namespace }}
   labels:
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 data:
   # Bundled/external-IdP issuer. Every service runs OIDC discovery + token
   # validation against this with coreos/go-oidc, which requires it to EQUAL
@@ -16,7 +16,7 @@ data:
   # In-cluster service DNS — never leaves the namespace.
   KATALOG_BASE_URL: http://katalog-api
   STREAM_BASE_URL: http://chino-stream
-  MEDIA_ROOT: /var/lib/stube/media
+  MEDIA_ROOT: /var/lib/zaentrum/media
   KAFKA_BROKERS: {{ if .Kafka }}kafka:9092{{ else }}""{{ end }}
   # Empty = no admins until the operator sets Keycloak subs / realm role.
   ADMIN_SUBJECTS: ""
@@ -25,11 +25,11 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: stube-keycloak-config
+  name: zaentrum-keycloak-config
   namespace: {{ .Namespace }}
   labels:
     app: keycloak
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 data:
   # Pins the bundled Keycloak public base to <host>/auth so the discovery doc
   # issuer == OIDC_ISSUER == token iss.

@@ -1,12 +1,12 @@
-# Contributing to Stube
+# Contributing to Zaentrum
 
-Thanks for your interest! Stube is a **neutral media client + server** for a library you own
+Thanks for your interest! Zaentrum is a **neutral media client + server** for a library you own
 and are entitled to stream — a media server, an admin launchpad, and clients, nothing more.
 
 ## Ground rules
 
 - **No acquisition.** PRs that add downloaders, indexer/tracker integrations, scrapers, or
-  links to such tools will be declined. Stube catalogs and streams a library you already
+  links to such tools will be declined. Zaentrum catalogs and streams a library you already
   own; it never fetches content, and how files arrive on disk is out of scope. See
   [docs/architecture.md](docs/architecture.md#scope).
 - **Neutral by default.** No hardcoded servers, issuers, or branding for any one operator.
@@ -30,7 +30,7 @@ here reference their published `ghcr.io/zaentrum/<svc>` images.
 
 ```bash
 # whole product in one container (k3s in-process, all services bundled)
-docker run -d --privileged --name stube -p 8080:80 ghcr.io/zaentrum/stube:latest
+docker run -d --privileged --name zaentrum -p 8080:80 ghcr.io/zaentrum/appliance:latest
 
 # or the same manifests on any cluster you have a kubeconfig for
 kubectl apply -k deploy/base

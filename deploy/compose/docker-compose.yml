@@ -8,7 +8,7 @@
 #   /manage     -> admin                 (management UI, SPA)
 #   /api        -> chino-api             (product BFF)
 #   /           -> chino-web             (the main app, static SPA)
-name: stube
+name: zaentrum
 
 x-env: &oidc
   OIDC_ISSUER: ""          # set to your server's OIDC issuer, or leave blank for first-run setup
@@ -25,11 +25,11 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: stube
-      POSTGRES_PASSWORD: stube-dev-change-me
-      POSTGRES_DB: stube
+      POSTGRES_USER: zaentrum
+      POSTGRES_PASSWORD: zaentrum-dev-change-me
+      POSTGRES_DB: zaentrum
     volumes: ["pg:/var/lib/postgresql/data"]
-    healthcheck: { test: ["CMD", "pg_isready", "-U", "stube"], interval: 10s, retries: 5 }
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "zaentrum"], interval: 10s, retries: 5 }
 
   valkey:
     image: valkey/valkey:8-alpine
@@ -51,7 +51,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
       KAFKA_NUM_PARTITIONS: "1"
-      CLUSTER_ID: "stube-kraft-0000000000001"
+      CLUSTER_ID: "zaentrum-kraft-0000000000001"
       KAFKA_LOG_DIRS: "/var/lib/kafka/data"
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
     volumes: ["kafka:/var/lib/kafka/data"]
@@ -60,7 +60,7 @@ services:
     image: ghcr.io/zaentrum/katalog-api:latest
     environment:
       <<: *oidc
-      KATALOG_API_PG_URL: "postgres://stube:stube-dev-change-me@postgres:5432/stube?sslmode=disable"
+      KATALOG_API_PG_URL: "postgres://zaentrum:zaentrum-dev-change-me@postgres:5432/zaentrum?sslmode=disable"
     depends_on: { postgres: { condition: service_healthy } }
 
   # Neutral management / write API. Served under /api/manage.
@@ -71,7 +71,7 @@ services:
       ADDR: ":8080"
       KATALOG_API_BASE_URL: "http://katalog-api:8080"
       KAFKA_BROKERS: "kafka:9092"
-      PG_URL: "postgres://stube:stube-dev-change-me@postgres:5432/stube?sslmode=disable"
+      PG_URL: "postgres://zaentrum:zaentrum-dev-change-me@postgres:5432/zaentrum?sslmode=disable"
       STREAM_SIGNING_KEY: "dev-only-stream-signing-key-change-me"
     depends_on:
       postgres: { condition: service_healthy }
@@ -84,7 +84,7 @@ services:
       <<: *oidc
       KATALOG_BASE_URL: "http://katalog-api:8080"
       STREAM_BASE_URL: "http://chino-stream:8080"
-      PG_URL: "postgres://stube:stube-dev-change-me@postgres:5432/stube?sslmode=disable"
+      PG_URL: "postgres://zaentrum:zaentrum-dev-change-me@postgres:5432/zaentrum?sslmode=disable"
       STREAM_SIGNING_KEY: "dev-only-stream-signing-key-change-me"
     depends_on: [katalog-api, chino-stream]
 

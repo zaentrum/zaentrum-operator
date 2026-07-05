@@ -1,25 +1,25 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: stube-operator-manager-rolebinding
+  name: zaentrum-operator-manager-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: stube-operator-manager-role
+  name: zaentrum-operator-manager-role
 subjects:
   - kind: ServiceAccount
-    name: stube-operator-controller-manager
-    namespace: stube-operator-system
+    name: zaentrum-operator-controller-manager
+    namespace: zaentrum-operator-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: stube-operator-leader-election-rolebinding
+  name: zaentrum-operator-leader-election-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: stube-operator-leader-election-role
+  name: zaentrum-operator-leader-election-role
 subjects:
   - kind: ServiceAccount
-    name: stube-operator-controller-manager
-    namespace: stube-operator-system
+    name: zaentrum-operator-controller-manager
+    namespace: zaentrum-operator-system

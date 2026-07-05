@@ -1,17 +1,17 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: stube-operator-manager-role
+  name: zaentrum-operator-manager-role
 rules:
-  # The Stube CR itself + status/finalizers.
-  - apiGroups: ["stube.io"]
-    resources: ["stubes"]
+  # The Zaentrum CR itself + status/finalizers.
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["stube.io"]
-    resources: ["stubes/status"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums/status"]
     verbs: ["get", "update", "patch"]
-  - apiGroups: ["stube.io"]
-    resources: ["stubes/finalizers"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums/finalizers"]
     verbs: ["update"]
   # Namespace (cluster-scoped) — created/owned by the operator.
   - apiGroups: [""]
@@ -46,7 +46,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: stube-operator-leader-election-role
+  name: zaentrum-operator-leader-election-role
 rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]

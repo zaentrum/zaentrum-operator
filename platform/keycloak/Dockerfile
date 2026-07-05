@@ -1,11 +1,11 @@
-# Bundled Stube identity provider: Keycloak with the 'stube' realm baked in.
+# Bundled Zaentrum identity provider: Keycloak with the 'zaentrum' realm baked in.
 #
 # Two-stage optimized build. The builder runs `kc.sh build` to bake the
 # Postgres JDBC store + health/metrics into an immutable, pre-augmented
 # distribution; the runtime stage starts with `--optimized` so no build
 # step runs at pod start (fast, deterministic boot).
 #
-# The 'stube' realm is imported on first start from
+# The 'zaentrum' realm is imported on first start from
 # /opt/keycloak/data/import/. The OAuth 2.0 Device Authorization Grant is
 # GA in Keycloak 26.x (no --features flag needed); it is enabled per-client
 # in the realm import via the oauth2.device.authorization.grant.enabled
@@ -40,10 +40,10 @@ COPY --from=builder /opt/keycloak/ /opt/keycloak/
 
 # Bake the realm import. On first start (--import-realm) Keycloak reads every
 # *.json in this directory and creates/updates the realm. The
-# ${STUBE_MANAGER_CLIENT_SECRET} placeholder in the JSON is resolved from the
+# ${ZAENTRUM_MANAGER_CLIENT_SECRET} placeholder in the JSON is resolved from the
 # pod environment at import time (Keycloak performs env substitution on
 # realm-import files), so no real secret is ever committed to the image.
-COPY stube-realm.json /opt/keycloak/data/import/stube-realm.json
+COPY zaentrum-realm.json /opt/keycloak/data/import/zaentrum-realm.json
 
 # Run as the non-root keycloak user shipped in the base image.
 USER 1000

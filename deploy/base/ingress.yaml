@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: stube
+  name: zaentrum
   annotations:
     # Long-form playback proxies through chino-api; the browser stops reading
     # once its buffer fills, so a short proxy read-timeout severs the stream
@@ -9,14 +9,14 @@ metadata:
     # controller specific — this one is nginx; Traefik uses a ServersTransport.)
     nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
 spec:
-  # Default host is stube.localhost: modern browsers auto-resolve *.localhost to
-  # 127.0.0.1, so the all-in-one answers on http://stube.localhost with no
+  # Default host is zaentrum.localhost: modern browsers auto-resolve *.localhost to
+  # 127.0.0.1, so the all-in-one answers on http://zaentrum.localhost with no
   # /etc/hosts edit, and the issuer host equals the ingress host (what a real
   # cluster does too). Operators / overlays replace this with their real name
-  # — override together with stube-env OIDC_ISSUER + stube-keycloak-config
+  # — override together with zaentrum-env OIDC_ISSUER + zaentrum-keycloak-config
   # KC_HOSTNAME (and, on the appliance, STUBE_ISSUER_HOST).
   rules:
-    - host: stube.localhost
+    - host: zaentrum.localhost
       http:
         # ── Order matters ──
         # Ingress path matching is longest-prefix on most controllers, but we
@@ -47,7 +47,7 @@ spec:
                 name: chino-api
                 port: { number: 80 }
           # Bundled Keycloak. Served at /auth (KC_HTTP_RELATIVE_PATH=/auth) so
-          # the issuer is <host>/auth/realms/stube and the prefix maps 1:1 with
+          # the issuer is <host>/auth/realms/zaentrum and the prefix maps 1:1 with
           # no rewrite. More specific than '/', so it precedes the catch-all.
           - path: /auth
             pathType: Prefix

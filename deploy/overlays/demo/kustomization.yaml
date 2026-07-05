@@ -1,29 +1,29 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Public demo overlay → demo-stube.nalet.cloud
+# Public demo overlay → demo-zaentrum.nalet.cloud
 # Isolated namespace so it can never collide with a real deployment on the
 # same cluster. Serves ONLY distributable (Creative-Commons) content.
 
-namespace: stube-demo
+namespace: zaentrum-demo
 
 resources:
   - ../../base
   - seed-content.yaml
 
 configMapGenerator:
-  - name: stube-env
+  - name: zaentrum-env
     behavior: merge
     literals:
       # Throwaway demo realm — NOT the real user realm.
-      - OIDC_ISSUER=https://sso.nalet.cloud/realms/stube-demo
+      - OIDC_ISSUER=https://sso.nalet.cloud/realms/zaentrum-demo
       - OIDC_AUDIENCE=chino
       - TELEMETRY_ENABLED=false
 
 patches:
   # Point the ingress at the demo host.
-  - target: { kind: Ingress, name: stube }
+  - target: { kind: Ingress, name: zaentrum }
     patch: |
       - op: replace
         path: /spec/rules/0/host
-        value: demo-stube.nalet.cloud
+        value: demo-zaentrum.nalet.cloud

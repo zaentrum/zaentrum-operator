@@ -1,10 +1,10 @@
-# Build the Stube all-in-one image and push it to GitHub Container Registry.
+# Build the Zaentrum all-in-one image and push it to GitHub Container Registry.
 #
 # The all-in-one bundles a single-node k3s (FROM rancher/k3s) plus the rendered
-# deploy/base manifests, so `docker run` installs a whole Stube cluster in one
+# deploy/base manifests, so `docker run` installs a whole Zaentrum cluster in one
 # container. It is published as:
-#   ghcr.io/zaentrum/stube:latest
-#   ghcr.io/zaentrum/stube:<git-sha>
+#   ghcr.io/zaentrum/appliance:latest
+#   ghcr.io/zaentrum/appliance:<git-sha>
 #
 # It chains off build-images: once the component images exist for a commit on
 # main, this assembles the bundle that references them. It can also be run by
@@ -33,7 +33,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: ghcr.io/zaentrum/stube
+  IMAGE: ghcr.io/zaentrum/appliance
 
 concurrency:
   group: all-in-one-${{ github.ref }}

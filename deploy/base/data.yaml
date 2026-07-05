@@ -4,7 +4,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
-  labels: { app: postgres, app.kubernetes.io/part-of: stube }
+  labels: { app: postgres, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: postgres } }
@@ -18,17 +18,17 @@ spec:
           ports: [{ containerPort: 5432, name: pg }]
           env:
             - name: POSTGRES_USER
-              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
             # Both apps get a database; least-privilege role split is an
             # operator concern (the appliance keeps it simple).
             - name: POSTGRES_DB
-              value: stube
+              value: zaentrum
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
           readinessProbe:
-            exec: { command: ["pg_isready", "-U", "stube"] }
+            exec: { command: ["pg_isready", "-U", "zaentrum"] }
             initialDelaySeconds: 5
             periodSeconds: 10
       volumes:
@@ -56,7 +56,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: valkey
-  labels: { app: valkey, app.kubernetes.io/part-of: stube }
+  labels: { app: valkey, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: valkey } }

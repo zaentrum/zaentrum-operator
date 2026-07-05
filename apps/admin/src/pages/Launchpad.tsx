@@ -38,7 +38,7 @@ const TILES: Tile[] = [
   {
     to: '/import',
     title: 'Import',
-    blurb: 'Scan a folder so Stube catalogs the files already on disk.',
+    blurb: 'Scan a folder so Zaentrum catalogs the files already on disk.',
     icon: FolderInput,
   },
   {
@@ -106,7 +106,7 @@ export function Launchpad() {
     <>
       <PageHeader
         title="Launchpad"
-        description="Set up and run your Stube server — a media client + server for a library you own."
+        description="Set up and run your Zaentrum server — a media client + server for a library you own."
       />
 
       {loading ? (
@@ -180,7 +180,7 @@ export function Launchpad() {
           <p className="flex items-center gap-s-2 text-xs text-fg-dim">
             <Radio size={13} />
             <Database size={13} />
-            Stube catalogs and streams a library you already own. How files arrive on
+            Zaentrum catalogs and streams a library you already own. How files arrive on
             disk is out of scope.
           </p>
         </div>

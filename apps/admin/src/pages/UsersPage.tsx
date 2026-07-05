@@ -415,7 +415,7 @@ export function UsersPage() {
     <>
       <PageHeader
         title="Users"
-        description="Accounts in the bundled identity provider — who can sign in to your Stube."
+        description="Accounts in the bundled identity provider — who can sign in to your Zaentrum."
         action={
           <Button icon={<UserPlus size={16} />} onClick={() => setDialog({ kind: 'add' })}>
             Add user
@@ -430,7 +430,7 @@ export function UsersPage() {
       ) : users.length === 0 ? (
         <Empty
           title="No users yet"
-          description="Add an account so someone can sign in to your Stube."
+          description="Add an account so someone can sign in to your Zaentrum."
           icon={<UsersIcon size={28} />}
           action={
             <Button icon={<UserPlus size={16} />} onClick={() => setDialog({ kind: 'add' })}>

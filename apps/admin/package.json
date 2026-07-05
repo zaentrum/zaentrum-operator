@@ -1,9 +1,9 @@
 {
-  "name": "stube-admin",
+  "name": "zaentrum-admin",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Stube admin UI — first-run setup + day-2 management for a media client + server you own.",
+  "description": "Zaentrum admin UI — first-run setup + day-2 management for a media client + server you own.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

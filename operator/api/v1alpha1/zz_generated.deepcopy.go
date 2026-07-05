@@ -86,26 +86,33 @@ func (in *UpdateSpec) DeepCopy() *UpdateSpec {
 }
 
 // DeepCopyInto copies the receiver into out.
-func (in *StubeSpec) DeepCopyInto(out *StubeSpec) {
+func (in *ZaentrumSpec) DeepCopyInto(out *ZaentrumSpec) {
 	*out = *in
 	out.Identity = in.Identity
 	in.Storage.DeepCopyInto(&out.Storage)
 	out.Features = in.Features
 	out.Update = in.Update
+	if in.Replicas != nil {
+		m := make(map[string]int32, len(in.Replicas))
+		for k, v := range in.Replicas {
+			m[k] = v
+		}
+		out.Replicas = m
+	}
 }
 
-// DeepCopy returns a deep copy of StubeSpec.
-func (in *StubeSpec) DeepCopy() *StubeSpec {
+// DeepCopy returns a deep copy of ZaentrumSpec.
+func (in *ZaentrumSpec) DeepCopy() *ZaentrumSpec {
 	if in == nil {
 		return nil
 	}
-	out := new(StubeSpec)
+	out := new(ZaentrumSpec)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out.
-func (in *StubeStatus) DeepCopyInto(out *StubeStatus) {
+func (in *ZaentrumStatus) DeepCopyInto(out *ZaentrumStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		l := make([]metav1.Condition, len(in.Conditions))
@@ -121,18 +128,18 @@ func (in *StubeStatus) DeepCopyInto(out *StubeStatus) {
 	}
 }
 
-// DeepCopy returns a deep copy of StubeStatus.
-func (in *StubeStatus) DeepCopy() *StubeStatus {
+// DeepCopy returns a deep copy of ZaentrumStatus.
+func (in *ZaentrumStatus) DeepCopy() *ZaentrumStatus {
 	if in == nil {
 		return nil
 	}
-	out := new(StubeStatus)
+	out := new(ZaentrumStatus)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies the receiver into out.
-func (in *Stube) DeepCopyInto(out *Stube) {
+func (in *Zaentrum) DeepCopyInto(out *Zaentrum) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
@@ -140,18 +147,18 @@ func (in *Stube) DeepCopyInto(out *Stube) {
 	in.Status.DeepCopyInto(&out.Status)
 }
 
-// DeepCopy returns a deep copy of Stube.
-func (in *Stube) DeepCopy() *Stube {
+// DeepCopy returns a deep copy of Zaentrum.
+func (in *Zaentrum) DeepCopy() *Zaentrum {
 	if in == nil {
 		return nil
 	}
-	out := new(Stube)
+	out := new(Zaentrum)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyObject returns a generically typed copy of Stube.
-func (in *Stube) DeepCopyObject() runtime.Object {
+// DeepCopyObject returns a generically typed copy of Zaentrum.
+func (in *Zaentrum) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
@@ -159,12 +166,12 @@ func (in *Stube) DeepCopyObject() runtime.Object {
 }
 
 // DeepCopyInto copies the receiver into out.
-func (in *StubeList) DeepCopyInto(out *StubeList) {
+func (in *ZaentrumList) DeepCopyInto(out *ZaentrumList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
-		l := make([]Stube, len(in.Items))
+		l := make([]Zaentrum, len(in.Items))
 		for i := range in.Items {
 			in.Items[i].DeepCopyInto(&l[i])
 		}
@@ -172,18 +179,18 @@ func (in *StubeList) DeepCopyInto(out *StubeList) {
 	}
 }
 
-// DeepCopy returns a deep copy of StubeList.
-func (in *StubeList) DeepCopy() *StubeList {
+// DeepCopy returns a deep copy of ZaentrumList.
+func (in *ZaentrumList) DeepCopy() *ZaentrumList {
 	if in == nil {
 		return nil
 	}
-	out := new(StubeList)
+	out := new(ZaentrumList)
 	in.DeepCopyInto(out)
 	return out
 }
 
-// DeepCopyObject returns a generically typed copy of StubeList.
-func (in *StubeList) DeepCopyObject() runtime.Object {
+// DeepCopyObject returns a generically typed copy of ZaentrumList.
+func (in *ZaentrumList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}

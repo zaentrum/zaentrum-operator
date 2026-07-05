@@ -1,34 +1,34 @@
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
-  name: stube-operator.v0.1.0
+  name: zaentrum-operator.v0.1.0
   namespace: placeholder                # OLM substitutes the install namespace
   annotations:
     capabilities: Basic Install
     categories: Streaming & Messaging
     containerImage: ghcr.io/zaentrum/operator:latest
     description: >-
-      Stube is a neutral, self-hostable media client + server for a library you
-      own and are entitled to stream. The operator reconciles a single Stube
+      Zaentrum is a neutral, self-hostable media client + server for a library you
+      own and are entitled to stream. The operator reconciles a single Zaentrum
       custom resource into the full platform (catalog core, per-product
       streaming backends, clients, bundled Postgres/Valkey/Kafka and OIDC).
     repository: https://github.com/zaentrum/stube
     support: https://github.com/zaentrum/stube/issues
     # alm-examples is the CR sample OperatorHub renders in the "Create instance"
-    # form. Mirrors operator/config/samples/stube_v1alpha1_stube.yaml.
+    # form. Mirrors operator/config/samples/zaentrum_v1alpha1_zaentrum.yaml.
     alm-examples: |-
       [
         {
-          "apiVersion": "stube.io/v1alpha1",
-          "kind": "Stube",
+          "apiVersion": "zaentrum.io/v1alpha1",
+          "kind": "Zaentrum",
           "metadata": {
-            "name": "stube",
-            "namespace": "stube"
+            "name": "zaentrum",
+            "namespace": "zaentrum"
           },
           "spec": {
             "channel": "stable",
             "version": "latest",
-            "hostname": "stube.localhost",
+            "hostname": "zaentrum.localhost",
             "identity": {
               "mode": "bundled",
               "clientId": "chino-web",
@@ -48,13 +48,13 @@ metadata:
         }
       ]
 spec:
-  displayName: Stube
+  displayName: Zaentrum
   description: |
-    **Stube** is a neutral media client + server for a library you own and are
-    entitled to stream. Bring your own files; Stube catalogs, processes, and
+    **Zaentrum** is a neutral media client + server for a library you own and are
+    entitled to stream. Bring your own files; Zaentrum catalogs, processes, and
     streams them to clean clients on the web, phone/tablet, and TV.
 
-    This operator manages a `Stube` custom resource and reconciles it into the
+    This operator manages a `Zaentrum` custom resource and reconciles it into the
     same Kubernetes resources that `kubectl kustomize deploy/base` renders — one
     declarative, GitOps-friendly way to run the whole platform on any cluster.
 
@@ -75,10 +75,10 @@ spec:
     - streaming
     - catalog
   maintainers:
-    - name: Stube maintainers
-      email: maintainers@stube.invalid
+    - name: Zaentrum maintainers
+      email: maintainers@zaentrum.invalid
   provider:
-    name: Stube
+    name: Zaentrum
   links:
     - name: Source
       url: https://github.com/zaentrum/stube
@@ -95,15 +95,15 @@ spec:
     - type: AllNamespaces
       supported: true
   # ── CRDs this operator owns ────────────────────────────────────────────────
-  # group/version/kind match operator/config/crd/stube.io_stubes.yaml.
+  # group/version/kind match operator/config/crd/zaentrum.io_zaentrums.yaml.
   customresourcedefinitions:
     owned:
-      - name: stubes.stube.io
-        kind: Stube
+      - name: zaentrums.zaentrum.io
+        kind: Zaentrum
         version: v1alpha1
-        displayName: Stube
+        displayName: Zaentrum
         description: >-
-          A single Stube platform instance. The operator reconciles it into the
+          A single Zaentrum platform instance. The operator reconciles it into the
           full neutral platform (see deploy/base for the rendered resource set).
         specDescriptors:
           - path: channel
@@ -147,17 +147,17 @@ spec:
     strategy: deployment
     spec:
       clusterPermissions:
-        - serviceAccountName: stube-operator-controller-manager
+        - serviceAccountName: zaentrum-operator-controller-manager
           rules:
-            # The Stube CR itself + status/finalizers.
-            - apiGroups: ["stube.io"]
-              resources: ["stubes"]
+            # The Zaentrum CR itself + status/finalizers.
+            - apiGroups: ["zaentrum.io"]
+              resources: ["zaentrums"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-            - apiGroups: ["stube.io"]
-              resources: ["stubes/status"]
+            - apiGroups: ["zaentrum.io"]
+              resources: ["zaentrums/status"]
               verbs: ["get", "update", "patch"]
-            - apiGroups: ["stube.io"]
-              resources: ["stubes/finalizers"]
+            - apiGroups: ["zaentrum.io"]
+              resources: ["zaentrums/finalizers"]
               verbs: ["update"]
             # Namespace (cluster-scoped) — created/owned by the operator.
             - apiGroups: [""]
@@ -197,9 +197,9 @@ spec:
               resources: ["events"]
               verbs: ["create", "patch"]
       deployments:
-        - name: stube-operator-controller-manager
+        - name: zaentrum-operator-controller-manager
           label:
-            app.kubernetes.io/part-of: stube-operator
+            app.kubernetes.io/part-of: zaentrum-operator
             control-plane: controller-manager
           spec:
             replicas: 1
@@ -211,7 +211,7 @@ spec:
                 labels:
                   control-plane: controller-manager
               spec:
-                serviceAccountName: stube-operator-controller-manager
+                serviceAccountName: zaentrum-operator-controller-manager
                 securityContext:
                   runAsNonRoot: true
                   seccompProfile:

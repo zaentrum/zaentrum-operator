@@ -2,14 +2,14 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: stubes.stube.io
+  name: zaentrums.zaentrum.io
 spec:
-  group: stube.io
+  group: zaentrum.io
   names:
-    kind: Stube
-    listKind: StubeList
-    plural: stubes
-    singular: stube
+    kind: Zaentrum
+    listKind: ZaentrumList
+    plural: zaentrums
+    singular: zaentrum
     shortNames:
       - stb
   scope: Namespaced
@@ -35,7 +35,7 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: Stube is the Schema for the stubes API; one CR drives the whole platform.
+          description: Zaentrum is the Schema for the zaentrums API; one CR drives the whole platform.
           properties:
             apiVersion:
               type: string
@@ -57,7 +57,7 @@ spec:
                   description: Image tag applied to every ghcr.io/zaentrum/* image.
                 hostname:
                   type: string
-                  default: stube.localhost
+                  default: zaentrum.localhost
                   description: Public host - issuer host + ingress host + KC_HOSTNAME.
                 identity:
                   type: object
@@ -157,43 +157,43 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: stube-operator-manager-rolebinding
+  name: zaentrum-operator-manager-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: stube-operator-manager-role
+  name: zaentrum-operator-manager-role
 subjects:
   - kind: ServiceAccount
-    name: stube-operator-controller-manager
-    namespace: stube-operator-system
+    name: zaentrum-operator-controller-manager
+    namespace: zaentrum-operator-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: stube-operator-leader-election-rolebinding
+  name: zaentrum-operator-leader-election-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: stube-operator-leader-election-role
+  name: zaentrum-operator-leader-election-role
 subjects:
   - kind: ServiceAccount
-    name: stube-operator-controller-manager
-    namespace: stube-operator-system
+    name: zaentrum-operator-controller-manager
+    namespace: zaentrum-operator-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: stube-operator-manager-role
+  name: zaentrum-operator-manager-role
 rules:
-  # The Stube CR itself + status/finalizers.
-  - apiGroups: ["stube.io"]
-    resources: ["stubes"]
+  # The Zaentrum CR itself + status/finalizers.
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["stube.io"]
-    resources: ["stubes/status"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums/status"]
     verbs: ["get", "update", "patch"]
-  - apiGroups: ["stube.io"]
-    resources: ["stubes/finalizers"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums/finalizers"]
     verbs: ["update"]
   # Namespace (cluster-scoped) — created/owned by the operator.
   - apiGroups: [""]
@@ -228,7 +228,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: stube-operator-leader-election-role
+  name: zaentrum-operator-leader-election-role
 rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
@@ -240,24 +240,24 @@ rules:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: stube-operator-controller-manager
-  namespace: stube-operator-system
+  name: zaentrum-operator-controller-manager
+  namespace: zaentrum-operator-system
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: stube-operator-system
+  name: zaentrum-operator-system
   labels:
-    app.kubernetes.io/part-of: stube-operator
+    app.kubernetes.io/part-of: zaentrum-operator
     control-plane: controller-manager
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: stube-operator-controller-manager
-  namespace: stube-operator-system
+  name: zaentrum-operator-controller-manager
+  namespace: zaentrum-operator-system
   labels:
-    app.kubernetes.io/part-of: stube-operator
+    app.kubernetes.io/part-of: zaentrum-operator
     control-plane: controller-manager
 spec:
   replicas: 1
@@ -269,7 +269,7 @@ spec:
       labels:
         control-plane: controller-manager
     spec:
-      serviceAccountName: stube-operator-controller-manager
+      serviceAccountName: zaentrum-operator-controller-manager
       securityContext:
         runAsNonRoot: true
         seccompProfile:

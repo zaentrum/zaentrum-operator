@@ -1,34 +1,34 @@
-# ── stube realm import ───────────────────────────────────────────────────
+# ── zaentrum realm import ───────────────────────────────────────────────────
 # Mounted into Keycloak at /opt/keycloak/data/import and ingested with
 # --import-realm on first boot. This ConfigMap is the single source of truth
 # for the realm/client/role contract; the keycloak image carries no realm.
 #
 # Kept BYTE-FOR-BYTE in sync (modulo YAML block indentation) with
-# platform/keycloak/stube-realm.json — same realm, one contract, two carriers
+# platform/keycloak/zaentrum-realm.json — same realm, one contract, two carriers
 # (this ConfigMap for deploy/, that file baked into the image for stand-alone /
 # compose runs). When editing the realm, change BOTH.
 #
 # Clients are NEUTRALISED for the public bundle: redirect/web-origins are
 # wildcards (the appliance host is unknown at build time) and the realm is the
-# generic 'stube' (NOT a tenant realm). Every access token gets aud=chino via an
+# generic 'zaentrum' (NOT a tenant realm). Every access token gets aud=chino via an
 # audience mapper so the services keep OIDC_AUDIENCE=chino, and the realm 'roles'
 # client scope emits realm roles into realm_access.roles so manage-api can gate
-# /api/manage/* on the 'stube-admin' realm role.
+# /api/manage/* on the 'zaentrum-admin' realm role.
 #
-# ${STUBE_MANAGER_SECRET} and ${STUBE_ADMIN_PASSWORD} are substituted by Keycloak
-# from the env vars of the same name (sourced from the stube-keycloak /
-# stube-keycloak-admin Secrets) at import time, so neither the confidential
+# ${ZAENTRUM_MANAGER_SECRET} and ${ZAENTRUM_ADMIN_PASSWORD} are substituted by Keycloak
+# from the env vars of the same name (sourced from the zaentrum-keycloak /
+# zaentrum-keycloak-admin Secrets) at import time, so neither the confidential
 # service-account secret nor the realm-admin password lives in this manifest.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: keycloak-realm
-  labels: { app: keycloak, app.kubernetes.io/part-of: stube }
+  labels: { app: keycloak, app.kubernetes.io/part-of: zaentrum }
 data:
-  stube-realm.json: |
+  zaentrum-realm.json: |
     {
-      "realm": "stube",
-      "displayName": "Stube",
+      "realm": "zaentrum",
+      "displayName": "Zaentrum",
       "enabled": true,
       "sslRequired": "external",
       "registrationAllowed": false,
@@ -69,14 +69,14 @@ data:
             "clientRole": false
           },
           {
-            "name": "stube-user",
-            "description": "Default Stube end user. Granted to interactive accounts on the public clients.",
+            "name": "zaentrum-user",
+            "description": "Default Zaentrum end user. Granted to interactive accounts on the public clients.",
             "composite": false,
             "clientRole": false
           },
           {
-            "name": "stube-admin",
-            "description": "Stube administrator. Manage the catalog and other users via the Stube /manage console.",
+            "name": "zaentrum-admin",
+            "description": "Zaentrum administrator. Manage the catalog and other users via the Zaentrum /manage console.",
             "composite": false,
             "clientRole": false
           }
@@ -363,9 +363,9 @@ data:
           ]
         },
         {
-          "clientId": "stube-manager",
-          "name": "Stube Manager",
-          "description": "Confidential service-account client the Stube manage-api uses for the Keycloak Admin REST API. Not for interactive login; secret injected at runtime.",
+          "clientId": "zaentrum-manager",
+          "name": "Zaentrum Manager",
+          "description": "Confidential service-account client the Zaentrum manage-api uses for the Keycloak Admin REST API. Not for interactive login; secret injected at runtime.",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": false,
@@ -375,7 +375,7 @@ data:
           "serviceAccountsEnabled": true,
           "bearerOnly": false,
           "frontchannelLogout": false,
-          "secret": "${STUBE_MANAGER_SECRET}",
+          "secret": "${ZAENTRUM_MANAGER_SECRET}",
           "redirectUris": [],
           "webOrigins": [],
           "attributes": {
@@ -393,22 +393,22 @@ data:
           "username": "admin",
           "enabled": true,
           "emailVerified": true,
-          "firstName": "Stube",
+          "firstName": "Zaentrum",
           "lastName": "Administrator",
-          "email": "admin@stube.local",
+          "email": "admin@zaentrum.local",
           "requiredActions": [
             "UPDATE_PASSWORD"
           ],
           "credentials": [
             {
               "type": "password",
-              "value": "${STUBE_ADMIN_PASSWORD}",
+              "value": "${ZAENTRUM_ADMIN_PASSWORD}",
               "temporary": true
             }
           ],
           "realmRoles": [
-            "stube-admin",
-            "stube-user",
+            "zaentrum-admin",
+            "zaentrum-user",
             "offline_access"
           ],
           "clientRoles": {
@@ -418,9 +418,9 @@ data:
           }
         },
         {
-          "username": "service-account-stube-manager",
+          "username": "service-account-zaentrum-manager",
           "enabled": true,
-          "serviceAccountClientId": "stube-manager",
+          "serviceAccountClientId": "zaentrum-manager",
           "clientRoles": {
             "realm-management": [
               "manage-users",

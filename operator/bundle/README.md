@@ -1,7 +1,7 @@
-# Stube operator — OLM bundle
+# Zaentrum operator — OLM bundle
 
 This directory is the [Operator Lifecycle Manager](https://olm.operatorframework.io/)
-(OLM) bundle for the Stube operator: the packaging that lets it appear in
+(OLM) bundle for the Zaentrum operator: the packaging that lets it appear in
 OperatorHub and be installed via a `Subscription` on OpenShift or any OLM
 cluster.
 
@@ -11,8 +11,8 @@ OLM installs operators from a *bundle image*: a `registry+v1` payload made of a
 ClusterServiceVersion (the operator's install metadata, RBAC, and managed
 Deployment), the CRDs it owns, and a small set of annotations.
 
-The Stube operator (the Go controller-manager under `operator/`) reconciles a
-single `Stube` custom resource into the same resource set that
+The Zaentrum operator (the Go controller-manager under `operator/`) reconciles a
+single `Zaentrum` custom resource into the same resource set that
 `kubectl kustomize deploy/base` renders — namespace, the bundled
 data/Kafka/Keycloak, `katalog-*`, `chino-*`, `admin`, the ingress, and the boot
 fixes. This bundle is how that operator gets installed by OLM.
@@ -26,10 +26,10 @@ with no downloaders or indexer integrations.
 operator/bundle/
 ├── bundle.Dockerfile     # builds the registry+v1 bundle image (scratch + labels)
 ├── manifests/            # the installable payload
-│   ├── stube-operator.clusterserviceversion.yaml   # CSV (install spec + RBAC)
-│   └── stube.io_stubes.yaml                         # owned Stube CRD
+│   ├── zaentrum-operator.clusterserviceversion.yaml   # CSV (install spec + RBAC)
+│   └── zaentrum.io_zaentrums.yaml                         # owned Zaentrum CRD
 ├── metadata/
-│   └── annotations.yaml  # package=stube-operator, channel=stable
+│   └── annotations.yaml  # package=zaentrum-operator, channel=stable
 └── README.md             # this file
 ```
 
@@ -39,8 +39,8 @@ The CSV's install spec is derived directly from the operator's own manifests:
 - the **clusterPermissions** are the rules from `operator/config/rbac/role.yaml`
   (plus leader-election leases/events), bound to the `serviceAccountName` from
   `operator/config/rbac/service_account.yaml`,
-- the owned **CRD** (`stubes.stube.io`) is copied from
-  `operator/config/crd/stube.io_stubes.yaml`.
+- the owned **CRD** (`zaentrums.zaentrum.io`) is copied from
+  `operator/config/crd/zaentrum.io_zaentrums.yaml`.
 
 This is distinct from the operator **controller** image
 (`ghcr.io/zaentrum/operator`), which is built from `operator/Dockerfile` by
@@ -64,4 +64,4 @@ references it) as a step separate from the controller image build.
 ## Installing
 
 See [`docs/operator.md`](../../docs/operator.md) for how to install on
-OpenShift / any OLM cluster and create a `Stube` CR.
+OpenShift / any OLM cluster and create a `Zaentrum` CR.
