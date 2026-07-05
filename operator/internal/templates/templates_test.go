@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	stubev1alpha1 "github.com/zaentrum/stube/operator/api/v1alpha1"
+	stubev1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 )
 
 // defaultStube returns a Stube CR with empty spec; NewValues applies all the
