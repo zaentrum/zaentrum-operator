@@ -8,18 +8,46 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	stubev1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 )
 
-// defaultStube returns a Stube CR with empty spec; NewValues applies all the
-// documented defaults (bundled identity, latest, stube.localhost, kafka on).
-func defaultStube() *stubev1alpha1.Stube {
-	s := &stubev1alpha1.Stube{}
-	s.Name = "stube"
-	s.Namespace = "stube"
+// defaultZaentrum returns a Zaentrum CR with empty spec; NewValues applies all the
+// documented defaults (bundled identity, latest, zaentrum.localhost, kafka on).
+func defaultZaentrum() *zaentrumv1alpha1.Zaentrum {
+	s := &zaentrumv1alpha1.Zaentrum{}
+	s.Name = "zaentrum"
+	s.Namespace = "zaentrum"
 	// Mirror the CRD defaults the API server would inject.
 	s.Spec.Features.Kafka = true
 	return s
+}
+
+// deploymentReplicas reads spec.replicas from a rendered Deployment.
+func deploymentReplicas(t *testing.T, objs []*unstructured.Unstructured, name string) int64 {
+	t.Helper()
+	dep := find(t, objs, "Deployment", name)
+	require.NotNil(t, dep, "Deployment %s not rendered", name)
+	// The YAML→JSON decoder represents numbers as float64 (the operator applies
+	// them fine — controller-runtime coerces on SSA).
+	f, found, err := unstructured.NestedFloat64(dep.Object, "spec", "replicas")
+	require.NoError(t, err)
+	require.True(t, found, "Deployment %s has no spec.replicas", name)
+	return int64(f)
+}
+
+// spec.replicas overrides an app-tier Deployment; unlisted services default to 1
+// and stateful backers are never scaled.
+func TestReplicasOverride(t *testing.T) {
+	s := defaultZaentrum()
+	s.Spec.Replicas = map[string]int32{"chino-api": 3, "katalog-api": 2}
+	objs, err := Render(NewValues(s))
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(3), deploymentReplicas(t, objs, "chino-api"), "override applied")
+	assert.Equal(t, int64(2), deploymentReplicas(t, objs, "katalog-api"), "override applied")
+	assert.Equal(t, int64(1), deploymentReplicas(t, objs, "chino-web"), "unlisted app-tier defaults to 1")
+	assert.Equal(t, int64(1), deploymentReplicas(t, objs, "postgres"), "stateful backer stays at 1")
+	assert.Equal(t, int64(1), deploymentReplicas(t, objs, "keycloak"), "stateful backer stays at 1")
 }
 
 func find(t *testing.T, objs []*unstructured.Unstructured, kind, name string) *unstructured.Unstructured {
@@ -33,7 +61,7 @@ func find(t *testing.T, objs []*unstructured.Unstructured, kind, name string) *u
 }
 
 func TestRenderDefaultProducesFullPlatform(t *testing.T) {
-	objs, err := Render(NewValues(defaultStube()))
+	objs, err := Render(NewValues(defaultZaentrum()))
 	require.NoError(t, err)
 
 	// deploy/base renders 35 objects; the operator reproduces the same set.
@@ -58,7 +86,7 @@ func TestRenderDefaultProducesFullPlatform(t *testing.T) {
 }
 
 func TestKeycloakBootFixesPreserved(t *testing.T) {
-	objs, err := Render(NewValues(defaultStube()))
+	objs, err := Render(NewValues(defaultZaentrum()))
 	require.NoError(t, err)
 
 	// A Deployment named keycloak must exist.
@@ -95,7 +123,7 @@ func TestKeycloakBootFixesPreserved(t *testing.T) {
 }
 
 func TestWaitForOIDCInitContainersPresent(t *testing.T) {
-	objs, err := Render(NewValues(defaultStube()))
+	objs, err := Render(NewValues(defaultZaentrum()))
 	require.NoError(t, err)
 
 	for _, name := range []string{"chino-api", "chino-stream", "katalog-manager-api"} {
@@ -113,27 +141,27 @@ func TestWaitForOIDCInitContainersPresent(t *testing.T) {
 }
 
 func TestStableConfigMapNamesAndReferences(t *testing.T) {
-	objs, err := Render(NewValues(defaultStube()))
+	objs, err := Render(NewValues(defaultZaentrum()))
 	require.NoError(t, err)
 
 	// Un-kustomized: the env ConfigMap has the stable name (no hash suffix).
-	require.NotNil(t, find(t, objs, "ConfigMap", "stube-env"), "stube-env must use stable name")
-	require.NotNil(t, find(t, objs, "Secret", "stube-db"), "stube-db must use stable name")
-	require.NotNil(t, find(t, objs, "Secret", "stube-stream-signing"), "stube-stream-signing must use stable name")
+	require.NotNil(t, find(t, objs, "ConfigMap", "zaentrum-env"), "zaentrum-env must use stable name")
+	require.NotNil(t, find(t, objs, "Secret", "zaentrum-db"), "zaentrum-db must use stable name")
+	require.NotNil(t, find(t, objs, "Secret", "zaentrum-stream-signing"), "zaentrum-stream-signing must use stable name")
 
-	// chino-api references stube-env by plain name via envFrom.
+	// chino-api references zaentrum-env by plain name via envFrom.
 	dep := find(t, objs, "Deployment", "chino-api")
 	containers, _, _ := unstructured.NestedSlice(dep.Object, "spec", "template", "spec", "containers")
 	envFrom, found, _ := unstructured.NestedSlice(containers[0].(map[string]interface{}), "envFrom")
 	require.True(t, found)
 	cmName, _, _ := unstructured.NestedString(envFrom[0].(map[string]interface{}), "configMapRef", "name")
-	assert.Equal(t, "stube-env", cmName)
+	assert.Equal(t, "zaentrum-env", cmName)
 }
 
 func TestStreamSigningKeyIsValidBase64(t *testing.T) {
-	objs, err := Render(NewValues(defaultStube()))
+	objs, err := Render(NewValues(defaultZaentrum()))
 	require.NoError(t, err)
-	sec := find(t, objs, "Secret", "stube-stream-signing")
+	sec := find(t, objs, "Secret", "zaentrum-stream-signing")
 	require.NotNil(t, sec)
 	// The data value itself is base64 (k8s Secret data); preserved from base.
 	key, found, _ := unstructured.NestedString(sec.Object, "data", "key")
@@ -141,13 +169,13 @@ func TestStreamSigningKeyIsValidBase64(t *testing.T) {
 	assert.NotEmpty(t, key)
 }
 
-func TestVersionParameterizationAppliesToAllStubeImages(t *testing.T) {
-	s := defaultStube()
+func TestVersionParameterizationAppliesToAllZaentrumImages(t *testing.T) {
+	s := defaultZaentrum()
 	s.Spec.Version = "v1.2.3"
 	objs, err := Render(NewValues(s))
 	require.NoError(t, err)
 
-	stubeImages := 0
+	zaentrumImages := 0
 	for _, o := range objs {
 		if o.GetKind() != "Deployment" {
 			continue
@@ -156,8 +184,8 @@ func TestVersionParameterizationAppliesToAllStubeImages(t *testing.T) {
 		for _, c := range containers {
 			img, _, _ := unstructured.NestedString(c.(map[string]interface{}), "image")
 			if len(img) >= len("ghcr.io/zaentrum/") && img[:len("ghcr.io/zaentrum/")] == "ghcr.io/zaentrum/" {
-				stubeImages++
-				assert.Contains(t, img, ":v1.2.3", "stube image must carry the configured version: %s", img)
+				zaentrumImages++
+				assert.Contains(t, img, ":v1.2.3", "zaentrum image must carry the configured version: %s", img)
 			}
 		}
 	}
@@ -165,36 +193,36 @@ func TestVersionParameterizationAppliesToAllStubeImages(t *testing.T) {
 	// chino-api, chino-stream, katalog-api, katalog-manager, admin. (The
 	// management API's Deployment is named katalog-manager-api but pulls the
 	// flat katalog-manager image — the Go rewrite.)
-	assert.Equal(t, 7, stubeImages, "all 7 ghcr.io/zaentrum/* images must carry the version tag")
+	assert.Equal(t, 7, zaentrumImages, "all 7 ghcr.io/zaentrum/* images must carry the version tag")
 }
 
 func TestHostnameParameterization(t *testing.T) {
-	s := defaultStube()
+	s := defaultZaentrum()
 	s.Spec.Hostname = "media.example.com"
 	objs, err := Render(NewValues(s))
 	require.NoError(t, err)
 
 	// Ingress host.
-	ing := find(t, objs, "Ingress", "stube")
+	ing := find(t, objs, "Ingress", "zaentrum")
 	require.NotNil(t, ing)
 	rules, _, _ := unstructured.NestedSlice(ing.Object, "spec", "rules")
 	host, _, _ := unstructured.NestedString(rules[0].(map[string]interface{}), "host")
 	assert.Equal(t, "media.example.com", host)
 
 	// OIDC issuer derived from hostname.
-	cm := find(t, objs, "ConfigMap", "stube-env")
+	cm := find(t, objs, "ConfigMap", "zaentrum-env")
 	issuer, _, _ := unstructured.NestedString(cm.Object, "data", "OIDC_ISSUER")
-	assert.Equal(t, "http://media.example.com/auth/realms/stube", issuer)
+	assert.Equal(t, "http://media.example.com/auth/realms/zaentrum", issuer)
 
 	// KC_HOSTNAME derived from hostname.
-	kcCfg := find(t, objs, "ConfigMap", "stube-keycloak-config")
+	kcCfg := find(t, objs, "ConfigMap", "zaentrum-keycloak-config")
 	require.NotNil(t, kcCfg)
 	kcHost, _, _ := unstructured.NestedString(kcCfg.Object, "data", "KC_HOSTNAME")
 	assert.Equal(t, "http://media.example.com/auth", kcHost)
 }
 
 func TestMediaStorageSizeAndClass(t *testing.T) {
-	s := defaultStube()
+	s := defaultZaentrum()
 	s.Spec.Storage.MediaSize = resource.MustParse("250Gi")
 	s.Spec.Storage.ClassName = "fast-ssd"
 	objs, err := Render(NewValues(s))
@@ -209,7 +237,7 @@ func TestMediaStorageSizeAndClass(t *testing.T) {
 }
 
 func TestKafkaFeatureGate(t *testing.T) {
-	s := defaultStube()
+	s := defaultZaentrum()
 	s.Spec.Features.Kafka = false
 	objs, err := Render(NewValues(s))
 	require.NoError(t, err)
@@ -221,13 +249,13 @@ func TestKafkaFeatureGate(t *testing.T) {
 	assert.Len(t, objs, 32)
 
 	// KAFKA_BROKERS empty when disabled.
-	cm := find(t, objs, "ConfigMap", "stube-env")
+	cm := find(t, objs, "ConfigMap", "zaentrum-env")
 	brokers, _, _ := unstructured.NestedString(cm.Object, "data", "KAFKA_BROKERS")
 	assert.Empty(t, brokers)
 }
 
 func TestGPUFeatureGate(t *testing.T) {
-	s := defaultStube()
+	s := defaultZaentrum()
 	s.Spec.Features.GPU = true
 	objs, err := Render(NewValues(s))
 	require.NoError(t, err)
@@ -259,16 +287,16 @@ func TestGPUFeatureGate(t *testing.T) {
 }
 
 func TestExternalIdentityElidesBundledKeycloak(t *testing.T) {
-	s := defaultStube()
-	s.Spec.Identity.Mode = stubev1alpha1.IdentityExternal
-	s.Spec.Identity.Issuer = "https://idp.example.com/realms/stube"
+	s := defaultZaentrum()
+	s.Spec.Identity.Mode = zaentrumv1alpha1.IdentityExternal
+	s.Spec.Identity.Issuer = "https://idp.example.com/realms/zaentrum"
 	objs, err := Render(NewValues(s))
 	require.NoError(t, err)
 
 	assert.Nil(t, find(t, objs, "Deployment", "keycloak"), "external mode elides bundled keycloak")
 	assert.Nil(t, find(t, objs, "ConfigMap", "keycloak-realm"))
 
-	cm := find(t, objs, "ConfigMap", "stube-env")
+	cm := find(t, objs, "ConfigMap", "zaentrum-env")
 	issuer, _, _ := unstructured.NestedString(cm.Object, "data", "OIDC_ISSUER")
-	assert.Equal(t, "https://idp.example.com/realms/stube", issuer)
+	assert.Equal(t, "https://idp.example.com/realms/zaentrum", issuer)
 }

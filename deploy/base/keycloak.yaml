@@ -1,12 +1,12 @@
 # ── Bundled Keycloak: the appliance identity provider ───────────────────────
 #
 # A neutral, self-contained OIDC provider so the bundle ships login out of the
-# box — no external IdP required. Realm is the generic 'stube' (NOT a tenant
+# box — no external IdP required. Realm is the generic 'zaentrum' (NOT a tenant
 # realm). Postgres-backed (the same bundled postgres as everything else), served
 # behind Traefik under /auth, and reachable in-cluster as the 'keycloak' Service.
 #
 # ISSUER MODEL (the Keycloak-behind-a-proxy gotcha):
-#   Tokens carry iss = <public-origin>/auth/realms/stube (a FRONTEND value), and
+#   Tokens carry iss = <public-origin>/auth/realms/zaentrum (a FRONTEND value), and
 #   the Go services validate with coreos/go-oidc, which (a) fetches
 #   {OIDC_ISSUER}/.well-known/openid-configuration, (b) requires the doc's
 #   `issuer` to EQUAL OIDC_ISSUER, and (c) checks the token `iss` against it.
@@ -18,7 +18,7 @@
 #   rewrite to the keycloak Service (see deploy/allinone/entrypoint.sh); on a
 #   real cluster the operator points OIDC_ISSUER + KC_HOSTNAME + the ingress
 #   host at the same name and relies on cluster DNS / hostAliases. See the
-#   stube-keycloak-config ConfigMap below for the two values to override.
+#   zaentrum-keycloak-config ConfigMap below for the two values to override.
 #
 # The realm is imported from the keycloak-realm ConfigMap (--import-realm), so
 # deploy/base is the single source of truth for the client/role contract — the
@@ -27,20 +27,20 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: stube-keycloak-config
-  labels: { app: keycloak, app.kubernetes.io/part-of: stube }
+  name: zaentrum-keycloak-config
+  labels: { app: keycloak, app.kubernetes.io/part-of: zaentrum }
 data:
-  # The public origin the browser reaches Stube at (scheme + host[:port]),
+  # The public origin the browser reaches Zaentrum at (scheme + host[:port]),
   # WITHOUT the /auth path — Keycloak appends KC_HTTP_RELATIVE_PATH itself.
-  # Override together with ingress host + stube-env OIDC_ISSUER. The demo
+  # Override together with ingress host + zaentrum-env OIDC_ISSUER. The demo
   # overlay shows the pattern (it patches the ingress host + merges OIDC_ISSUER).
-  KC_HOSTNAME: "http://stube.localhost/auth"
+  KC_HOSTNAME: "http://zaentrum.localhost/auth"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: keycloak
-  labels: { app: keycloak, role: identity, app.kubernetes.io/part-of: stube }
+  labels: { app: keycloak, role: identity, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: keycloak } }
@@ -53,7 +53,7 @@ spec:
       labels: { app: keycloak, role: identity }
     spec:
       # The bundled postgres has no 'keycloak' database (it bootstraps only
-      # POSTGRES_DB=stube), so create it before Keycloak's JPA store connects.
+      # POSTGRES_DB=zaentrum), so create it before Keycloak's JPA store connects.
       # Idempotent: skips creation when the database already exists.
       initContainers:
         - name: create-keycloak-db
@@ -75,9 +75,9 @@ spec:
               fi
           env:
             - name: PGUSER
-              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: PGPASSWORD
-              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
       containers:
         - name: keycloak
           image: ghcr.io/zaentrum/keycloak:latest
@@ -98,13 +98,13 @@ spec:
             - name: KC_DB_URL_DATABASE
               value: keycloak
             - name: KC_DB_USERNAME
-              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: KC_DB_PASSWORD
-              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
             # ── HTTP / edge-proxy ──
             - name: KC_HTTP_ENABLED
               value: "true"
-            # Served under /auth so the issuer is <host>/auth/realms/stube and the
+            # Served under /auth so the issuer is <host>/auth/realms/zaentrum and the
             # Traefik /auth prefix maps 1:1 (no path rewrite, no double prefix).
             - name: KC_HTTP_RELATIVE_PATH
               value: /auth
@@ -117,7 +117,7 @@ spec:
             # this is what keeps the token `iss` and the discovery `issuer`
             # identical for both browser logins and in-cluster validation.
             - name: KC_HOSTNAME
-              valueFrom: { configMapKeyRef: { name: stube-keycloak-config, key: KC_HOSTNAME } }
+              valueFrom: { configMapKeyRef: { name: zaentrum-keycloak-config, key: KC_HOSTNAME } }
             # Don't require the request Host to match KC_HOSTNAME — the same pod
             # answers on the in-cluster name (keycloak:8080) and the public host.
             - name: KC_HOSTNAME_STRICT
@@ -126,25 +126,25 @@ spec:
             - name: KC_HEALTH_ENABLED
               value: "true"
             # ── Bootstrap admin (temporary master-realm admin) ──
-            # Used only to bootstrap; the stube-realm 'admin' user (realm-admin)
+            # Used only to bootstrap; the zaentrum-realm 'admin' user (realm-admin)
             # is the operational account and is created by the realm import. The
             # bundled admin password is forced to change on first login.
             - name: KEYCLOAK_ADMIN
-              valueFrom: { secretKeyRef: { name: stube-keycloak-admin, key: username } }
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: username } }
             - name: KEYCLOAK_ADMIN_PASSWORD
-              valueFrom: { secretKeyRef: { name: stube-keycloak-admin, key: password } }
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: password } }
             # The realm import substitutes these ${VAR} placeholders in
-            # stube-realm.json from the environment, so neither the confidential
+            # zaentrum-realm.json from the environment, so neither the confidential
             # service-account secret nor the realm-admin bootstrap password lives
             # in the (world-readable) imported JSON:
-            #   ${STUBE_MANAGER_SECRET}  -> stube-manager client secret
-            #   ${STUBE_ADMIN_PASSWORD}  -> stube-realm 'admin' user password
+            #   ${ZAENTRUM_MANAGER_SECRET}  -> zaentrum-manager client secret
+            #   ${ZAENTRUM_ADMIN_PASSWORD}  -> zaentrum-realm 'admin' user password
             #                               (temporary:true => forced change on
             #                               first login)
-            - name: STUBE_MANAGER_SECRET
-              valueFrom: { secretKeyRef: { name: stube-keycloak, key: client-secret } }
-            - name: STUBE_ADMIN_PASSWORD
-              valueFrom: { secretKeyRef: { name: stube-keycloak-admin, key: realm-admin-password } }
+            - name: ZAENTRUM_MANAGER_SECRET
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak, key: client-secret } }
+            - name: ZAENTRUM_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: realm-admin-password } }
           volumeMounts:
             - name: realm-import
               mountPath: /opt/keycloak/data/import

@@ -5,13 +5,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// IdentityMode selects whether Stube ships its own bundled OIDC provider
+// IdentityMode selects whether Zaentrum ships its own bundled OIDC provider
 // (Keycloak) or federates to an external one.
 // +kubebuilder:validation:Enum=bundled;external
 type IdentityMode string
 
 const (
-	// IdentityBundled deploys the in-cluster Keycloak + stube realm import.
+	// IdentityBundled deploys the in-cluster Keycloak + zaentrum realm import.
 	IdentityBundled IdentityMode = "bundled"
 	// IdentityExternal points every service at an external issuer; the
 	// bundled Keycloak resources are not rendered.
@@ -48,7 +48,7 @@ type IdentitySpec struct {
 	Mode IdentityMode `json:"mode,omitempty"`
 
 	// Issuer is the public OIDC issuer URL. When empty in bundled mode the
-	// operator derives it from Hostname (http://<hostname>/auth/realms/stube).
+	// operator derives it from Hostname (http://<hostname>/auth/realms/zaentrum).
 	// +optional
 	Issuer string `json:"issuer,omitempty"`
 
@@ -96,8 +96,8 @@ type UpdateSpec struct {
 	Mode UpdateMode `json:"mode,omitempty"`
 }
 
-// StubeSpec defines the desired state of a Stube platform instance.
-type StubeSpec struct {
+// ZaentrumSpec defines the desired state of a Zaentrum platform instance.
+type ZaentrumSpec struct {
 	// Channel selects the release train (consumed by Stage-2 auto-update).
 	// +kubebuilder:default=stable
 	// +optional
@@ -109,7 +109,7 @@ type StubeSpec struct {
 	Version string `json:"version,omitempty"`
 
 	// Hostname is the public host: issuer host + ingress host + KC_HOSTNAME.
-	// +kubebuilder:default=stube.localhost
+	// +kubebuilder:default=zaentrum.localhost
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
 
@@ -128,6 +128,14 @@ type StubeSpec struct {
 	// Update configures Stage-2 auto-update.
 	// +optional
 	Update UpdateSpec `json:"update,omitempty"`
+
+	// Replicas overrides the replica count of individual app-tier Deployments by
+	// name, e.g. {"chino-api": 2, "katalog-api": 3}. Unlisted services stay at 1.
+	// Stateful backers (postgres/valkey/kafka/keycloak) are NOT scalable this way.
+	// Set from the portal operator console; the operator reconciles it so the
+	// change persists (a raw Deployment edit would be reverted on the next pass).
+	// +optional
+	Replicas map[string]int32 `json:"replicas,omitempty"`
 }
 
 // ComponentStatus reports the readiness of one managed Deployment.
@@ -140,8 +148,8 @@ type ComponentStatus struct {
 	Image string `json:"image,omitempty"`
 }
 
-// StubeStatus reports the observed state of a Stube platform instance.
-type StubeStatus struct {
+// ZaentrumStatus reports the observed state of a Zaentrum platform instance.
+type ZaentrumStatus struct {
 	// Phase is a coarse human-facing lifecycle string.
 	// +optional
 	Phase string `json:"phase,omitempty"`
@@ -178,20 +186,20 @@ type StubeStatus struct {
 // +kubebuilder:printcolumn:name="Host",type=string,JSONPath=`.spec.hostname`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// Stube is the Schema for the stubes API; one CR drives the whole platform.
-type Stube struct {
+// Zaentrum is the Schema for the zaentrums API; one CR drives the whole platform.
+type Zaentrum struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   StubeSpec   `json:"spec,omitempty"`
-	Status StubeStatus `json:"status,omitempty"`
+	Spec   ZaentrumSpec   `json:"spec,omitempty"`
+	Status ZaentrumStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// StubeList contains a list of Stube.
-type StubeList struct {
+// ZaentrumList contains a list of Zaentrum.
+type ZaentrumList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Stube `json:"items"`
+	Items           []Zaentrum `json:"items"`
 }

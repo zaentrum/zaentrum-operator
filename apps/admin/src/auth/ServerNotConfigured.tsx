@@ -27,7 +27,7 @@ export function ServerNotConfigured({ checking }: ServerNotConfiguredProps) {
         </h1>
         <div className="mx-auto mb-s-5 max-w-sm rounded-lg border border-border bg-surface px-s-4 py-s-4 text-left">
           <p className="text-sm text-fg-2">
-            The Stube API and its bundled identity provider are starting up.
+            The Zaentrum API and its bundled identity provider are starting up.
             Sign-in will appear here automatically once they are reachable — no
             need to refresh.
           </p>

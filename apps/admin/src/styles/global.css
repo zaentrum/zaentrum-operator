@@ -53,7 +53,7 @@
 }
 
 @layer components {
-  /* The chevron-driven monospace wordmark "> stube". */
+  /* The chevron-driven monospace wordmark "> zaentrum". */
   .wordmark {
     font-family: var(--ff-mono);
     font-weight: 800;

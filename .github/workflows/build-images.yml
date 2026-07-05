@@ -1,4 +1,4 @@
-# Build the platform-owned Stube images and push them to GitHub Container Registry.
+# Build the platform-owned Zaentrum images and push them to GitHub Container Registry.
 #
 # This monorepo builds ONLY the images that have no dedicated polyrepo:
 #   ghcr.io/zaentrum/admin:latest         (apps/admin — first-run + day-2 UI)
@@ -111,7 +111,7 @@ jobs:
           - svc: keycloak
             context: platform/keycloak
             changed: ${{ needs.changes.outputs.keycloak }}
-          # The cluster operator (controller-manager). Reconciles the Stube CRD
+          # The cluster operator (controller-manager). Reconciles the Zaentrum CRD
           # into the same resource set that `kubectl kustomize deploy/base`
           # renders. Built from operator/ (Go); image is wired into the OLM
           # bundle under operator/bundle/ for OperatorHub/OpenShift install.

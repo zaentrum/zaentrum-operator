@@ -149,7 +149,7 @@ export interface ImportJob {
 
 // ── Instance / updates ─────────────────────────────────────────────────────
 //
-// Backed by the operator-managed Stube CR (stube.io/v1alpha1) via the
+// Backed by the operator-managed Zaentrum CR (zaentrum.io/v1alpha1) via the
 // manage-API, which reads/patches the CR with its in-cluster k8s client.
 // The release train and applied tag live in the CR spec; the operator's
 // Stage-2 reconciler discovers the newest in-channel tag and reports it back
@@ -171,7 +171,7 @@ export interface ComponentStatus {
   image: string;
 }
 
-/** Flattened view of the Stube CR spec + status the Updates page renders. */
+/** Flattened view of the Zaentrum CR spec + status the Updates page renders. */
 export interface InstanceView {
   /** spec.channel — the selected release train. */
   channel: Channel;
@@ -360,7 +360,7 @@ export const api = {
 
   // ── Instance / updates ───────────────────────────────────────────────────
 
-  /** Read the flattened view of the Stube CR spec + status. */
+  /** Read the flattened view of the Zaentrum CR spec + status. */
   getInstance(signal?: AbortSignal): Promise<InstanceView> {
     return request<InstanceView>('/instance', { signal });
   },

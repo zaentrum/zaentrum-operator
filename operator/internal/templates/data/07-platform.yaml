@@ -22,9 +22,9 @@ metadata:
   labels:
     app: katalog-api
     role: catalog-read
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 spec:
-  replicas: 1
+  replicas: {{ replicas "katalog-api" }}
   selector:
     matchLabels:
       app: katalog-api
@@ -43,25 +43,25 @@ spec:
             - name: KATALOG_API_OIDC_ISSUER
               valueFrom:
                 configMapKeyRef:
-                  name: stube-env
+                  name: zaentrum-env
                   key: OIDC_ISSUER
             - name: KATALOG_API_OIDC_AUDIENCE
               valueFrom:
                 configMapKeyRef:
-                  name: stube-env
+                  name: zaentrum-env
                   key: OIDC_AUDIENCE
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: user
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: password
             - name: KATALOG_API_PG_URL
-              value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+              value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/zaentrum?sslmode=disable
           ports:
             - name: http
               containerPort: 8080

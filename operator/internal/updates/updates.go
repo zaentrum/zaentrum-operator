@@ -1,6 +1,6 @@
-// Package updates implements Stage-2 release-channel discovery for the Stube
+// Package updates implements Stage-2 release-channel discovery for the Zaentrum
 // operator. It fetches the published releases.json (a small static document
-// served over HTTP) and resolves a Stube spec.channel to the image tag that
+// served over HTTP) and resolves a Zaentrum spec.channel to the image tag that
 // channel currently points at.
 //
 // The document shape is:

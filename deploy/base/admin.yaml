@@ -9,7 +9,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: admin
-  labels: { app: admin, role: frontend, app.kubernetes.io/part-of: stube }
+  labels: { app: admin, role: frontend, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: admin } }

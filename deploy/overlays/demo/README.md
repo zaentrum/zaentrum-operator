@@ -1,4 +1,4 @@
-# Demo overlay → `demo-stube.nalet.cloud`
+# Demo overlay → `demo-zaentrum.nalet.cloud`
 
 A public, link-shareable demo of the neutral platform.
 
@@ -9,9 +9,9 @@ the Blender open movies (CC-BY).
 
 What this overlay changes vs `base`:
 
-- isolated namespace `stube-demo` (never collides with a real deployment),
-- ingress host → `demo-stube.nalet.cloud`,
-- a throwaway demo OIDC realm (`stube-demo`) with a shared demo login — not real users,
+- isolated namespace `zaentrum-demo` (never collides with a real deployment),
+- ingress host → `demo-zaentrum.nalet.cloud`,
+- a throwaway demo OIDC realm (`zaentrum-demo`) with a shared demo login — not real users,
 - telemetry off,
 - a one-shot Job that seeds CC content.
 

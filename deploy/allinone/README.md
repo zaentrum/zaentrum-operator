@@ -1,16 +1,16 @@
-# Stube all-in-one (`ghcr.io/zaentrum/stube`)
+# Zaentrum all-in-one (`ghcr.io/zaentrum/appliance`)
 
-A whole Stube cluster in **one container** — a neutral media client + server for
+A whole Zaentrum cluster in **one container** — a neutral media client + server for
 a library you own and are entitled to stream. The image bundles a single-node
 [k3s](https://k3s.io) (real Kubernetes) and the rendered `deploy/base`
 manifests. k3s auto-applies those manifests on boot, so starting the container
-installs Stube. This is the zero-clone option: nothing to check out, one
+installs Zaentrum. This is the zero-clone option: nothing to check out, one
 `docker run`.
 
 ## Run it
 
 ```bash
-docker run -d --privileged --name stube -p 8080:80 ghcr.io/zaentrum/stube:latest
+docker run -d --privileged --name zaentrum -p 8080:80 ghcr.io/zaentrum/appliance:latest
 ```
 
 Then open <http://localhost:8080>. First boot pulls the application images
@@ -40,9 +40,9 @@ the container's writable layer. To keep your data across `docker rm`, mount a
 host directory at k3s's storage path:
 
 ```bash
-docker run -d --privileged --name stube -p 8080:80 \
-  -v stube-data:/var/lib/rancher/k3s/storage \
-  ghcr.io/zaentrum/stube:latest
+docker run -d --privileged --name zaentrum -p 8080:80 \
+  -v zaentrum-data:/var/lib/rancher/k3s/storage \
+  ghcr.io/zaentrum/appliance:latest
 ```
 
 Put your own library files where the stream service expects them (the `media`
@@ -65,8 +65,8 @@ The container starts k3s, which applies the rendered `deploy/base` bundle:
 Inspect it like any cluster:
 
 ```bash
-docker exec -it stube k3s kubectl -n stube get pods
-docker exec -it stube k3s kubectl -n stube logs deploy/katalog-manager-api
+docker exec -it zaentrum k3s kubectl -n zaentrum get pods
+docker exec -it zaentrum k3s kubectl -n zaentrum logs deploy/katalog-manager-api
 ```
 
 ## Where the images come from
@@ -93,12 +93,12 @@ ghcr.io/zaentrum/katalog-manager:latest \
 ghcr.io/zaentrum/admin:latest \
 postgres:16-alpine valkey/valkey:8-alpine apache/kafka:3.8.0"
 for i in $imgs; do docker pull "$i"; done
-docker save $imgs -o stube-airgap.tar
+docker save $imgs -o zaentrum-airgap.tar
 
 # 2. Bake it into a custom all-in-one image:
-mkdir -p deploy/allinone/airgap && mv stube-airgap.tar deploy/allinone/airgap/
+mkdir -p deploy/allinone/airgap && mv zaentrum-airgap.tar deploy/allinone/airgap/
 #    then add to the Dockerfile, before the ENTRYPOINT line:
-#      COPY airgap/stube-airgap.tar /var/lib/rancher/k3s/agent/images/
+#      COPY airgap/zaentrum-airgap.tar /var/lib/rancher/k3s/agent/images/
 ./deploy/allinone/build.sh
 ```
 
@@ -109,16 +109,16 @@ registry traffic.
 
 ```bash
 ./deploy/allinone/build.sh            # render deploy/base -> manifests/, then docker build
-IMAGE=ghcr.io/zaentrum/stube:v1 ./deploy/allinone/build.sh
-./deploy/allinone/build.sh render     # just re-render manifests/stube.yaml
+IMAGE=ghcr.io/zaentrum/appliance:v1 ./deploy/allinone/build.sh
+./deploy/allinone/build.sh render     # just re-render manifests/zaentrum.yaml
 ```
 
-`build.sh` renders `deploy/base` with kustomize into `manifests/stube.yaml`,
+`build.sh` renders `deploy/base` with kustomize into `manifests/zaentrum.yaml`,
 which the Dockerfile copies into the k3s auto-apply directory. Re-run it
 whenever `deploy/base` changes so the bundled manifest stays in sync.
 
 ## Stop / remove
 
 ```bash
-docker rm -f stube
+docker rm -f zaentrum
 ```

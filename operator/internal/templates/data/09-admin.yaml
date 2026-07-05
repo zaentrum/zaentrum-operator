@@ -37,9 +37,9 @@ metadata:
   labels:
     app: katalog-manager-api
     role: catalog-write
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 spec:
-  replicas: 1
+  replicas: {{ replicas "katalog-manager-api" }}
   selector:
     matchLabels:
       app: katalog-manager-api
@@ -59,7 +59,7 @@ spec:
             - -c
             - |
               i=0
-              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+              until curl -sf -o /dev/null http://keycloak/auth/realms/zaentrum/.well-known/openid-configuration; do
                 i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
                 echo "waiting for bundled keycloak ($i)…"; sleep 3
               done
@@ -72,7 +72,7 @@ spec:
           image: {{ image "katalog-manager" }}
           envFrom:
             - configMapRef:
-                name: stube-env
+                name: zaentrum-env
           env:
             - name: ADDR
               value: :8080
@@ -81,31 +81,31 @@ spec:
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: user
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: password
             - name: PG_URL
-              value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable
+              value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/zaentrum?sslmode=disable
             - name: STREAM_SIGNING_KEY
               valueFrom:
                 secretKeyRef:
-                  name: stube-stream-signing
+                  name: zaentrum-stream-signing
                   key: key
                   optional: true
             - name: KEYCLOAK_BASE_URL
               value: http://keycloak/auth
             - name: KEYCLOAK_REALM
-              value: stube
+              value: zaentrum
             - name: KEYCLOAK_ADMIN_CLIENT_ID
-              value: stube-manager
+              value: zaentrum-manager
             - name: KEYCLOAK_ADMIN_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: stube-keycloak
+                  name: zaentrum-keycloak
                   key: client-secret
           ports:
             - name: http
@@ -138,9 +138,9 @@ metadata:
   labels:
     app: admin
     role: frontend
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 spec:
-  replicas: 1
+  replicas: {{ replicas "admin" }}
   selector:
     matchLabels:
       app: admin

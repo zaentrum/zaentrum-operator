@@ -1,12 +1,12 @@
-apiVersion: stube.io/v1alpha1
-kind: Stube
+apiVersion: zaentrum.io/v1alpha1
+kind: Zaentrum
 metadata:
-  name: stube
-  namespace: stube
+  name: zaentrum
+  namespace: zaentrum
 spec:
   channel: stable
   version: latest
-  hostname: stube.localhost
+  hostname: zaentrum.localhost
   identity:
     mode: bundled
     clientId: chino-web

@@ -1,10 +1,10 @@
-# Stube architecture
+# Zaentrum architecture
 
-## What Stube is
+## What Zaentrum is
 
 A neutral, self-hostable media client + server for a library **you own and are entitled to
-stream**. It is a catalog core + per-product streaming backends + clients. Stube is
-content-neutral: you bring files you already have, and Stube catalogs them, processes them
+stream**. It is a catalog core + per-product streaming backends + clients. Zaentrum is
+content-neutral: you bring files you already have, and Zaentrum catalogs them, processes them
 (transcode/package), and streams them to its clients. It never acquires content.
 
 ```mermaid
@@ -53,7 +53,7 @@ returns `configured: false`, the app sends every visitor to the first-run wizard
 
 ## Scope — the neutral line {#scope}
 
-Stube ships **only** the neutral platform. The hard boundary: anything that knows *how
+Zaentrum ships **only** the neutral platform. The hard boundary: anything that knows *how
 content was acquired* lives **outside this repo**, in a private deployment.
 
 | In this repo (neutral) | Never in this repo (private to an operator) |
@@ -64,7 +64,7 @@ content was acquired* lives **outside this repo**, in a private deployment.
 
 The catalog write path is the neutral `katalog-manager-api`: it registers and manages
 library entries for files that are **already on disk**. How those files got there is not
-Stube's concern and never will be.
+Zaentrum's concern and never will be.
 
 This isn't cosmetic. A media client/server is distributable on app stores precisely
 *because* it is content-neutral. Bundling acquisition would re-import the IP problem and is
@@ -124,7 +124,7 @@ flowchart LR
 ```
 
 - **All-in-one** (`deploy/allinone`) — a single privileged container that runs **k3s
-  in-process** and applies the base. This is the `docker run … ghcr.io/zaentrum/stube:latest`
+  in-process** and applies the base. This is the `docker run … ghcr.io/zaentrum/appliance:latest`
   experience: one image, one port, a complete server. **Postgres, Valkey, and Kafka are
   bundled** inside it, so there is nothing external to install.
 - **Scale out** (`deploy/base`) — the same manifests on a real Kubernetes cluster via

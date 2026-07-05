@@ -1,7 +1,7 @@
-# Stube
+# Zaentrum
 
 **A neutral media client + server for a library you own and are entitled to stream.**
-Bring your own files; Stube catalogs, processes, and streams them to clean clients on the
+Bring your own files; Zaentrum catalogs, processes, and streams them to clean clients on the
 web, your phone/tablet, and your TV.
 
 ---
@@ -9,11 +9,11 @@ web, your phone/tablet, and your TV.
 ## Try it in one command
 
 ```bash
-docker run -d --privileged -p 80:80 --name stube ghcr.io/zaentrum/stube:latest
-open http://stube.localhost
+docker run -d --privileged -p 80:80 --name zaentrum ghcr.io/zaentrum/appliance:latest
+open http://zaentrum.localhost
 ```
 
-Then open **http://stube.localhost** — the first-run setup **wizard** guides you through it.
+Then open **http://zaentrum.localhost** — the first-run setup **wizard** guides you through it.
 (Modern browsers auto-resolve `*.localhost` to `127.0.0.1`, so this needs **no `/etc/hosts`
 edit**.) Sign-in uses the **bundled Keycloak** — log in with its admin account
 (`admin` / `dev` by default; you are forced to set a new password on first login).
@@ -30,7 +30,7 @@ install. One image, one port, a complete media server.
 
 ## First-run flow
 
-On first boot nothing is configured yet, so Stube sends you to the setup wizard at
+On first boot nothing is configured yet, so Zaentrum sends you to the setup wizard at
 **`/manage/setup`**. You give it a display name, your OIDC provider details, and the path
 to your library; it generates a stream-signing key, persists the config, and from then on
 the app opens straight to your catalog.
@@ -67,7 +67,7 @@ flowchart LR
 
 ## Products
 
-Stube is the platform; the clients are skins over one shared core.
+Zaentrum is the platform; the clients are skins over one shared core.
 
 | Component | What it is | State |
 |---|---|---|
@@ -84,16 +84,16 @@ Stube is the platform; the clients are skins over one shared core.
 
 ```bash
 # All-in-one appliance — k3s in one container, everything bundled
-docker run -d --privileged -p 80:80 --name stube ghcr.io/zaentrum/stube:latest
-# then: open http://stube.localhost
+docker run -d --privileged -p 80:80 --name zaentrum ghcr.io/zaentrum/appliance:latest
+# then: open http://zaentrum.localhost
 
 # Scale out — the same manifests on a real cluster
 kubectl apply -k deploy/base
 ```
 
 **Running under a different name** (a LAN host, a public domain, or the box's IP):
-the issuer host must equal the host you reach Stube at, so set it in all four places —
-`deploy/base/ingress.yaml` host, `stube-env` `OIDC_ISSUER`, `stube-keycloak-config`
+the issuer host must equal the host you reach Zaentrum at, so set it in all four places —
+`deploy/base/ingress.yaml` host, `zaentrum-env` `OIDC_ISSUER`, `zaentrum-keycloak-config`
 `KC_HOSTNAME`, and (on the appliance) the `STUBE_ISSUER_HOST` env var on the container.
 
 See **[docs/self-hosting.md](docs/self-hosting.md)** for the operator contract and
@@ -107,7 +107,7 @@ live in their own repos at `github.com/zaentrum/<svc>` and publish flat
 `ghcr.io/zaentrum/<svc>` images; the manifests here just reference those images.
 
 ```
-operator/         the controller-manager — reconciles the Stube CR into the deploy set
+operator/         the controller-manager — reconciles the Zaentrum CR into the deploy set
 deploy/           allinone (k3s-in-one) · base (real cluster) · compose · overlays  ← source of truth for deploy
 apps/admin/       the /manage admin UI            → ghcr.io/zaentrum/admin     (built here)
 platform/keycloak/ bundled identity provider      → ghcr.io/zaentrum/keycloak  (built here)
@@ -119,7 +119,7 @@ Service images the manifests pull (each owned by its own `github.com/zaentrum` r
 
 ## What is deliberately **not** here
 
-Stube is content-neutral. It catalogs and streams a library you already own; it never
+Zaentrum is content-neutral. It catalogs and streams a library you already own; it never
 fetches content, and how files arrive on disk is out of scope. There are no built-in
 downloaders, no indexer integrations, and no automation that reaches out for media — by
 design and forever. See [docs/architecture.md](docs/architecture.md#scope).

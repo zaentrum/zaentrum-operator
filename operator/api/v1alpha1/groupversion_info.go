@@ -1,7 +1,7 @@
-// Package v1alpha1 contains the API types for the stube.io/v1alpha1 group.
+// Package v1alpha1 contains the API types for the zaentrum.io/v1alpha1 group.
 //
 // +kubebuilder:object:generate=true
-// +groupName=stube.io
+// +groupName=zaentrum.io
 package v1alpha1
 
 import (
@@ -11,9 +11,9 @@ import (
 
 var (
 	// GroupVersion is the group/version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "stube.io", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "zaentrum.io", Version: "v1alpha1"}
 
-	// SchemeBuilder registers the Stube kinds into a runtime scheme.
+	// SchemeBuilder registers the Zaentrum kinds into a runtime scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
 
 	// AddToScheme adds the types in this group-version to the given scheme.
@@ -21,5 +21,5 @@ var (
 )
 
 func init() {
-	SchemeBuilder.Register(&Stube{}, &StubeList{})
+	SchemeBuilder.Register(&Zaentrum{}, &ZaentrumList{})
 }

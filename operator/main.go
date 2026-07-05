@@ -1,5 +1,5 @@
-// Command stube-operator runs the controller-runtime manager that reconciles
-// the Stube platform from a single Stube CR.
+// Command zaentrum-operator runs the controller-runtime manager that reconciles
+// the Zaentrum platform from a single Zaentrum CR.
 package main
 
 import (
@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	stubev1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/controller"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/updates"
 )
@@ -26,7 +26,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(stubev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(zaentrumv1alpha1.AddToScheme(scheme))
 }
 
 func main() {
@@ -47,7 +47,7 @@ func main() {
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "stube-operator.stube.io",
+		LeaderElectionID:       "zaentrum-operator.zaentrum.io",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -61,12 +61,12 @@ func main() {
 		releasesURL = updates.DefaultReleasesURL
 	}
 
-	if err := (&controller.StubeReconciler{
+	if err := (&controller.ZaentrumReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		ReleasesURL: releasesURL,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Stube")
+		setupLog.Error(err, "unable to create controller", "controller", "Zaentrum")
 		os.Exit(1)
 	}
 
@@ -79,7 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting stube-operator")
+	setupLog.Info("starting zaentrum-operator")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

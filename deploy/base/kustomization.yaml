@@ -5,7 +5,7 @@ kind: Kustomization
 # No OpenShift Route / ServiceMonitor / GrafanaDashboard here: those are
 # operator-private overlays (see docs/architecture.md).
 
-namespace: stube
+namespace: zaentrum
 
 resources:
   - namespace.yaml
@@ -13,7 +13,7 @@ resources:
   - kafka.yaml       # single-node KRaft event stream (no Zookeeper)
   - rbac.yaml        # katalog-manager-api SA + Role (first-run config propagation)
   - keycloak.yaml      # bundled OIDC provider (Deployment + Service, /auth)
-  - keycloak-realm.yaml # stube realm import (clients/roles/admin user)
+  - keycloak-realm.yaml # zaentrum realm import (clients/roles/admin user)
   - platform.yaml    # katalog-api (neutral catalog read API)
   - manage.yaml      # katalog-manager-api (neutral management/write API)
   - chino.yaml       # chino-api + chino-stream + chino-web
@@ -21,10 +21,10 @@ resources:
   - ingress.yaml
 
 configMapGenerator:
-  - name: stube-env
+  - name: zaentrum-env
     literals:
       # Bundled-IdP issuer: the PUBLIC url of the realm served by the bundled
-      # Keycloak behind Traefik (<host>/auth/realms/stube). Every service runs
+      # Keycloak behind Traefik (<host>/auth/realms/zaentrum). Every service runs
       # OIDC discovery + token validation against this with coreos/go-oidc,
       # which requires it to EQUAL both the discovery doc's `issuer` and the
       # token `iss`. Keycloak pins this value via KC_HOSTNAME (keycloak.yaml),
@@ -32,8 +32,8 @@ configMapGenerator:
       # (the all-in-one wires a CoreDNS rewrite to the keycloak Service; on a
       # real cluster the operator sets this, KC_HOSTNAME and the ingress host to
       # the same name — the demo overlay shows the merge). Override together
-      # with deploy/base/ingress.yaml host + stube-keycloak-config KC_HOSTNAME.
-      - OIDC_ISSUER=http://stube.localhost/auth/realms/stube
+      # with deploy/base/ingress.yaml host + zaentrum-keycloak-config KC_HOSTNAME.
+      - OIDC_ISSUER=http://zaentrum.localhost/auth/realms/zaentrum
       - OIDC_AUDIENCE=chino
       - OIDC_ENABLED=true
       # In-cluster service DNS — never leaves the namespace.
@@ -42,7 +42,7 @@ configMapGenerator:
       # On-disk library root the stream plane serves from. First-run setup
       # patches this to the operator's configured library path and rolls the
       # consumers; the default matches chino-stream's mounted media volume.
-      - MEDIA_ROOT=/var/lib/stube/media
+      - MEDIA_ROOT=/var/lib/zaentrum/media
       # Internal event stream (single-node KRaft broker). Override to a
       # managed cluster's bootstrap servers when running at scale.
       - KAFKA_BROKERS=kafka:9092
@@ -51,29 +51,29 @@ configMapGenerator:
 
 secretGenerator:
   # DEV DEFAULTS — fine for a local appliance, CHANGE for anything exposed.
-  - name: stube-db
+  - name: zaentrum-db
     literals:
-      - user=stube
-      - password=stube-dev-change-me
-  - name: stube-stream-signing
+      - user=zaentrum
+      - password=zaentrum-dev-change-me
+  - name: zaentrum-stream-signing
     literals:
       # Dev default — MUST be valid base64 (chino-api/chino-stream base64-decode
       # it; decodes to 32 bytes here). Regenerate for anything exposed:
       #   openssl rand -base64 32
       - key=ZGV2LW9ubHktY2hhbmdlLW1lLW5vdC1mb3ItcHJvZCE=
-  # Confidential secret for the 'stube-manager' service-account client. The
-  # realm import substitutes ${STUBE_MANAGER_SECRET} with this value, and
+  # Confidential secret for the 'zaentrum-manager' service-account client. The
+  # realm import substitutes ${ZAENTRUM_MANAGER_SECRET} with this value, and
   # katalog-manager-api reads it as KEYCLOAK_ADMIN_CLIENT_SECRET to call the
   # Admin REST API. DEV value — rotate for anything exposed.
-  - name: stube-keycloak
+  - name: zaentrum-keycloak
     literals:
-      - client-secret=stube-manager-dev-change-me
+      - client-secret=zaentrum-manager-dev-change-me
   # Bundled Keycloak bootstrap admin. 'username'/'password' bootstrap the
-  # master-realm temporary admin; 'realm-admin-password' seeds the stube-realm
+  # master-realm temporary admin; 'realm-admin-password' seeds the zaentrum-realm
   # 'admin' user (realm-admin) via the realm import with temporary=true, so the
   # first login forces a password change. DEV values — change for anything
   # exposed.
-  - name: stube-keycloak-admin
+  - name: zaentrum-keycloak-admin
     literals:
       - username=admin
       - password=dev

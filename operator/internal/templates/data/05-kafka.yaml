@@ -37,7 +37,7 @@ metadata:
   labels:
     app: kafka
     role: event-stream
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 spec:
   replicas: 1
   strategy:
@@ -82,7 +82,7 @@ spec:
             - name: KAFKA_NUM_PARTITIONS
               value: "1"
             - name: CLUSTER_ID
-              value: stube-kraft-0000000000001
+              value: zaentrum-kraft-0000000000001
             - name: KAFKA_LOG_DIRS
               value: /var/lib/kafka/data
             - name: KAFKA_HEAP_OPTS

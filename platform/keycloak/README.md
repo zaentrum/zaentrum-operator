@@ -1,15 +1,15 @@
-# Stube bundled Keycloak
+# Zaentrum bundled Keycloak
 
-A self-contained Keycloak image with the `stube` realm baked in. This is the
-identity provider that ships *with* Stube — a single-box / self-host appliance
+A self-contained Keycloak image with the `zaentrum` realm baked in. This is the
+identity provider that ships *with* Zaentrum — a single-box / self-host appliance
 gets working OIDC out of the box, no external IdP required. Larger deployments
 can point services at any compatible OIDC issuer instead and skip this image.
 
 - **Image:** built from `quay.io/keycloak/keycloak:26.1` (pinned), optimized build.
-- **Realm:** `stube` (imported on first start from `/opt/keycloak/data/import/`).
+- **Realm:** `zaentrum` (imported on first start from `/opt/keycloak/data/import/`).
 - **In-cluster Service:** `keycloak` on `:8080` (created by `deploy/`).
 - **Public path:** fronted by Traefik at `/auth` (`KC_HTTP_RELATIVE_PATH=/auth`).
-- **Issuer:** `<scheme>://<host>/auth/realms/stube`.
+- **Issuer:** `<scheme>://<host>/auth/realms/zaentrum`.
 
 The Deployment, Service, ConfigMap and Secret live in `deploy/` (owned by the
 deploy agent). This directory provides the **image + realm + the env contract**
@@ -20,7 +20,7 @@ documented below.
 | File               | Purpose                                                       |
 | ------------------ | ------------------------------------------------------------- |
 | `Dockerfile`       | Two-stage optimized build; bakes the realm into the image.    |
-| `stube-realm.json` | The `stube` realm: clients, scopes, roles, default admin user.|
+| `zaentrum-realm.json` | The `zaentrum` realm: clients, scopes, roles, default admin user.|
 | `README.md`        | This file — env contract + operational notes.                 |
 
 ## Realm contents
@@ -32,7 +32,7 @@ documented below.
 | `chino-web`     | public       | Auth Code + PKCE (S256), Device Grant   | Browser SPA. `redirectUris: ["*"]`, `webOrigins: ["*"]`.           |
 | `chino-tv`      | public       | Device Grant only                       | Living-room client; no browser on device.                          |
 | `chino-mobile`  | public       | Auth Code + PKCE (S256), Device Grant   | System-browser login; custom-scheme redirect via wildcard.         |
-| `stube-manager` | confidential | Service account (client credentials)    | Calls the Admin REST API from `manage-api` (user CRUD + `stube-admin` role grants). Secret injected by env.|
+| `zaentrum-manager` | confidential | Service account (client credentials)    | Calls the Admin REST API from `manage-api` (user CRUD + `zaentrum-admin` role grants). Secret injected by env.|
 
 All three public clients:
 
@@ -40,7 +40,7 @@ All three public clients:
   for a refresh token that survives SSO-session idle timeout);
 - emit access tokens with **`aud: chino`** via an audience protocol mapper, so
   every resource service keeps `OIDC_AUDIENCE=chino` (matches the deploy
-  `stube-env` ConfigMap and `docker-compose`).
+  `zaentrum-env` ConfigMap and `docker-compose`).
 
 > Compatibility note: these mirror the historical `chino*` clients in
 > `identity/idp-config/clients/` (public, PKCE S256, device grant, audience
@@ -49,58 +49,58 @@ All three public clients:
 > works behind any host the appliance is deployed under. Tighten these per
 > deployment if you front a single known host.
 
-### `stube-manager` secret
+### `zaentrum-manager` secret
 
 The realm JSON ships a placeholder secret:
 
 ```json
-"secret": "${STUBE_MANAGER_CLIENT_SECRET:change-me-in-deploy}"
+"secret": "${ZAENTRUM_MANAGER_CLIENT_SECRET:change-me-in-deploy}"
 ```
 
 Keycloak resolves `${ENV_VAR:default}` references in realm-import files from
 the pod environment at import time. `deploy/` provides
-`STUBE_MANAGER_CLIENT_SECRET` from a Kubernetes Secret; `manage-api` receives
+`ZAENTRUM_MANAGER_CLIENT_SECRET` from a Kubernetes Secret; `manage-api` receives
 the same value (also from that Secret) and uses it for the client-credentials
 grant against the Admin REST API. The image never contains a real secret.
 
-`service-account-stube-manager` is granted the `realm-management` client roles
+`service-account-zaentrum-manager` is granted the `realm-management` client roles
 **`manage-users`, `view-users`, `query-users`, `view-realm`** — exactly the scope
-`manage-api` needs to create / list Stube users and to read and assign the
-`stube-admin` realm role when promoting a user (`view-realm` lets it resolve the
+`manage-api` needs to create / list Zaentrum users and to read and assign the
+`zaentrum-admin` realm role when promoting a user (`view-realm` lets it resolve the
 realm role and its member list).
 
-### Realm roles and the `stube-admin` gate
+### Realm roles and the `zaentrum-admin` gate
 
 The realm defines two realm roles:
 
 | Role          | Granted to                              | Meaning                                                                 |
 | ------------- | --------------------------------------- | ----------------------------------------------------------------------- |
-| `stube-user`  | interactive accounts (assign on create) | Plain end user of the products.                                         |
-| `stube-admin` | the seed `admin` user only              | May manage the catalog and other users via the Stube `/manage` console. |
+| `zaentrum-user`  | interactive accounts (assign on create) | Plain end user of the products.                                         |
+| `zaentrum-admin` | the seed `admin` user only              | May manage the catalog and other users via the Zaentrum `/manage` console. |
 
-`stube-admin` is **not** in the realm `defaultRoles`, so newly-created users get
+`zaentrum-admin` is **not** in the realm `defaultRoles`, so newly-created users get
 no admin rights by default — an existing admin promotes another account
 explicitly (the Users API exposes an `admin` flag for this). The `roles` client
 scope emits realm roles into the access token's `realm_access.roles` claim
 (`access.token.claim: true`); `manage-api`'s auth middleware reads that claim and
-rejects any token lacking `stube-admin` on `/api/manage/*` with **403** (a valid
+rejects any token lacking `zaentrum-admin` on `/api/manage/*` with **403** (a valid
 token that is merely authenticated is not enough).
 
 ### Default admin user
 
 The realm contains a user `admin` with the `realm-management` `realm-admin`
-client role (full admin of the `stube` realm only). **No password is stored in
+client role (full admin of the `zaentrum` realm only). **No password is stored in
 the JSON.** Set it one of two ways:
 
 1. **Bootstrap env (recommended for first start).** Provide
    `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` (the 26.x
    replacement for `KEYCLOAK_ADMIN`/`KEYCLOAK_ADMIN_PASSWORD`) from a Secret in
    `deploy/`. This creates the temporary *master*-realm bootstrap admin; use it
-   once to set the `stube`-realm `admin` user's password, then remove it.
+   once to set the `zaentrum`-realm `admin` user's password, then remove it.
 2. **Initial password via Secret + first-run reset.** The realm `admin` user
    carries the `UPDATE_PASSWORD` required action, so whatever initial password
-   you set must be changed on first interactive login. In practice Stube users
-   (including the admin) are managed through the **Stube `/manage` console**,
+   you set must be changed on first interactive login. In practice Zaentrum users
+   (including the admin) are managed through the **Zaentrum `/manage` console**,
    which talks to `manage-api` → Admin REST API; the Keycloak admin console is
    not the day-to-day surface (see below).
 
@@ -119,9 +119,9 @@ under `/auth`:
 | `KC_HOSTNAME_STRICT`     | `false`       | Derive hostname/issuer from the forwarded request, not a fixed host.|
 | `KC_HTTP_RELATIVE_PATH`  | `/auth`       | Serve everything (and the issuer) under `/auth`.                    |
 | `KC_DB`                  | `postgres`    | Must match the build-time DB vendor.                                |
-| `KC_DB_URL`              | (deploy)      | JDBC URL for the Stube Postgres.                                    |
+| `KC_DB_URL`              | (deploy)      | JDBC URL for the Zaentrum Postgres.                                    |
 | `KC_DB_USERNAME` / `KC_DB_PASSWORD` | (Secret) | DB credentials.                                                  |
-| `STUBE_MANAGER_CLIENT_SECRET` | (Secret) | Resolved into `stube-manager` at realm import.                      |
+| `ZAENTRUM_MANAGER_CLIENT_SECRET` | (Secret) | Resolved into `zaentrum-manager` at realm import.                      |
 | `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` | (Secret, first run) | One-time master bootstrap admin. |
 
 > `KC_PROXY_HEADERS=xforwarded` is the 26.x replacement for the deprecated
@@ -132,14 +132,14 @@ under `/auth`:
 With the above, the public issuer is:
 
 ```
-<scheme>://<host>/auth/realms/stube
+<scheme>://<host>/auth/realms/zaentrum
 ```
 
 and that is exactly what services should set as `OIDC_ISSUER` (with
 `OIDC_AUDIENCE=chino`). OIDC discovery lives at:
 
 ```
-<scheme>://<host>/auth/realms/stube/.well-known/openid-configuration
+<scheme>://<host>/auth/realms/zaentrum/.well-known/openid-configuration
 ```
 
 The Traefik IngressRoute should route `PathPrefix(`/auth`)` to the in-cluster
@@ -156,8 +156,8 @@ The build enables management health endpoints (on the management port,
 
 ## Admin console is internal-only / headless
 
-Stube manages its users through the **Stube `/manage` console** (a Stube
-surface that calls `manage-api`, which in turn uses `stube-manager` to drive
+Zaentrum manages its users through the **Zaentrum `/manage` console** (a Zaentrum
+surface that calls `manage-api`, which in turn uses `zaentrum-manager` to drive
 the Keycloak Admin REST API). The Keycloak admin console itself is **not**
 exposed publicly:
 
@@ -167,7 +167,7 @@ exposed publicly:
   `kubectl port-forward svc/keycloak 8080:8080 -n <ns>` then
   `http://localhost:8080/auth/admin`.
 
-This keeps the realm's day-to-day operation behind Stube's own UI and keeps the
+This keeps the realm's day-to-day operation behind Zaentrum's own UI and keeps the
 public surface limited to the OIDC endpoints the clients need.
 
 ## Build (validation)
@@ -177,7 +177,7 @@ self-validating:
 
 ```bash
 # realm JSON is well-formed
-jq empty platform/keycloak/stube-realm.json
+jq empty platform/keycloak/zaentrum-realm.json
 
 # Dockerfile sanity (optional, if hadolint is available)
 hadolint platform/keycloak/Dockerfile

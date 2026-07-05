@@ -1,20 +1,20 @@
-# Self-hosting Stube
+# Self-hosting Zaentrum
 
-Stube is a media server for a library **you own and are entitled to stream**. It ships no
+Zaentrum is a media server for a library **you own and are entitled to stream**. It ships no
 content and no way to acquire content — you point it at your own files.
 
 ## Quick start (all-in-one)
 
 ```bash
-docker run -d --privileged -p 80:80 --name stube ghcr.io/zaentrum/stube:latest
-open http://stube.localhost
+docker run -d --privileged -p 80:80 --name zaentrum ghcr.io/zaentrum/appliance:latest
+open http://zaentrum.localhost
 ```
 
-Open **http://stube.localhost**. Modern browsers auto-resolve `*.localhost` to `127.0.0.1`,
+Open **http://zaentrum.localhost**. Modern browsers auto-resolve `*.localhost` to `127.0.0.1`,
 so this works with **no `/etc/hosts` edit**, and the issuer host matches the host you reach
-Stube at — the same invariant a real cluster holds.
+Zaentrum at — the same invariant a real cluster holds.
 
-Sign-in uses the **bundled Keycloak** (realm `stube`): log in with its admin account
+Sign-in uses the **bundled Keycloak** (realm `zaentrum`): log in with its admin account
 (`admin` / `dev` by default), which forces a password change on first login. On first boot
 nothing is configured, so the app sends you to the setup wizard at **`/manage/setup`** —
 give it a display name, your OIDC provider, and your library path, and you are running.
@@ -27,10 +27,10 @@ consistently in four places:
 
 | Where | What | Default |
 |---|---|---|
-| `deploy/base/ingress.yaml` | `spec.rules[0].host` | `stube.localhost` |
-| `stube-env` ConfigMap | `OIDC_ISSUER` | `http://stube.localhost/auth/realms/stube` |
-| `stube-keycloak-config` ConfigMap | `KC_HOSTNAME` | `http://stube.localhost/auth` |
-| all-in-one container | `STUBE_ISSUER_HOST` env (drives the in-cluster CoreDNS rewrite) | `stube.localhost` |
+| `deploy/base/ingress.yaml` | `spec.rules[0].host` | `zaentrum.localhost` |
+| `zaentrum-env` ConfigMap | `OIDC_ISSUER` | `http://zaentrum.localhost/auth/realms/zaentrum` |
+| `zaentrum-keycloak-config` ConfigMap | `KC_HOSTNAME` | `http://zaentrum.localhost/auth` |
+| all-in-one container | `STUBE_ISSUER_HOST` env (drives the in-cluster CoreDNS rewrite) | `zaentrum.localhost` |
 
 On the appliance the first three are baked into the image; for a one-off host change pass
 `-e STUBE_ISSUER_HOST=my.host` only if you also rebuild with the matching ingress/issuer, or
@@ -70,9 +70,9 @@ submits:
 ```
 POST /api/manage/setup
      { "displayName":  "My Library",
-       "oidcIssuer":   "https://auth.example.com/realms/stube",
+       "oidcIssuer":   "https://auth.example.com/realms/zaentrum",
        "oidcClientId": "chino",
-       "libraryPath":  "/var/lib/stube/media" }
+       "libraryPath":  "/var/lib/zaentrum/media" }
 ```
 
 `katalog-manager-api` persists the config and, if you did not supply a `streamSigningKey`,
@@ -82,7 +82,7 @@ reads and writes `GET`/`PUT /api/manage/config`.
 
 ## Operator contract
 
-Stube clients are neutral — they learn where the server is at runtime. You provide:
+Zaentrum clients are neutral — they learn where the server is at runtime. You provide:
 
 1. **An OIDC provider.** Register a public client with:
    - the **device authorization grant** (RFC 8628) enabled — the default sign-in on every
@@ -98,11 +98,11 @@ Stube clients are neutral — they learn where the server is at runtime. You pro
 
 ## Getting content in
 
-Point Stube at a directory of media you own. `katalog-manager-api` registers and manages
+Point Zaentrum at a directory of media you own. `katalog-manager-api` registers and manages
 those entries; the catalog core enriches metadata and (optionally) transcodes/packages for
 adaptive streaming.
 
-> Stube intentionally has **no** built-in downloaders or indexer integrations. It catalogs
+> Zaentrum intentionally has **no** built-in downloaders or indexer integrations. It catalogs
 > and streams files that are already on disk. How they got there is out of scope — and out
 > of this project.
 

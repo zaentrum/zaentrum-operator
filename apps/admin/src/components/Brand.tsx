@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 
 /**
- * The Stube chevron mark. A single cloud-blue chevron ">" drawn as an SVG so
+ * The Zaentrum chevron mark. A single cloud-blue chevron ">" drawn as an SVG so
  * it scales crisply at any header size. Attribute-only styling (fill/stroke)
  * keeps it portable.
  */
@@ -27,8 +27,8 @@ export function Chevron({ size = 18, className }: { size?: number; className?: s
 }
 
 /**
- * The umbrella wordmark: "> stube" in JetBrains Mono. The chevron is the brand
- * mark; "stube" is set in the mono face per the design system. `subtitle`
+ * The umbrella wordmark: "> zaentrum" in JetBrains Mono. The chevron is the brand
+ * mark; "zaentrum" is set in the mono face per the design system. `subtitle`
  * renders a muted product/context label after the wordmark (e.g. "Manage").
  */
 export function Wordmark({
@@ -42,7 +42,7 @@ export function Wordmark({
   return (
     <span className="inline-flex items-baseline gap-s-2">
       <span className="wordmark text-fg" style={style}>
-        <span className="text-cloud-blue">&gt;</span> stube
+        <span className="text-cloud-blue">&gt;</span> zaentrum
       </span>
       {subtitle ? (
         <span className="font-ui text-fg-dim" style={{ fontSize: size * 0.78 }}>

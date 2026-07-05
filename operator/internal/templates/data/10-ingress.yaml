@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: stube
+  name: zaentrum
   namespace: {{ .Namespace }}
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"

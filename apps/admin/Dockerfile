@@ -15,6 +15,6 @@ COPY --from=build /src/dist /usr/share/nginx/html/manage
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080
 
-LABEL org.opencontainers.image.title="stube-admin"
-LABEL org.opencontainers.image.description="Stube admin UI — first-run setup + day-2 management."
+LABEL org.opencontainers.image.title="zaentrum-admin"
+LABEL org.opencontainers.image.description="Zaentrum admin UI — first-run setup + day-2 management."
 LABEL org.opencontainers.image.source="https://github.com/zaentrum/stube"

@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chino-api
-  labels: { app: chino-api, role: backend, app.kubernetes.io/part-of: stube }
+  labels: { app: chino-api, role: backend, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: chino-api } }
@@ -13,7 +13,7 @@ spec:
     spec:
       # Gate startup on the bundled Keycloak so the OIDC verifier discovers on the
       # first try (no crash-retry noise). Waits on the keycloak Service — NOT the
-      # stube.localhost issuer (musl short-circuits *.localhost). Bounded so an
+      # zaentrum.localhost issuer (musl short-circuits *.localhost). Bounded so an
       # external-IdP operator (no bundled keycloak) doesn't hang.
       initContainers:
         - name: wait-for-oidc
@@ -23,7 +23,7 @@ spec:
             - -c
             - |
               i=0
-              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+              until curl -sf -o /dev/null http://keycloak/auth/realms/zaentrum/.well-known/openid-configuration; do
                 i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
                 echo "waiting for bundled keycloak ($i)…"; sleep 3
               done
@@ -33,19 +33,19 @@ spec:
           image: ghcr.io/zaentrum/chino-api:latest
           ports: [{ containerPort: 8080, name: http }]
           envFrom:
-            - configMapRef: { name: stube-env }   # OIDC_*, KATALOG_BASE_URL, STREAM_BASE_URL, ADMIN_SUBJECTS
+            - configMapRef: { name: zaentrum-env }   # OIDC_*, KATALOG_BASE_URL, STREAM_BASE_URL, ADMIN_SUBJECTS
           env:
             - name: ADDR
               value: ":8080"
             - name: DB_USER
-              valueFrom: { secretKeyRef: { name: stube-db, key: user } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: DB_PASSWORD
-              valueFrom: { secretKeyRef: { name: stube-db, key: password } }
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
             - name: PG_URL
-              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/stube?sslmode=disable"
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/zaentrum?sslmode=disable"
             # Shared with chino-stream; mismatch ⇒ playback 403 while artwork loads.
             - name: STREAM_SIGNING_KEY
-              valueFrom: { secretKeyRef: { name: stube-stream-signing, key: key } }
+              valueFrom: { secretKeyRef: { name: zaentrum-stream-signing, key: key } }
           readinessProbe:
             httpGet: { path: /api/healthz, port: http }
             initialDelaySeconds: 3
@@ -67,7 +67,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chino-stream
-  labels: { app: chino-stream, role: stream, app.kubernetes.io/part-of: stube }
+  labels: { app: chino-stream, role: stream, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: chino-stream } }
@@ -86,7 +86,7 @@ spec:
             - -c
             - |
               i=0
-              until curl -sf -o /dev/null http://keycloak/auth/realms/stube/.well-known/openid-configuration; do
+              until curl -sf -o /dev/null http://keycloak/auth/realms/zaentrum/.well-known/openid-configuration; do
                 i=$((i+1)); [ "$i" -ge 60 ] && { echo "bundled keycloak not present after 180s; proceeding"; exit 0; }
                 echo "waiting for bundled keycloak ($i)…"; sleep 3
               done
@@ -101,22 +101,22 @@ spec:
             - name: KATALOG_API_BASE_URL
               value: "http://katalog-api"
             - name: MEDIA_ROOT
-              value: "/var/lib/stube/media"
+              value: "/var/lib/zaentrum/media"
             - name: OIDC_ISSUER
-              valueFrom: { configMapKeyRef: { name: stube-env, key: OIDC_ISSUER } }
+              valueFrom: { configMapKeyRef: { name: zaentrum-env, key: OIDC_ISSUER } }
             - name: OIDC_AUDIENCE
-              valueFrom: { configMapKeyRef: { name: stube-env, key: OIDC_AUDIENCE } }
+              valueFrom: { configMapKeyRef: { name: zaentrum-env, key: OIDC_AUDIENCE } }
             - name: AUTH_ENABLED
               value: "true"
             - name: STREAM_SIGNING_KEY
-              valueFrom: { secretKeyRef: { name: stube-stream-signing, key: key } }
+              valueFrom: { secretKeyRef: { name: zaentrum-stream-signing, key: key } }
             # Software transcode by default. The GPU overlay flips USE_NVENC=true.
             - name: USE_NVENC
               value: "false"
             - name: TRANSCODE_PRESET
               value: "veryfast"
             - name: HLS_CACHE_DIR
-              value: "/var/cache/stube-hls"
+              value: "/var/cache/zaentrum-hls"
             - name: FFMPEG_MAX_CONCURRENT
               value: "2"
           readinessProbe:
@@ -127,8 +127,8 @@ spec:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: "2", memory: 2Gi }
           volumeMounts:
-            - { name: media, mountPath: /var/lib/stube/media, readOnly: true }
-            - { name: hls-cache, mountPath: /var/cache/stube-hls }
+            - { name: media, mountPath: /var/lib/zaentrum/media, readOnly: true }
+            - { name: hls-cache, mountPath: /var/cache/zaentrum-hls }
       volumes:
         # Your library. Appliance default: a local RWO PVC you fill via the
         # import path. Operators swap this for their NFS/object store.
@@ -156,7 +156,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chino-web
-  labels: { app: chino-web, role: frontend, app.kubernetes.io/part-of: stube }
+  labels: { app: chino-web, role: frontend, app.kubernetes.io/part-of: zaentrum }
 spec:
   replicas: 1
   selector: { matchLabels: { app: chino-web } }

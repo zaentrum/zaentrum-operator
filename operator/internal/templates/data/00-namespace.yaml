@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: {{ .Namespace }}
   labels:
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum

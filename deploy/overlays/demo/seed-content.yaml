@@ -17,7 +17,7 @@ spec:
           args:
             - |
               set -eu
-              dst=/var/lib/stube/media
+              dst=/var/lib/zaentrum/media
               mkdir -p "$dst"
               # CC-BY, freely distributable. Add/replace as you like.
               titles="
@@ -32,7 +32,7 @@ spec:
               done
               echo "demo content ready"
           volumeMounts:
-            - { name: media, mountPath: /var/lib/stube/media }
+            - { name: media, mountPath: /var/lib/zaentrum/media }
       volumes:
         - name: media
           persistentVolumeClaim: { claimName: media }

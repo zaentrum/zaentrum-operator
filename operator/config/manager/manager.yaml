@@ -1,18 +1,18 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: stube-operator-system
+  name: zaentrum-operator-system
   labels:
-    app.kubernetes.io/part-of: stube-operator
+    app.kubernetes.io/part-of: zaentrum-operator
     control-plane: controller-manager
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: stube-operator-controller-manager
-  namespace: stube-operator-system
+  name: zaentrum-operator-controller-manager
+  namespace: zaentrum-operator-system
   labels:
-    app.kubernetes.io/part-of: stube-operator
+    app.kubernetes.io/part-of: zaentrum-operator
     control-plane: controller-manager
 spec:
   replicas: 1
@@ -24,7 +24,7 @@ spec:
       labels:
         control-plane: controller-manager
     spec:
-      serviceAccountName: stube-operator-controller-manager
+      serviceAccountName: zaentrum-operator-controller-manager
       securityContext:
         runAsNonRoot: true
         seccompProfile:

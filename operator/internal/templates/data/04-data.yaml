@@ -50,7 +50,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: postgres
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 spec:
   replicas: 1
   selector:
@@ -68,21 +68,21 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: user
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: stube-db
+                  name: zaentrum-db
                   key: password
             - name: POSTGRES_DB
-              value: stube
+              value: zaentrum
           ports:
             - name: pg
               containerPort: 5432
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "stube"]
+              command: ["pg_isready", "-U", "zaentrum"]
             initialDelaySeconds: 5
             periodSeconds: 10
           volumeMounts:
@@ -100,7 +100,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: valkey
-    app.kubernetes.io/part-of: stube
+    app.kubernetes.io/part-of: zaentrum
 spec:
   replicas: 1
   selector:
