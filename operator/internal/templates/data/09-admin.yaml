@@ -67,7 +67,9 @@ spec:
       {{- end }}
       containers:
         - name: app
-          image: {{ image "katalog-manager-api" }}
+          # k8s resource stays named katalog-manager-api (service DNS + RBAC);
+          # the image is the flat Go rewrite ghcr.io/zaentrum/katalog-manager.
+          image: {{ image "katalog-manager" }}
           envFrom:
             - configMapRef:
                 name: stube-env

@@ -65,10 +65,10 @@ type Values struct {
 	Kafka bool
 }
 
-// image returns a fully-qualified ghcr.io/zaentrum/stube/<name> reference at the
+// image returns a fully-qualified ghcr.io/zaentrum/<name> reference at the
 // configured version. Exposed to templates as the `image` function.
 func (v Values) image(name string) string {
-	return fmt.Sprintf("ghcr.io/zaentrum/stube/%s:%s", name, v.Version)
+	return fmt.Sprintf("ghcr.io/zaentrum/%s:%s", name, v.Version)
 }
 
 // NewValues flattens and defaults a Stube spec into template Values.

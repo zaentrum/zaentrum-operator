@@ -2,7 +2,7 @@
 # Multi-stage build for the neutral management API. The final image is
 # distroless/static (nonroot) and listens on :8080.
 #
-# Published as ghcr.io/zaentrum/stube/katalog-manager-api.
+# Published as ghcr.io/zaentrum/katalog-manager.
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 

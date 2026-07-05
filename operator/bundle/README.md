@@ -43,7 +43,7 @@ The CSV's install spec is derived directly from the operator's own manifests:
   `operator/config/crd/stube.io_stubes.yaml`.
 
 This is distinct from the operator **controller** image
-(`ghcr.io/zaentrum/stube/operator`), which is built from `operator/Dockerfile` by
+(`ghcr.io/zaentrum/operator`), which is built from `operator/Dockerfile` by
 the `operator` matrix leg in
 [`.github/workflows/build-images.yml`](../../.github/workflows/build-images.yml).
 The CSV's managed Deployment references that controller image at the release tag
@@ -54,7 +54,7 @@ binary.
 
 ```bash
 # From operator/bundle:
-docker build -f bundle.Dockerfile -t ghcr.io/zaentrum/stube/operator-bundle:v0.1.0 .
+docker build -f bundle.Dockerfile -t ghcr.io/zaentrum/operator-bundle:v0.1.0 .
 operator-sdk bundle validate .
 ```
 

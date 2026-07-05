@@ -1,12 +1,22 @@
-# Build the Stube component images and push them to GitHub Container Registry.
+# Build the platform-owned Stube images and push them to GitHub Container Registry.
 #
-# Each component is built with Buildx + docker/build-push-action and published as
-#   ghcr.io/zaentrum/stube/<svc>:latest
-#   ghcr.io/zaentrum/stube/<svc>:<git-sha>
+# This monorepo builds ONLY the images that have no dedicated polyrepo:
+#   ghcr.io/zaentrum/admin:latest         (apps/admin — first-run + day-2 UI)
+#   ghcr.io/zaentrum/keycloak:latest      (platform/keycloak — bundled identity)
+#   ghcr.io/zaentrum/operator:latest      (operator — the controller-manager)
+# each also tagged with :<git-sha>.
+#
+# The application/service images (chino-web, chino-api, chino-stream, katalog-api,
+# katalog-manager) are OWNED BY THEIR POLYREPOS at github.com/zaentrum/<svc> and
+# published to the SAME flat ghcr.io/zaentrum/<svc> namespace by those repos'
+# own workflows. This monorepo must NOT rebuild them here — doing so would
+# clobber the polyrepo images with a divergent copy. deploy/base + the operator
+# templates simply reference the flat ghcr.io/zaentrum/<svc> images those
+# polyrepos publish.
 #
 # Path filtering keeps PRs cheap: a component only builds when its own sources
 # (or this workflow / the shared deploy bits) change. On `main` we always build
-# every component so the registry has a coherent set of images for a release.
+# every platform-owned component so the registry has a coherent set for a release.
 #
 # Platforms: linux/amd64 only for now. arm64 is a future matrix axis — see the
 # commented `platforms` lines below.
@@ -26,7 +36,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/zaentrum/stube
+  IMAGE_PREFIX: ghcr.io/zaentrum
 
 # A newer push to the same branch/PR cancels in-flight builds.
 concurrency:
@@ -34,18 +44,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Decide which components changed ──────────────────────────────────────
+  # ── Decide which platform-owned components changed ───────────────────────
   # On pull_request we honour the per-component path filters. On push to main
   # (and on workflow_dispatch) every filter is forced true so the whole set is
   # rebuilt. The matrix job reads these outputs to skip unchanged components.
   changes:
     runs-on: ubuntu-latest
     outputs:
-      chino-web: ${{ steps.decide.outputs.chino-web }}
-      chino-api: ${{ steps.decide.outputs.chino-api }}
-      chino-stream: ${{ steps.decide.outputs.chino-stream }}
-      katalog-api: ${{ steps.decide.outputs.katalog-api }}
-      katalog-manager-api: ${{ steps.decide.outputs.katalog-manager-api }}
       admin: ${{ steps.decide.outputs.admin }}
       keycloak: ${{ steps.decide.outputs.keycloak }}
       operator: ${{ steps.decide.outputs.operator }}
@@ -61,21 +66,6 @@ jobs:
             shared: &shared
               - '.github/workflows/build-images.yml'
               - 'deploy/**'
-            chino-web:
-              - *shared
-              - 'apps/chino/web/**'
-            chino-api:
-              - *shared
-              - 'services/chino-api/**'
-            chino-stream:
-              - *shared
-              - 'services/chino-stream/**'
-            katalog-api:
-              - *shared
-              - 'platform/katalog-api/**'
-            katalog-manager-api:
-              - *shared
-              - 'platform/katalog-manager-api/**'
             admin:
               - *shared
               - 'apps/admin/**'
@@ -90,11 +80,6 @@ jobs:
       - id: decide
         env:
           FORCE_ALL: ${{ github.event_name != 'pull_request' }}
-          F_CHINO_WEB: ${{ steps.filter.outputs.chino-web }}
-          F_CHINO_API: ${{ steps.filter.outputs.chino-api }}
-          F_CHINO_STREAM: ${{ steps.filter.outputs.chino-stream }}
-          F_KATALOG_API: ${{ steps.filter.outputs.katalog-api }}
-          F_KATALOG_MANAGER_API: ${{ steps.filter.outputs.katalog-manager-api }}
           F_ADMIN: ${{ steps.filter.outputs.admin }}
           F_KEYCLOAK: ${{ steps.filter.outputs.keycloak }}
           F_OPERATOR: ${{ steps.filter.outputs.operator }}
@@ -108,16 +93,11 @@ jobs:
               echo "$name=false" >> "$GITHUB_OUTPUT"
             fi
           }
-          emit chino-web           "$F_CHINO_WEB"
-          emit chino-api           "$F_CHINO_API"
-          emit chino-stream        "$F_CHINO_STREAM"
-          emit katalog-api         "$F_KATALOG_API"
-          emit katalog-manager-api "$F_KATALOG_MANAGER_API"
-          emit admin               "$F_ADMIN"
-          emit keycloak            "$F_KEYCLOAK"
-          emit operator            "$F_OPERATOR"
+          emit admin    "$F_ADMIN"
+          emit keycloak "$F_KEYCLOAK"
+          emit operator "$F_OPERATOR"
 
-  # ── Build + push each changed component ──────────────────────────────────
+  # ── Build + push each changed platform-owned component ───────────────────
   build:
     needs: changes
     runs-on: ubuntu-latest
@@ -125,21 +105,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - svc: chino-web
-            context: apps/chino/web
-            changed: ${{ needs.changes.outputs.chino-web }}
-          - svc: chino-api
-            context: services/chino-api
-            changed: ${{ needs.changes.outputs.chino-api }}
-          - svc: chino-stream
-            context: services/chino-stream
-            changed: ${{ needs.changes.outputs.chino-stream }}
-          - svc: katalog-api
-            context: platform/katalog-api
-            changed: ${{ needs.changes.outputs.katalog-api }}
-          - svc: katalog-manager-api
-            context: platform/katalog-manager-api
-            changed: ${{ needs.changes.outputs.katalog-manager-api }}
           - svc: admin
             context: apps/admin
             changed: ${{ needs.changes.outputs.admin }}

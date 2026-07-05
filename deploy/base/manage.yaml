@@ -52,7 +52,7 @@ spec:
               echo "bundled keycloak ready"
       containers:
         - name: app
-          image: ghcr.io/zaentrum/stube/katalog-manager-api:latest
+          image: ghcr.io/zaentrum/katalog-manager:latest
           ports: [{ containerPort: 8080, name: http }]
           envFrom:
             # OIDC_ISSUER / OIDC_AUDIENCE / KAFKA_BROKERS live in stube-env.
