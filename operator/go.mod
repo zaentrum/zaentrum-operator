@@ -1,4 +1,4 @@
-module github.com/zaentrum/stube/operator
+module github.com/zaentrum/zaentrum-operator/operator
 
 go 1.24.0
 

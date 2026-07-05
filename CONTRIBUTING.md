@@ -20,9 +20,11 @@ and are entitled to stream — a media server, an admin launchpad, and clients, 
 
 ## Layout
 
-`apps/` clients (incl. `admin`, the `/manage` launchpad) · `services/` per-product backends ·
-`platform/` neutral catalog core (incl. `katalog-manager-api`) · `deploy/` one source of
-truth for deployment · `docs/` architecture + self-hosting.
+Platform **meta-repo**: `operator/` the controller · `deploy/` one source of truth for
+deployment · `apps/admin/` the `/manage` UI (→ `ghcr.io/zaentrum/admin`) · `platform/keycloak/`
+bundled identity (→ `ghcr.io/zaentrum/keycloak`) · `docs/` architecture + self-hosting. The
+service/client sources live in their own repos at `github.com/zaentrum/<svc>`; the manifests
+here reference their published `ghcr.io/zaentrum/<svc>` images.
 
 ## Dev loop
 

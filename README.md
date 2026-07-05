@@ -101,13 +101,21 @@ See **[docs/self-hosting.md](docs/self-hosting.md)** for the operator contract a
 
 ## Repository layout
 
+This is the platform **meta-repo**: the operator, the deploy manifests, and the two
+platform-owned images that have no repo of their own. The application/service **sources**
+live in their own repos at `github.com/zaentrum/<svc>` and publish flat
+`ghcr.io/zaentrum/<svc>` images; the manifests here just reference those images.
+
 ```
-apps/        core (shared client) · chino · admin (/manage) · musig · tv   ← clients
-services/    chino-api · chino-stream                                       ← per-product BFF + stream origin
-platform/    katalog-api · katalog-manager-api · transcoder · packager · …  ← neutral catalog core
-deploy/      allinone (k3s-in-one) · base (real cluster) · overlays         ← single source of truth for deploy
-docs/        architecture · self-hosting (operator contract)
+operator/         the controller-manager — reconciles the Stube CR into the deploy set
+deploy/           allinone (k3s-in-one) · base (real cluster) · compose · overlays  ← source of truth for deploy
+apps/admin/       the /manage admin UI            → ghcr.io/zaentrum/admin     (built here)
+platform/keycloak/ bundled identity provider      → ghcr.io/zaentrum/keycloak  (built here)
+docs/             architecture · self-hosting · operator
 ```
+
+Service images the manifests pull (each owned by its own `github.com/zaentrum` repo):
+`chino-web` · `chino-api` · `chino-stream` · `katalog-api` · `katalog-manager`.
 
 ## What is deliberately **not** here
 

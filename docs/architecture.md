@@ -9,15 +9,15 @@ content-neutral: you bring files you already have, and Stube catalogs them, proc
 
 ```mermaid
 flowchart TD
-  subgraph clients["apps/ — clients (skins of one core)"]
-    web["chino-web"]; mob["chino-mobile"]; tv["chino-androidtv"]; admin["admin (/manage)"]
+  subgraph clients["clients (skins of one core) — own repos"]
+    web["chino-web"]; mob["chino-mobile"]; tv["chino-androidtv"]; admin["admin (/manage) — built here"]
   end
-  subgraph product["services/ — per product"]
+  subgraph product["per-product backends — own repos"]
     api["chino-api (BFF)"]; stream["chino-stream (HLS/CMAF origin)"]
   end
-  subgraph core["platform/ — neutral catalog core"]
+  subgraph core["neutral catalog core — own repos"]
     kapi["katalog-api (read)"]
-    kmgr["katalog-manager-api (manage / write + first-run)"]
+    kmgr["katalog-manager (manage / write + first-run)"]
     proc["transcoder · packager · enricher · analyzer · artwork"]
   end
   bundled[("bundled: Postgres · Valkey · Kafka")]

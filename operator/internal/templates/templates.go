@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
-	stubev1alpha1 "github.com/zaentrum/stube/operator/api/v1alpha1"
+	stubev1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 )
 
 //go:embed data/*.yaml
