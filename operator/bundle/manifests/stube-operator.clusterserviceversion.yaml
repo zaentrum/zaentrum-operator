@@ -6,7 +6,7 @@ metadata:
   annotations:
     capabilities: Basic Install
     categories: Streaming & Messaging
-    containerImage: ghcr.io/zaentrum/stube/operator:latest
+    containerImage: ghcr.io/zaentrum/operator:latest
     description: >-
       Stube is a neutral, self-hostable media client + server for a library you
       own and are entitled to stream. The operator reconciles a single Stube
@@ -114,7 +114,7 @@ spec:
               - urn:alm:descriptor:com.tectonic.ui:select:edge
           - path: version
             displayName: Version
-            description: Image tag applied to every ghcr.io/zaentrum/stube/* image.
+            description: Image tag applied to every ghcr.io/zaentrum/* image.
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:text
           - path: update.mode
@@ -218,7 +218,7 @@ spec:
                     type: RuntimeDefault
                 containers:
                   - name: manager
-                    image: ghcr.io/zaentrum/stube/operator:latest
+                    image: ghcr.io/zaentrum/operator:latest
                     command: ["/manager"]
                     args:
                       - --leader-elect
@@ -254,8 +254,8 @@ spec:
                 terminationGracePeriodSeconds: 10
   # ── relatedImages ──────────────────────────────────────────────────────────
   # For disconnected/mirrored installs. The operator image is pinned here; the
-  # full neutral ghcr.io/zaentrum/stube/<service> set is resolved by the operator
+  # full neutral ghcr.io/zaentrum/<service> set is resolved by the operator
   # at the same release tag (spec.version) it reconciles.
   relatedImages:
     - name: operator
-      image: ghcr.io/zaentrum/stube/operator:latest
+      image: ghcr.io/zaentrum/operator:latest

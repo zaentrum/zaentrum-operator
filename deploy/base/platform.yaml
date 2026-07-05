@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: katalog-api
-          image: ghcr.io/zaentrum/stube/katalog-api:latest
+          image: ghcr.io/zaentrum/katalog-api:latest
           ports: [{ containerPort: 8080, name: http }]
           env:
             - name: KATALOG_API_ADDR

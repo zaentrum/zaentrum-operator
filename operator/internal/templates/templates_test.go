@@ -81,7 +81,7 @@ func TestKeycloakBootFixesPreserved(t *testing.T) {
 
 	// Image is parameterized to the configured version.
 	img, _, _ := unstructured.NestedString(kc, "image")
-	assert.Equal(t, "ghcr.io/zaentrum/stube/keycloak:latest", img)
+	assert.Equal(t, "ghcr.io/zaentrum/keycloak:latest", img)
 
 	// The keycloak Service must expose :80.
 	svc := find(t, objs, "Service", "keycloak")
@@ -155,15 +155,17 @@ func TestVersionParameterizationAppliesToAllStubeImages(t *testing.T) {
 		containers, _, _ := unstructured.NestedSlice(o.Object, "spec", "template", "spec", "containers")
 		for _, c := range containers {
 			img, _, _ := unstructured.NestedString(c.(map[string]interface{}), "image")
-			if len(img) >= len("ghcr.io/zaentrum/stube/") && img[:len("ghcr.io/zaentrum/stube/")] == "ghcr.io/zaentrum/stube/" {
+			if len(img) >= len("ghcr.io/zaentrum/") && img[:len("ghcr.io/zaentrum/")] == "ghcr.io/zaentrum/" {
 				stubeImages++
 				assert.Contains(t, img, ":v1.2.3", "stube image must carry the configured version: %s", img)
 			}
 		}
 	}
-	// 7 ghcr.io/zaentrum/stube/* images across Deployments: keycloak, chino-web,
-	// chino-api, chino-stream, katalog-api, katalog-manager-api, admin.
-	assert.Equal(t, 7, stubeImages, "all 7 ghcr.io/zaentrum/stube/* images must carry the version tag")
+	// 7 ghcr.io/zaentrum/* images across Deployments: keycloak, chino-web,
+	// chino-api, chino-stream, katalog-api, katalog-manager, admin. (The
+	// management API's Deployment is named katalog-manager-api but pulls the
+	// flat katalog-manager image — the Go rewrite.)
+	assert.Equal(t, 7, stubeImages, "all 7 ghcr.io/zaentrum/* images must carry the version tag")
 }
 
 func TestHostnameParameterization(t *testing.T) {

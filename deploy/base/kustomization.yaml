@@ -80,17 +80,17 @@ secretGenerator:
       - realm-admin-password=dev
 
 images:
-  - name: ghcr.io/zaentrum/stube/chino-web
+  - name: ghcr.io/zaentrum/chino-web
     newTag: latest
-  - name: ghcr.io/zaentrum/stube/chino-api
+  - name: ghcr.io/zaentrum/chino-api
     newTag: latest
-  - name: ghcr.io/zaentrum/stube/chino-stream
+  - name: ghcr.io/zaentrum/chino-stream
     newTag: latest
-  - name: ghcr.io/zaentrum/stube/katalog-api
+  - name: ghcr.io/zaentrum/katalog-api
     newTag: latest
-  - name: ghcr.io/zaentrum/stube/katalog-manager-api
+  - name: ghcr.io/zaentrum/katalog-manager
     newTag: latest
-  - name: ghcr.io/zaentrum/stube/admin
+  - name: ghcr.io/zaentrum/admin
     newTag: latest
-  - name: ghcr.io/zaentrum/stube/keycloak
+  - name: ghcr.io/zaentrum/keycloak
     newTag: latest

@@ -30,7 +30,7 @@ spec:
               echo "bundled keycloak ready"
       containers:
         - name: app
-          image: ghcr.io/zaentrum/stube/chino-api:latest
+          image: ghcr.io/zaentrum/chino-api:latest
           ports: [{ containerPort: 8080, name: http }]
           envFrom:
             - configMapRef: { name: stube-env }   # OIDC_*, KATALOG_BASE_URL, STREAM_BASE_URL, ADMIN_SUBJECTS
@@ -93,7 +93,7 @@ spec:
               echo "bundled keycloak ready"
       containers:
         - name: chino-stream
-          image: ghcr.io/zaentrum/stube/chino-stream:latest
+          image: ghcr.io/zaentrum/chino-stream:latest
           ports: [{ containerPort: 8080, name: http }]
           env:
             - name: LISTEN_ADDR
@@ -166,7 +166,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: ghcr.io/zaentrum/stube/chino-web:latest
+          image: ghcr.io/zaentrum/chino-web:latest
           ports: [{ containerPort: 8080, name: http }]
           readinessProbe:
             httpGet: { path: /healthz, port: http }

@@ -57,7 +57,7 @@ services:
     volumes: ["kafka:/var/lib/kafka/data"]
 
   katalog-api:
-    image: ghcr.io/zaentrum/stube/katalog-api:latest
+    image: ghcr.io/zaentrum/katalog-api:latest
     environment:
       <<: *oidc
       KATALOG_API_PG_URL: "postgres://stube:stube-dev-change-me@postgres:5432/stube?sslmode=disable"
@@ -65,7 +65,7 @@ services:
 
   # Neutral management / write API. Served under /api/manage.
   katalog-manager-api:
-    image: ghcr.io/zaentrum/stube/katalog-manager-api:latest
+    image: ghcr.io/zaentrum/katalog-manager:latest
     environment:
       <<: *oidc
       ADDR: ":8080"
@@ -79,7 +79,7 @@ services:
       kafka: { condition: service_started }
 
   chino-api:
-    image: ghcr.io/zaentrum/stube/chino-api:latest
+    image: ghcr.io/zaentrum/chino-api:latest
     environment:
       <<: *oidc
       KATALOG_BASE_URL: "http://katalog-api:8080"
@@ -89,7 +89,7 @@ services:
     depends_on: [katalog-api, chino-stream]
 
   chino-stream:
-    image: ghcr.io/zaentrum/stube/chino-stream:latest
+    image: ghcr.io/zaentrum/chino-stream:latest
     environment:
       <<: *oidc
       KATALOG_API_BASE_URL: "http://katalog-api:8080"
@@ -100,13 +100,13 @@ services:
       - "${STUBE_MEDIA:-./media}:/media:ro"   # ← your library (files you own)
 
   chino-web:
-    image: ghcr.io/zaentrum/stube/chino-web:latest
+    image: ghcr.io/zaentrum/chino-web:latest
     depends_on: [chino-api]
 
   # Management UI (React launchpad, static SPA). Built with router basename
   # "/manage"; the proxy serves it at /manage and first run opens /manage/setup.
   admin:
-    image: ghcr.io/zaentrum/stube/admin:latest
+    image: ghcr.io/zaentrum/admin:latest
     depends_on: [katalog-manager-api]
 
 volumes:

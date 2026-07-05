@@ -71,7 +71,7 @@ docker exec -it stube k3s kubectl -n stube logs deploy/katalog-manager-api
 
 ## Where the images come from
 
-Application images are pulled from **`ghcr.io/zaentrum/stube/<service>`** on first
+Application images are pulled from **`ghcr.io/zaentrum/<service>`** on first
 boot (`chino-web`, `chino-api`, `chino-stream`, `katalog-api`,
 `katalog-manager-api`, `admin`), plus the upstream `postgres`, `valkey`, and
 `apache/kafka` images. The box needs outbound network for the first start;
@@ -85,12 +85,12 @@ it tries to pull:
 
 ```bash
 # 1. Collect the images this release uses (on a connected machine):
-imgs="ghcr.io/zaentrum/stube/chino-web:latest \
-ghcr.io/zaentrum/stube/chino-api:latest \
-ghcr.io/zaentrum/stube/chino-stream:latest \
-ghcr.io/zaentrum/stube/katalog-api:latest \
-ghcr.io/zaentrum/stube/katalog-manager-api:latest \
-ghcr.io/zaentrum/stube/admin:latest \
+imgs="ghcr.io/zaentrum/chino-web:latest \
+ghcr.io/zaentrum/chino-api:latest \
+ghcr.io/zaentrum/chino-stream:latest \
+ghcr.io/zaentrum/katalog-api:latest \
+ghcr.io/zaentrum/katalog-manager:latest \
+ghcr.io/zaentrum/admin:latest \
 postgres:16-alpine valkey/valkey:8-alpine apache/kafka:3.8.0"
 for i in $imgs; do docker pull "$i"; done
 docker save $imgs -o stube-airgap.tar
