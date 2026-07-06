@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: analyzer
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: analyzer
     component: pipeline
@@ -113,7 +113,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: analyzer
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: analyzer
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
@@ -131,7 +131,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: packager
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: packager
     component: pipeline
@@ -227,7 +227,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: packager
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: packager
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
@@ -245,7 +245,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: transcoder
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: transcoder
     component: pipeline
@@ -356,7 +356,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: transcoder
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: transcoder
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
@@ -374,7 +374,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: katalog-ingest
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: katalog-ingest
     component: catalog
@@ -458,7 +458,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: katalog-ingest
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: katalog-ingest
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}

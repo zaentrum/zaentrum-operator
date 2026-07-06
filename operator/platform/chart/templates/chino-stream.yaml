@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chino-stream
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: chino-stream
     role: stream
@@ -128,7 +128,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: chino-stream
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: chino-stream
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
