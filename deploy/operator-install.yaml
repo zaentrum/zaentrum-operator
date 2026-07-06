@@ -1,0 +1,601 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/part-of: zaentrum-operator
+    control-plane: controller-manager
+  name: zaentrum-operator-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: zaentrums.zaentrum.io
+spec:
+  group: zaentrum.io
+  names:
+    kind: Zaentrum
+    listKind: ZaentrumList
+    plural: zaentrums
+    shortNames:
+    - stb
+    singular: zaentrum
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.currentVersion
+      name: Version
+      type: string
+    - jsonPath: .spec.hostname
+      name: Host
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Zaentrum is the Schema for the zaentrums API; one CR drives the
+          whole platform.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ZaentrumSpec defines the desired state of a Zaentrum platform
+              instance.
+            properties:
+              channel:
+                default: stable
+                description: Channel selects the release train (consumed by Stage-2
+                  auto-update).
+                enum:
+                - stable
+                - edge
+                type: string
+              databases:
+                description: Databases configures the per-app database layout.
+                properties:
+                  chino:
+                    default: chino
+                    type: string
+                  katalog:
+                    default: katalog
+                    type: string
+                  keycloak:
+                    default: keycloak
+                    type: string
+                  mode:
+                    default: perApp
+                    description: Mode is "perApp" (a DB per service) or "single".
+                    type: string
+                  portal:
+                    default: portal
+                    type: string
+                type: object
+              features:
+                description: Features toggles optional capabilities.
+                properties:
+                  gpu:
+                    default: false
+                    description: GPU enables hardware (NVENC) transcoding on the stream
+                      plane.
+                    type: boolean
+                  kafka:
+                    default: true
+                    description: Kafka enables the bundled single-node event-stream
+                      broker.
+                    type: boolean
+                  pipeline:
+                    default: false
+                    description: Pipeline enables the media pipeline (analyzer/packager/transcoder/katalog-ingest).
+                    type: boolean
+                type: object
+              hostname:
+                default: zaentrum.localhost
+                description: 'Hostname is the public host: issuer host + ingress host
+                  + KC_HOSTNAME.'
+                type: string
+              identity:
+                description: Identity configures the OIDC provider.
+                properties:
+                  audience:
+                    default: chino
+                    description: Audience is the expected token audience services
+                      validate against.
+                    type: string
+                  clientId:
+                    default: chino-web
+                    description: ClientID is the public OIDC client id the web SPA
+                      authenticates as.
+                    type: string
+                  issuer:
+                    description: |-
+                      Issuer is the public OIDC issuer URL. When empty in bundled mode the
+                      operator derives it from Hostname (http://<hostname>/auth/realms/zaentrum).
+                    type: string
+                  issuerScheme:
+                    default: http
+                    description: |-
+                      IssuerScheme is http or https — the scheme of the derived issuer + the
+                      bundled Keycloak KC_HOSTNAME. Use https when TLS is terminated at the edge.
+                    enum:
+                    - http
+                    - https
+                    type: string
+                  loginTheme:
+                    description: LoginTheme is the bundled Keycloak login theme name
+                      (empty = Keycloak default).
+                    type: string
+                  mode:
+                    default: bundled
+                    description: Mode is "bundled" (ship Keycloak) or "external" (federate).
+                    enum:
+                    - bundled
+                    - external
+                    type: string
+                type: object
+              imagePullSecrets:
+                description: ImagePullSecrets are added to every workload (private
+                  registries).
+                items:
+                  type: string
+                type: array
+              keycloak:
+                description: Keycloak configures the bundled Keycloak image.
+                properties:
+                  image:
+                    default: quay.io/keycloak/keycloak:26.0.7
+                    description: Image is the bundled Keycloak container image.
+                    type: string
+                type: object
+              network:
+                description: Network configures split-horizon / hostAliases.
+                properties:
+                  issuerHostAliasIP:
+                    description: |-
+                      IssuerHostAliasIP adds a hostAliases entry (this IP → the public host) to
+                      the OIDC validators so in-cluster token validation reaches an edge-terminated
+                      HTTPS issuer (split-horizon). Empty = no hostAliases.
+                    type: string
+                type: object
+              partOf:
+                description: 'PartOf sets the app.kubernetes.io/part-of label value
+                  (default: the namespace).'
+                type: string
+              replicas:
+                additionalProperties:
+                  format: int32
+                  type: integer
+                description: |-
+                  Replicas overrides the replica count of individual app-tier Deployments by
+                  name, e.g. {"chino-api": 2, "katalog-api": 3}. Unlisted services stay at 1.
+                  Stateful backers (postgres/valkey/kafka/keycloak) are NOT scalable this way.
+                  Set from the portal operator console; the operator reconciles it so the
+                  change persists (a raw Deployment edit would be reverted on the next pass).
+                type: object
+              routing:
+                description: Routing selects Ingress vs OpenShift Routes.
+                properties:
+                  provisionIngress:
+                    description: ProvisionIngress renders a plain-Kubernetes Ingress.
+                      Default true.
+                    type: boolean
+                  provisionRoutes:
+                    description: ProvisionRoutes renders OpenShift Routes (single-origin
+                      paths). Default false.
+                    type: boolean
+                type: object
+              secrets:
+                description: Secrets controls whether platform secrets are rendered
+                  or external.
+                properties:
+                  external:
+                    description: |-
+                      External means the platform secrets are pre-created (e.g. by CI); the chart
+                      does not render them. Default false (bundled dev-default secrets).
+                    type: boolean
+                type: object
+              storage:
+                description: Storage configures persistent storage.
+                properties:
+                  className:
+                    description: ClassName is an optional StorageClass for all platform
+                      PVCs.
+                    type: string
+                  mediaSize:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    default: 50Gi
+                    description: MediaSize is the size of the media library PVC.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  provisionMedia:
+                    description: |-
+                      ProvisionMedia controls whether the chart creates the media PVC. Set false
+                      when an external PV backs it (e.g. the demo's NFS export). Default true.
+                    type: boolean
+                type: object
+              update:
+                description: Update configures Stage-2 auto-update.
+                properties:
+                  mode:
+                    default: manual
+                    description: Mode is "manual" (default) or "auto".
+                    enum:
+                    - manual
+                    - auto
+                    type: string
+                type: object
+              version:
+                default: latest
+                description: Version is the image tag applied to every ghcr.io/zaentrum/*
+                  image.
+                type: string
+            type: object
+          status:
+            description: ZaentrumStatus reports the observed state of a Zaentrum platform
+              instance.
+            properties:
+              availableUpdate:
+                description: |-
+                  AvailableUpdate is the newest in-channel tag discovered by Stage-2
+                  auto-update logic, if any.
+                type: string
+              components:
+                description: Components reports per-Deployment readiness.
+                items:
+                  description: ComponentStatus reports the readiness of one managed
+                    Deployment.
+                  properties:
+                    image:
+                      description: Image is the primary container image (with tag)
+                        currently applied.
+                      type: string
+                    name:
+                      description: Name is the Deployment name.
+                      type: string
+                    ready:
+                      description: Ready is true when all replicas of the Deployment
+                        are available.
+                      type: boolean
+                  required:
+                  - name
+                  - ready
+                  type: object
+                type: array
+              conditions:
+                description: Conditions follow the standard Kubernetes condition convention.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              currentVersion:
+                description: CurrentVersion mirrors the version most recently applied
+                  to the cluster.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is a coarse human-facing lifecycle string.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zaentrum-operator-controller-manager
+  namespace: zaentrum-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zaentrum-operator-leader-election-role
+rules:
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zaentrum-operator-manager-role
+rules:
+- apiGroups:
+  - zaentrum.io
+  resources:
+  - zaentrums
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - zaentrum.io
+  resources:
+  - zaentrums/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - zaentrum.io
+  resources:
+  - zaentrums/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  - services
+  - serviceaccounts
+  - persistentvolumeclaims
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  - rolebindings
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zaentrum-operator-leader-election-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zaentrum-operator-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: zaentrum-operator-controller-manager
+  namespace: zaentrum-operator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zaentrum-operator-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zaentrum-operator-manager-role
+subjects:
+- kind: ServiceAccount
+  name: zaentrum-operator-controller-manager
+  namespace: zaentrum-operator-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/part-of: zaentrum-operator
+    control-plane: controller-manager
+  name: zaentrum-operator-controller-manager
+  namespace: zaentrum-operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --metrics-bind-address=:8080
+        command:
+        - /manager
+        image: ghcr.io/zaentrum/operator:ef77742
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 8080
+          name: metrics
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: zaentrum-operator-controller-manager
+      terminationGracePeriodSeconds: 10

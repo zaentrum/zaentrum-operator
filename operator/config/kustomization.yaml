@@ -1,0 +1,29 @@
+# Canonical operator install (the cluster-admin bootstrap).
+#
+# Assembles the CRD + cluster-scoped RBAC + the controller-manager Deployment
+# into one applyable unit. These are cluster-scoped (CRD + ClusterRole[Binding]s)
+# so they are a ONE-TIME cluster-admin bootstrap — never app-CI, never a local
+# apply from an agent. A cluster-admin runs, from a checkout of this repo:
+#
+#   oc apply -k operator/config
+#
+# or applies the pinned, flattened artifact committed alongside:
+#
+#   oc apply -f deploy/operator-install.yaml     # (kustomize build of this dir)
+#
+# The image is PINNED to a built tag for reproducibility. Bump `newTag` (or move
+# to a digest) to roll the operator; the operator's own Stage-2 channel logic
+# updates the PLATFORM workloads via the Zaentrum CR, independently of this.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - crd/zaentrum.io_zaentrums.yaml
+  - rbac/service_account.yaml
+  - rbac/role.yaml
+  - rbac/role_binding.yaml
+  - manager/manager.yaml
+
+images:
+  - name: ghcr.io/zaentrum/operator
+    newTag: ef77742

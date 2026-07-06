@@ -33,9 +33,14 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Ingress.
+  # Ingress (plain-Kubernetes exposure; provisionIngress profiles).
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # OpenShift Routes (single-origin exposure; provisionRoutes profiles, e.g. the
+  # demo). Without this the SSA apply of the rendered Routes is forbidden.
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # RBAC the operator hands to katalog-manager-api (first-run config propagation).
   # A controller may only grant rights it already holds, so it must carry these.

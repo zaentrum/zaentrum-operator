@@ -179,9 +179,13 @@ spec:
             - apiGroups: ["batch"]
               resources: ["jobs"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-            # Ingress.
+            # Ingress (provisionIngress profiles).
             - apiGroups: ["networking.k8s.io"]
               resources: ["ingresses"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            # OpenShift Routes (provisionRoutes profiles, e.g. the demo).
+            - apiGroups: ["route.openshift.io"]
+              resources: ["routes"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
             # RBAC the operator hands to katalog-manager-api (first-run config
             # propagation). A controller may only grant rights it already holds,
