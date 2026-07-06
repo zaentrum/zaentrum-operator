@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: zaentrum-portal
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: zaentrum-portal
     role: portal
@@ -53,7 +53,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: zaentrum-portal
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: zaentrum-portal
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}

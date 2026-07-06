@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chino-api
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: chino-api
     role: backend
@@ -125,7 +125,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: chino-api
-  namespace: zaentrum-demo
+  namespace: {{ .Release.Namespace }}
   labels:
     app: chino-api
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}

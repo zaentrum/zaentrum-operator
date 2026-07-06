@@ -61,6 +61,17 @@ type IdentitySpec struct {
 	// +kubebuilder:default=chino
 	// +optional
 	Audience string `json:"audience,omitempty"`
+
+	// IssuerScheme is http or https — the scheme of the derived issuer + the
+	// bundled Keycloak KC_HOSTNAME. Use https when TLS is terminated at the edge.
+	// +kubebuilder:validation:Enum=http;https
+	// +kubebuilder:default=http
+	// +optional
+	IssuerScheme string `json:"issuerScheme,omitempty"`
+
+	// LoginTheme is the bundled Keycloak login theme name (empty = Keycloak default).
+	// +optional
+	LoginTheme string `json:"loginTheme,omitempty"`
 }
 
 // StorageSpec configures persistent storage for the media library.
@@ -73,6 +84,11 @@ type StorageSpec struct {
 	// ClassName is an optional StorageClass for all platform PVCs.
 	// +optional
 	ClassName string `json:"className,omitempty"`
+
+	// ProvisionMedia controls whether the chart creates the media PVC. Set false
+	// when an external PV backs it (e.g. the demo's NFS export). Default true.
+	// +optional
+	ProvisionMedia *bool `json:"provisionMedia,omitempty"`
 }
 
 // FeaturesSpec toggles optional platform capabilities.
@@ -86,6 +102,67 @@ type FeaturesSpec struct {
 	// +kubebuilder:default=true
 	// +optional
 	Kafka bool `json:"kafka,omitempty"`
+
+	// Pipeline enables the media pipeline (analyzer/packager/transcoder/katalog-ingest).
+	// +kubebuilder:default=false
+	// +optional
+	Pipeline bool `json:"pipeline,omitempty"`
+}
+
+// NetworkSpec configures network-level platform behaviour.
+type NetworkSpec struct {
+	// IssuerHostAliasIP adds a hostAliases entry (this IP → the public host) to
+	// the OIDC validators so in-cluster token validation reaches an edge-terminated
+	// HTTPS issuer (split-horizon). Empty = no hostAliases.
+	// +optional
+	IssuerHostAliasIP string `json:"issuerHostAliasIP,omitempty"`
+}
+
+// RoutingSpec selects how the platform is exposed.
+type RoutingSpec struct {
+	// ProvisionIngress renders a plain-Kubernetes Ingress. Default true.
+	// +optional
+	ProvisionIngress *bool `json:"provisionIngress,omitempty"`
+
+	// ProvisionRoutes renders OpenShift Routes (single-origin paths). Default false.
+	// +optional
+	ProvisionRoutes *bool `json:"provisionRoutes,omitempty"`
+}
+
+// SecretsSpec controls secret provisioning.
+type SecretsSpec struct {
+	// External means the platform secrets are pre-created (e.g. by CI); the chart
+	// does not render them. Default false (bundled dev-default secrets).
+	// +optional
+	External bool `json:"external,omitempty"`
+}
+
+// DatabasesSpec configures the per-app database layout.
+type DatabasesSpec struct {
+	// Mode is "perApp" (a DB per service) or "single".
+	// +kubebuilder:default=perApp
+	// +optional
+	Mode string `json:"mode,omitempty"`
+	// +kubebuilder:default=chino
+	// +optional
+	Chino string `json:"chino,omitempty"`
+	// +kubebuilder:default=katalog
+	// +optional
+	Katalog string `json:"katalog,omitempty"`
+	// +kubebuilder:default=keycloak
+	// +optional
+	Keycloak string `json:"keycloak,omitempty"`
+	// +kubebuilder:default=portal
+	// +optional
+	Portal string `json:"portal,omitempty"`
+}
+
+// KeycloakSpec configures the bundled Keycloak image.
+type KeycloakSpec struct {
+	// Image is the bundled Keycloak container image.
+	// +kubebuilder:default="quay.io/keycloak/keycloak:26.0.7"
+	// +optional
+	Image string `json:"image,omitempty"`
 }
 
 // UpdateSpec configures the Stage-2 auto-update behaviour.
@@ -128,6 +205,34 @@ type ZaentrumSpec struct {
 	// Update configures Stage-2 auto-update.
 	// +optional
 	Update UpdateSpec `json:"update,omitempty"`
+
+	// Network configures split-horizon / hostAliases.
+	// +optional
+	Network NetworkSpec `json:"network,omitempty"`
+
+	// Routing selects Ingress vs OpenShift Routes.
+	// +optional
+	Routing RoutingSpec `json:"routing,omitempty"`
+
+	// Secrets controls whether platform secrets are rendered or external.
+	// +optional
+	Secrets SecretsSpec `json:"secrets,omitempty"`
+
+	// Databases configures the per-app database layout.
+	// +optional
+	Databases DatabasesSpec `json:"databases,omitempty"`
+
+	// Keycloak configures the bundled Keycloak image.
+	// +optional
+	Keycloak KeycloakSpec `json:"keycloak,omitempty"`
+
+	// ImagePullSecrets are added to every workload (private registries).
+	// +optional
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
+
+	// PartOf sets the app.kubernetes.io/part-of label value (default: the namespace).
+	// +optional
+	PartOf string `json:"partOf,omitempty"`
 
 	// Replicas overrides the replica count of individual app-tier Deployments by
 	// name, e.g. {"chino-api": 2, "katalog-api": 3}. Unlisted services stay at 1.
@@ -180,7 +285,7 @@ type ZaentrumStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=stb
+// +kubebuilder:resource:shortName=stb,path=zaentrums,singular=zaentrum
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.currentVersion`
 // +kubebuilder:printcolumn:name="Host",type=string,JSONPath=`.spec.hostname`
