@@ -8,11 +8,13 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 RUN go mod download
 
-# Source. The platform manifests are embedded via go:embed, so they ship in
-# the binary — no runtime files needed.
+# Source. The canonical platform Helm chart is embedded via go:embed
+# (platform/embed.go → platform/chart), so it ships in the binary — no runtime
+# files needed. platform/ MUST be copied or the embed fails to resolve.
 COPY main.go main.go
 COPY api/ api/
 COPY internal/ internal/
+COPY platform/ platform/
 
 # Static, stripped binary.
 RUN CGO_ENABLED=0 GOOS=linux GOFLAGS=-trimpath \
