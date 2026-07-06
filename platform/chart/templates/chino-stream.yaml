@@ -1,0 +1,143 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-stream
+  namespace: zaentrum-demo
+  labels:
+    app: chino-stream
+    role: stream
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-stream" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: chino-stream
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: chino-stream
+        role: stream
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      {{- include "z.hostAliases" . | nindent 6 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: transcoder
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      containers:
+      - name: chino-stream
+        image: ghcr.io/zaentrum/chino-stream:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        - name: LISTEN_ADDR
+          value: ":8080"
+        - name: KATALOG_API_BASE_URL
+          value: http://katalog-api
+        - name: MEDIA_ROOT
+          value: /var/lib/katalog/media
+        - name: OIDC_ISSUER
+          value: {{ include "z.issuer" . }}
+        - name: OIDC_AUDIENCE
+          value: chino
+        - name: AUTH_ENABLED
+          value: "true"
+        - name: STREAM_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-stream-signing
+              key: key
+              optional: true
+        - name: TRANSCODE_PRESET
+          value: veryfast
+        - name: HLS_CACHE_DIR
+          value: /var/cache/katalog-hls
+        - name: USE_NVENC
+          value: "false"   # cut-1: software on-the-fly transcode (no GPU); flip to true with the GPU pipeline
+        - name: NVENC_PRESET
+          value: p5
+        - name: NVENC_CQ
+          value: "23"
+        - name: FFMPEG_MAX_CONCURRENT
+          value: "4"
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64:/usr/local/nvidia/lib
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 3
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        # ONE read-only mount of the media NFS export: serves source (/var/lib/katalog/media)
+        # and the packager's shared HLS output (/var/lib/katalog/packages).
+        - mountPath: /var/lib/katalog
+          name: katalog-data
+          readOnly: true
+        - mountPath: /var/cache/katalog-hls
+          name: hls-cache
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: katalog-data
+        persistentVolumeClaim:
+          claimName: media
+          readOnly: true
+      - name: hls-cache
+        emptyDir:
+          sizeLimit: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chino-stream
+  namespace: zaentrum-demo
+  labels:
+    app: chino-stream
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: http
+  selector:
+    app: chino-stream

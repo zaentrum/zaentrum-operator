@@ -1,0 +1,15 @@
+apiVersion: v2
+name: zaentrum
+description: >-
+  The zaentrum platform — the single canonical definition of every service
+  (launchpad, chino, katalog, the media pipeline, and bundled identity/data/event
+  infra). Self-hosters install it with `helm install`; the zaentrum-operator
+  renders this same chart from a Zaentrum CR; the demo is a values profile. One
+  source of truth — no drift.
+type: application
+version: 0.1.0
+# appVersion is the default platform image tag; overridden per-install by
+# .Values.global.version (the operator sets it from spec.version / the channel).
+appVersion: latest
+keywords: [zaentrum, self-host, media, launchpad]
+home: https://github.com/zaentrum/zaentrum-operator

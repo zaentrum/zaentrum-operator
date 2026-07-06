@@ -1,0 +1,95 @@
+# Demo Postgres + Valkey — EPHEMERAL (emptyDir): a demo auto-resets, and emptyDir
+# sidesteps the no-dynamic-provisioner storage blocker on this cluster.
+# OKD restricted-v2 runs an arbitrary high UID, so PGDATA is a subdir the
+# container creates+owns (the chino-wunsch postgres proves this pattern).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-initdb
+  labels: { app: postgres, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+data:
+  # Runs once on first init (PGDATA empty). POSTGRES_DB already made 'zaentrum';
+  # create the per-app DBs the demo services + bundled Keycloak expect.
+  10-create-dbs.sql: |
+    CREATE DATABASE {{ .Values.databases.chino }};
+    CREATE DATABASE {{ .Values.databases.katalog }};
+    CREATE DATABASE {{ .Values.databases.keycloak }};
+    CREATE DATABASE {{ .Values.databases.portal }};
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels: { app: postgres, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "postgres" "def" 1) }}
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports: [{ containerPort: 5432, name: pg }]
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+            - name: POSTGRES_DB
+              value: zaentrum
+            # Subdir the container creates+owns (restricted-v2 arbitrary UID).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: initdb, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "zaentrum"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 5Gi }     # ephemeral demo DB
+        - name: initdb
+          configMap: { name: postgres-initdb }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: { app: postgres }
+spec:
+  selector: { app: postgres }
+  ports: [{ name: pg, port: 5432, targetPort: pg }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  labels: { app: valkey, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "valkey" "def" 1) }}
+  selector: { matchLabels: { app: valkey } }
+  template:
+    metadata: { labels: { app: valkey } }
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          ports: [{ containerPort: 6379, name: valkey }]
+          readinessProbe:
+            tcpSocket: { port: valkey }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  labels: { app: valkey }
+spec:
+  selector: { app: valkey }
+  ports: [{ name: valkey, port: 6379, targetPort: valkey }]

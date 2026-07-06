@@ -1,0 +1,474 @@
+{{- if .Values.features.pipeline }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analyzer
+  namespace: zaentrum-demo
+  labels:
+    app: analyzer
+    component: pipeline
+    plane: worker
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "analyzer" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: analyzer
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: analyzer
+        component: pipeline
+        plane: worker
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+        operator: Exists
+      containers:
+      - name: app
+        image: ghcr.io/zaentrum/analyzer:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        # Claim/report endpoints (/api/analyze/claim, step updates) live on the WRITE
+        # plane (katalog-manager-api), NOT the read plane (katalog-api -> 404).
+        # Matches packager/transcoder.
+        - name: KATALOG_API_URL
+          value: http://katalog-manager-api
+        # Token endpoint via the in-cluster Keycloak Service, NOT the public origin:
+        # the HostNetwork router 403s the client-credentials grant; the Service path
+        # works (proven by the scan Job). Issued token's iss is still the public origin
+        # (KC_HOSTNAME), so katalog-api/manager-api accept it. No hostAliases needed.
+        - name: OIDC_TOKEN_URL
+          value: http://keycloak/auth/realms/zaentrum/protocol/openid-connect/token
+        - name: OIDC_CLIENT_ID
+          value: zaentrum-manager   # realm's confidential client (no 'katalog'/'client-id' in the bundled realm)
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: client-secret
+              name: zaentrum-keycloak
+        - name: CLAIM_BATCH_SIZE
+          value: "2"
+        - name: IDLE_SLEEP_SECONDS
+          value: "20"
+        - name: TIDB_FIRST_CLAIM_INTERVAL_SECONDS
+          value: "0.25"
+        - name: TIDB_FIRST_BATCH_SIZE
+          value: "4"
+        - name: ENABLE_WHISPER
+          value: "false"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: "4"
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        # ONE mount of the media NFS export at the parent dir: /var/lib/katalog/media is the
+        # source, /var/lib/katalog/packages is the shared HLS output. Mounting the same export
+        # twice in one pod hard-hangs the in-tree NFS kubelet mount, so we never do that.
+        - name: katalog-data
+          mountPath: /var/lib/katalog
+      volumes:
+      - name: katalog-data
+        persistentVolumeClaim:
+          claimName: media
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analyzer
+  namespace: zaentrum-demo
+  labels:
+    app: analyzer
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: analyzer
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: packager
+  namespace: zaentrum-demo
+  labels:
+    app: packager
+    component: pipeline
+    plane: worker
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "packager" "def" 2) }}
+  selector:
+    matchLabels:
+      app: packager
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: packager
+        component: pipeline
+        plane: worker
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        image: ghcr.io/zaentrum/packager:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        - name: KATALOG_API_URL
+          value: http://katalog-manager-api
+        # In-cluster Keycloak Service (the public origin 403s client-credentials via
+        # the HostNetwork router; issued token's iss stays the public origin).
+        - name: OIDC_TOKEN_URL
+          value: http://keycloak/auth/realms/zaentrum/protocol/openid-connect/token
+        - name: OIDC_CLIENT_ID
+          value: zaentrum-manager
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-keycloak
+              key: client-secret
+        - name: CLAIM_BATCH_SIZE
+          value: "1"
+        - name: IDLE_SLEEP_SECONDS
+          value: "30"
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: "4"
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        # ONE mount of the media NFS export at the parent dir: reads the transcoder's output
+        # from /var/lib/katalog/packages (shared) and writes the HLS package back there.
+        - name: katalog-data
+          mountPath: /var/lib/katalog
+      volumes:
+      - name: katalog-data
+        persistentVolumeClaim:
+          claimName: media
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: packager
+  namespace: zaentrum-demo
+  labels:
+    app: packager
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: packager
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcoder
+  namespace: zaentrum-demo
+  labels:
+    app: transcoder
+    component: pipeline
+    plane: worker
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "transcoder" "def" 1) }}
+  selector:
+    matchLabels:
+      app: transcoder
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: transcoder
+        component: pipeline
+        plane: worker
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+        operator: Exists
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        image: ghcr.io/zaentrum/transcoder:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        - name: KATALOG_API_URL
+          value: http://katalog-manager-api
+        # In-cluster Keycloak Service (the public origin 403s client-credentials via
+        # the HostNetwork router; issued token's iss stays the public origin).
+        - name: OIDC_TOKEN_URL
+          value: http://keycloak/auth/realms/zaentrum/protocol/openid-connect/token
+        - name: OIDC_CLIENT_ID
+          value: zaentrum-manager
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-keycloak
+              key: client-secret
+        - name: CLAIM_BATCH_SIZE
+          value: "1"
+        - name: IDLE_SLEEP_SECONDS
+          value: "30"
+        - name: NVENC_PRESET
+          value: p5
+        - name: NVENC_CQ
+          value: "23"
+        - name: NVENC_MAXRATE_1080P_MBPS
+          value: "8"
+        - name: NVENC_MAXRATE_2160P_MBPS
+          value: "14"
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64:/usr/local/nvidia/lib
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: "4"
+            memory: 8Gi
+            nvidia.com/gpu: "1"
+          requests:
+            cpu: "1"
+            memory: 2Gi
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        # ONE mount of the media NFS export at the parent dir: reads source from
+        # /var/lib/katalog/media, writes transcoded output to the shared /var/lib/katalog/packages.
+        - mountPath: /var/lib/katalog
+          name: katalog-data
+      volumes:
+      - name: katalog-data
+        persistentVolumeClaim:
+          claimName: media
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transcoder
+  namespace: zaentrum-demo
+  labels:
+    app: transcoder
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: transcoder
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-ingest
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-ingest
+    component: catalog
+    plane: scheduler
+    value-stream: zaentrum
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-ingest" "def" 1) }}
+  selector:
+    matchLabels:
+      app: katalog-ingest
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: katalog-ingest
+        component: catalog
+        value-stream: zaentrum
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: katalog-ingest
+          image: ghcr.io/zaentrum/katalog-ingest:{{ .Values.global.version }}
+          imagePullPolicy: Always
+          env:
+            - name: KATALOG_INGEST_ADDR
+              value: ":8080"
+            - name: KATALOG_API_URL
+              value: http://katalog-api
+            - name: KATALOG_MANAGER_API_URL
+              value: http://katalog-manager-api
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_TLS_CA
+              value: ""
+            - name: KAFKA_TLS_CERT
+              value: ""
+            - name: KAFKA_TLS_KEY
+              value: ""
+            - name: KAFKA_GROUP_ID
+              value: zaentrum-demo
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-ingest
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-ingest
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: katalog-ingest
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+{{- end }}

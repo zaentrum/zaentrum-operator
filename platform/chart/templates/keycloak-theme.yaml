@@ -1,0 +1,13 @@
+{{- if eq .Values.identity.mode "bundled" }}
+# ── Custom Keycloak login theme (nalet/chino design system) ─────────────────
+# Laid out into the Keycloak themes dir by the theme-layout initContainer (see
+# templates/keycloak.yaml). Stable name 'keycloak-theme' (no kustomize hash) so
+# the Deployment's theme-src volume references a fixed ConfigMap name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-theme
+  labels: { app: keycloak, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+data:
+{{ (.Files.Glob "files/keycloak-theme/*").AsConfig | nindent 2 }}
+{{- end }}

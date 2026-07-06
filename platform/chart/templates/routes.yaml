@@ -1,0 +1,142 @@
+{{- if .Values.routing.provisionRoutes }}
+# Routing profile: SINGLE-ORIGIN PATHS (B1) on the demo host. Public traffic is
+# TLS-terminated at the OKD router and forwarded to HTTP backends; HTTP remains
+# allowed for the in-cluster issuer path. The OKD router matches most-specific
+# path first, so /api/manage > /api, and /auth, /chino, /portal are disjoint.
+# NOTE: /chino + /portal assume the SPAs are built for that sub-path base; if
+# not, switch to the subdomains profile (routes-subdomains.yaml).
+#
+# (To serve the main app at the host root instead, change zaentrum-demo-chino
+#  path to "/" — see SPEC §Routing.)
+# Front door: bare / -> the portal, whose nginx 302s / -> /portal/ (the launchpad).
+# This is also the catch-all; the more-specific /chino //portal //manage //api //auth win.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-root
+  labels: { app: zaentrum-portal, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /
+  to: { kind: Service, name: zaentrum-portal, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+# chino product (launched from the portal tile). Its image is now built for Vite
+# base=/chino/, so it serves /chino/ + /chino/assets/ + /chino/auth/callback.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-chino
+  labels: { app: chino-web, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+  annotations: { haproxy.router.openshift.io/timeout: "4h" }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /chino
+  to: { kind: Service, name: chino-web, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+# /portal → the zaentrum launchpad shell (login → spaces/tiles). The SPA is built with
+# Vite base=/portal/ and its OIDC redirect is /portal/auth/callback (served by this route),
+# so it never collides with Keycloak's /auth. (The bare-host / → /portal/ redirect + moving
+# chino to /chino come with the front-door cutover; for now / still serves chino-web.)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-portal
+  labels: { app: zaentrum-portal, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+  annotations: { haproxy.router.openshift.io/timeout: "4h" }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /portal
+  to: { kind: Service, name: zaentrum-portal, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+# /katalog → the standalone katalog-manager-ui console (split out of the portal).
+# Its image is built for a runtime base and mounted at /katalog/, so it serves
+# /katalog/ + /katalog/assets/ + /katalog/auth/callback (SPA fallback). It posts
+# GraphQL to /api/manage (katalog-manager-api) on the same origin.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-katalog
+  labels: { app: katalog-manager-ui, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+  annotations: { haproxy.router.openshift.io/timeout: "4h" }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /katalog
+  to: { kind: Service, name: katalog-manager-ui, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-api
+  labels: { app: chino-api, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+  annotations: { haproxy.router.openshift.io/timeout: "4h" }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /api
+  to: { kind: Service, name: chino-api, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-manage-api
+  labels: { app: katalog-manager-api, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /api/manage
+  to: { kind: Service, name: katalog-manager-api, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+# /api/portal → portal-api (the launchpad registry). More specific than /api, so
+# the router sends /api/portal/* here and everything else /api/* to chino-api.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-portal-api
+  labels: { app: portal-api, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /api/portal
+  to: { kind: Service, name: portal-api, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+# Bundled headless Keycloak under /auth → issuer https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-auth
+  labels: { app: keycloak, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /auth
+  to: { kind: Service, name: keycloak, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+# The neutral chino-web SPA's OIDC redirect_uri is origin/auth/callback, which on this
+# SINGLE-ORIGIN demo collides with the /auth → keycloak route above (in prod Keycloak is
+# a separate host, so no collision). A MORE-SPECIFIC route sends just /auth/callback to
+# chino-web so the SPA (nginx serves index.html there) processes the auth code; every
+# other /auth/* path (realms/discovery/token/login) still routes to Keycloak.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-auth-callback
+  labels: { app: chino-web, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /auth/callback
+  to: { kind: Service, name: chino-web, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+{{- end }}

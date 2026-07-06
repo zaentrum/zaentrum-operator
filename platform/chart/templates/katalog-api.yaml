@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-api
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-api
+    role: catalog-read
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-api" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: katalog-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: katalog-api
+        role: catalog-read
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      {{- include "z.hostAliases" . | nindent 6 }}
+      containers:
+      - name: katalog-api
+        image: ghcr.io/zaentrum/katalog-api:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: KATALOG_API_ADDR
+          value: ":8080"
+        - name: KATALOG_API_OIDC_ISSUER
+          value: {{ include "z.issuer" . }}
+        - name: KATALOG_API_OIDC_AUDIENCE
+          value: chino
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-db
+              key: user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-db
+              key: password
+        - name: KATALOG_API_PG_URL
+          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/katalog?sslmode=disable
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 3
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-api
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-api
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: katalog-api
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080

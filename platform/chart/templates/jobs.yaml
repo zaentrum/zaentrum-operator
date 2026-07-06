@@ -1,0 +1,174 @@
+{{- if .Values.jobs.seed }}
+# Seeds the demo library on the NFS share with Creative-Commons content only.
+# Mounts the whole export at /var/lib/katalog (the parent-mount layout the services use):
+# source under media/, shared HLS output under packages/. Writes RW (NFS export must allow
+# arbitrary-UID writes — the live packager proves nas001 tolerates this for /media).
+# CI deletes this Job before apply so it re-runs each deploy (idempotent: migrate + skip-if-present).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-demo-content
+  labels: { app: seed-demo-content, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  backoffLimit: 4
+  template:
+    metadata: { labels: { app: seed-demo-content } }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: curlimages/curl:8.11.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              root=/var/lib/katalog
+              dst="$root/media"
+              mkdir -p "$dst" "$root/packages"
+              # packages is written by transcoder/packager which run as varied arbitrary UIDs.
+              chmod 0777 "$root/packages" 2>/dev/null || true
+              # Migrate any legacy root-level media (pre parent-mount layout) into media/.
+              for f in "$root"/*.mp4 "$root"/*.mkv "$root"/*.mov; do
+                [ -f "$f" ] && { echo "migrate $(basename "$f") -> media/"; mv -f "$f" "$dst/"; } || true
+              done
+              titles="
+              https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4
+              https://download.blender.org/durian/movies/Sintel.2010.720p.mkv
+              https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov
+              "
+              for url in $titles; do
+                f="$dst/$(basename "$url")"
+                [ -f "$f" ] && { echo "have $f"; continue; }
+                echo "fetch $url"; curl -fsSL "$url" -o "$f.part" && mv "$f.part" "$f"
+              done
+              echo "demo content ready:"; ls -lh "$dst"
+              echo "packages dir:"; ls -ld "$root/packages"
+          volumeMounts:
+            - { name: katalog-data, mountPath: /var/lib/katalog }   # whole export, RW for seeding
+      volumes:
+        - name: katalog-data
+          persistentVolumeClaim: { claimName: media }
+---
+# Post-deploy self-populate. Waits for katalog-manager-api readiness (its
+# deploy-schema initContainer has applied the CAP schema by then), mints a
+# client-credentials token from the bundled Keycloak (zaentrum-manager → aud=chino,
+# same client the pipeline workers use), and triggers the filesystem scan that
+# turns the seeded CC media into catalog items. The scan emits Kafka events that
+# katalog-ingest consumes; analyzer/transcoder/packager then claim the work.
+#
+# Re-runnable: CI deletes this Job before `kubectl apply -k`, so a fresh scan
+# fires on every deploy (scan upserts by path — re-running is idempotent).
+# In-cluster Keycloak is reached at its Service ClusterIP (http://keycloak/auth),
+# NOT the public origin (the HostNetwork router resets in-cluster ClusterIP HTTP);
+# the issued token's `iss` is still the public origin, so manager-api accepts it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: scan-catalog
+  labels: { app: scan-catalog, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata: { labels: { app: scan-catalog } }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: scan
+          image: curlimages/curl:8.11.0
+          command: ["/bin/sh", "-c"]
+          env:
+            - name: MANAGER_SECRET
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak, key: client-secret } }
+          args:
+            - |
+              set -eu
+              # Gate on the seed having placed content under media/ (the seed may still be
+              # downloading on a fresh namespace) so we never scan an empty/partial library.
+              echo "[scan] waiting for seeded content in media/…"
+              until [ "$(ls -1 /var/lib/katalog/media 2>/dev/null | grep -vE '\.part$' | wc -l)" -ge 3 ]; do sleep 5; done
+              echo "[scan] content present."
+              echo "[scan] waiting for katalog-manager-api readiness…"
+              until curl -fsS http://katalog-manager-api/actuator/health/readiness >/dev/null 2>&1; do sleep 5; done
+              echo "[scan] manager-api ready."
+              # Retry the whole mint+scan internally: right after a fresh deploy the app can
+              # be 'ready' a beat before the schema commit settles, yielding a transient 500.
+              # Looping here (vs Job backoff) keeps retries tight and bounded.
+              i=0
+              while [ "$i" -lt 20 ]; do
+                i=$((i+1))
+                TOKEN=$(curl -fsS http://keycloak/auth/realms/zaentrum/protocol/openid-connect/token \
+                  -d grant_type=client_credentials -d client_id=zaentrum-manager \
+                  -d client_secret="$MANAGER_SECRET" \
+                  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p') || TOKEN=""
+                if [ -z "$TOKEN" ]; then echo "[scan] attempt $i: no token yet, retrying…"; sleep 6; continue; fi
+                # The Go katalog-manager triggers a scan via the GraphQL `triggerScan`
+                # mutation (the old CAP REST POST /api/scan is gone). GraphQL returns
+                # 200 even on errors, so require the data field + no errors array.
+                code=$(curl -s -o /tmp/out -w '%{http_code}' -X POST http://katalog-manager-api/query \
+                  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+                  --data '{"query":"mutation { triggerScan { id status } }"}')
+                echo "[scan] attempt $i: triggerScan -> HTTP $code"; cat /tmp/out 2>/dev/null; echo
+                if [ "$code" = "200" ] && grep -q '"triggerScan"' /tmp/out && ! grep -q '"errors"' /tmp/out; then echo "[scan] OK"; exit 0; fi
+                sleep 6
+              done
+              echo "[scan] giving up after $i attempts"; exit 1
+          volumeMounts:
+            - { name: katalog-data, mountPath: /var/lib/katalog, readOnly: true }
+      volumes:
+        - name: katalog-data
+          persistentVolumeClaim: { claimName: media }
+---
+# Post-scan enqueue Job (demo self-drive). Waits for the seed content to be present and
+# items to land, then seeds `pending` ItemProcessingSteps so the HTTP-poll workers
+# (analyzer → transcoder → packager) claim and process. See enqueue.sql.
+# CI deletes this Job before `kubectl apply -k`, so it re-runs on every deploy
+# (the SQL is idempotent).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: enqueue-processing
+  labels: { app: enqueue-processing, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata: { labels: { app: enqueue-processing } }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: enqueue
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          env:
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+          args:
+            - |
+              set -eu
+              DB="postgresql://$PGUSER:$PGPASSWORD@postgres:5432/katalog"
+              echo "[enqueue] waiting for seeded content + scanned items…"
+              i=0
+              while :; do
+                # transcode reads the source file, so gate on content actually being present.
+                content=$(ls -1 /var/lib/katalog/media 2>/dev/null | grep -vE '\.part$' | wc -l)
+                items=$(psql "$DB" -tAc "select count(*) from com_nalet_katalog_items where type in ('movie','episode')" 2>/dev/null || echo 0)
+                [ "${content:-0}" -ge 3 ] && [ "${items:-0}" -ge 1 ] && break
+                i=$((i+1)); [ "$i" -gt 120 ] && { echo "[enqueue] timed out (content=$content items=$items)"; exit 1; }
+                sleep 5
+              done
+              echo "[enqueue] content + $items movie/episode item(s) ready; seeding pending steps…"
+              psql "$DB" -v ON_ERROR_STOP=1 -f /sql/enqueue.sql
+              echo "[enqueue] step summary:"
+              psql "$DB" -c "select step,status,count(*) from com_nalet_katalog_itemprocessingsteps group by step,status order by step,status"
+          volumeMounts:
+            - { name: enqueue-sql, mountPath: /sql, readOnly: true }
+            - { name: katalog-data, mountPath: /var/lib/katalog, readOnly: true }
+      volumes:
+        - name: enqueue-sql
+          configMap: { name: katalog-enqueue }
+        - name: katalog-data
+          persistentVolumeClaim: { claimName: media }
+{{- end }}

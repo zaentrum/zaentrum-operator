@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-web
+  namespace: zaentrum-demo
+  labels:
+    app: chino-web
+    role: frontend
+    product: chino
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-web" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: chino-web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: chino-web
+        role: frontend
+        product: chino
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        # Neutral self-host build (feat/neutral-selfhost-oidc): reads GET /api/config at
+        # runtime for the OIDC issuer + web client id, so it points at THIS demo's bundled
+        # Keycloak instead of the build-time-baked prod URLs. See chino-web src/auth/oidc.ts.
+        image: ghcr.io/zaentrum/chino-web:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        # The demo path-mounts chino at /chino/ (see routes.yaml). chino-web is a
+        # runtime-configurable-base image: its entrypoint lays the SPA under this
+        # path and rewrites the asset base, so /chino/assets/* resolve here instead
+        # of 404ing against the portal's / route. Neutral self-host leaves it "/".
+        - name: BASE_PATH
+          value: /chino/
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 3
+          periodSeconds: 30
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 1
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chino-web
+  namespace: zaentrum-demo
+  labels:
+    app: chino-web
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: chino-web
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080

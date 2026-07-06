@@ -1,0 +1,37 @@
+# The zaentrum-demo profile — only the deltas from values.yaml. Rendering
+#   helm template zaentrum . -f values-demo.yaml -n zaentrum-demo
+# must reproduce the demo's namespaced platform objects (the parity target for
+# `deploy/zaentrum-demo`). Secrets, the NFS PV, bootstrap SCC/RBAC stay external.
+
+global:
+  version: latest
+  hostname: zaentrum.demo.nalet.cloud
+  partOf: zaentrum-demo
+  imagePullSecrets: [ghcr-pull, gitlab-registry]
+
+identity:
+  issuerScheme: https        # edge-terminated TLS at the OKD router
+  loginTheme: zaentrum
+
+features:
+  kafka: true
+  pipeline: true             # the demo runs the full media pipeline
+
+storage:
+  provisionMedia: false      # the demo binds an external NFS PV (bootstrap)
+
+network:
+  issuerHostAliasIP: "77.109.148.13"   # OKD HostNetwork router node
+
+routing:
+  provisionIngress: false
+  provisionRoutes: true      # single-origin OpenShift Routes
+
+secrets:
+  external: true             # zaentrum-* secrets are CI-created from DEMO_* vars
+
+jobs:
+  seed: true                 # seed → scan → enqueue self-populate the catalog
+
+databases:
+  mode: perApp

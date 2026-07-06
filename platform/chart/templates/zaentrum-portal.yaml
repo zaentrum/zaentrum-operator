@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zaentrum-portal
+  namespace: zaentrum-demo
+  labels:
+    app: zaentrum-portal
+    role: portal
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "zaentrum-portal" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: zaentrum-portal
+  template:
+    metadata:
+      labels:
+        app: zaentrum-portal
+        role: portal
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        # zaentrum launchpad shell — react + @nalet/design-system, served under /portal
+        # (the bare host 302s here). Built by the zaentrum-portal CI.
+        image: ghcr.io/zaentrum/zaentrum-portal:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          httpGet: { path: /healthz, port: http, scheme: HTTP }
+          initialDelaySeconds: 3
+          periodSeconds: 10
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet: { path: /healthz, port: http, scheme: HTTP }
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 2
+        resources:
+          requests: { cpu: 20m, memory: 32Mi }
+          limits: { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zaentrum-portal
+  namespace: zaentrum-demo
+  labels:
+    app: zaentrum-portal
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: zaentrum-portal
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: http
