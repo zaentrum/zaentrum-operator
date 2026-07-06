@@ -1,0 +1,15 @@
+{{- if .Values.storage.provisionMedia }}
+# Demo library claim → binds to the static NFS PV created by bootstrap.yaml
+# (cluster-admin). The PVC is namespaced, so the CI deployer applies it here.
+# CONTENT POLICY: CC/own content only (prod /media is OFF-LIMITS).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media
+  labels: { app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: {{ .Values.storage.className | quote }}
+  volumeName: zaentrum-demo-media-nfs
+  resources: { requests: { storage: {{ .Values.storage.mediaSize }} } }
+{{- end }}

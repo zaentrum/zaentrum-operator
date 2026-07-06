@@ -1,0 +1,228 @@
+{{- if eq .Values.identity.mode "bundled" }}
+# ── Bundled Keycloak: the appliance identity provider ───────────────────────
+#
+# A neutral, self-contained OIDC provider so the bundle ships login out of the
+# box — no external IdP required. Realm is the generic 'zaentrum' (NOT a tenant
+# realm). Postgres-backed (the same bundled postgres as everything else), served
+# behind Traefik under /auth, and reachable in-cluster as the 'keycloak' Service.
+#
+# ISSUER MODEL (the Keycloak-behind-a-proxy gotcha):
+#   Tokens carry iss = <public-origin>/auth/realms/zaentrum (a FRONTEND value), and
+#   the Go services validate with coreos/go-oidc, which (a) fetches
+#   {OIDC_ISSUER}/.well-known/openid-configuration, (b) requires the doc's
+#   `issuer` to EQUAL OIDC_ISSUER, and (c) checks the token `iss` against it.
+#   So OIDC_ISSUER MUST be the public issuer AND that URL must be resolvable
+#   in-cluster. We therefore PIN Keycloak's hostname to the public origin
+#   (KC_HOSTNAME) so the issuer is fixed regardless of which host requested
+#   discovery, and the cluster resolves that host back to the ingress
+#   (split-horizon). The all-in-one wires this automatically via a CoreDNS
+#   rewrite to the keycloak Service (see deploy/allinone/entrypoint.sh); on a
+#   real cluster the operator points OIDC_ISSUER + KC_HOSTNAME + the ingress
+#   host at the same name and relies on cluster DNS / hostAliases. See the
+#   zaentrum-keycloak-config ConfigMap below for the two values to override.
+#
+# The realm is imported from the keycloak-realm ConfigMap (--import-realm), so
+# deploy/base is the single source of truth for the client/role contract — the
+# image just needs to be a Keycloak distribution; nothing realm-specific is
+# baked into it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zaentrum-keycloak-config
+  labels: { app: keycloak, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+data:
+  # The public origin the browser reaches Stube at (scheme + host[:port]),
+  # WITHOUT the /auth path — Keycloak appends KC_HTTP_RELATIVE_PATH itself.
+  # Override together with ingress host + zaentrum-env OIDC_ISSUER. The demo
+  # overlay shows the pattern (it patches the ingress host + merges OIDC_ISSUER).
+  KC_HOSTNAME: "{{ include "z.kcHostname" . }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels: { app: keycloak, role: identity, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "keycloak" "def" 1) }}
+  selector: { matchLabels: { app: keycloak } }
+  strategy:
+    # Keycloak holds a JPA/Liquibase changelog lock during DB migration; two
+    # pods racing the migration can deadlock. Recreate keeps exactly one.
+    type: Recreate
+  template:
+    metadata:
+      labels: { app: keycloak, role: identity }
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      # The bundled postgres has no 'keycloak' database (it bootstraps only
+      # POSTGRES_DB=zaentrum), so create it before Keycloak's JPA store connects.
+      # Idempotent: skips creation when the database already exists.
+      initContainers:
+        - name: create-keycloak-db
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do
+                echo "waiting for postgres…"; sleep 2
+              done
+              if psql -h postgres -U "$PGUSER" -tAc \
+                   "SELECT 1 FROM pg_database WHERE datname='keycloak'" \
+                   | grep -q 1; then
+                echo "database keycloak already exists"
+              else
+                echo "creating database keycloak"
+                createdb -h postgres -U "$PGUSER" keycloak
+              fi
+          env:
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+        # Lay out the custom login theme (from the keycloak-theme ConfigMap) into the
+        # Keycloak themes dir structure on a shared emptyDir. The built-in themes
+        # (base/keycloak/keycloak.v2) come from the themes JAR, so only 'zaentrum' lives here.
+        - name: theme-layout
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              D=/themes/zaentrum/login
+              mkdir -p "$D/resources/css" "$D/resources/img"
+              cp /src/theme.properties "$D/theme.properties"
+              cp /src/login.ftl        "$D/login.ftl"
+              cp /src/zaentrum.css     "$D/resources/css/zaentrum.css"
+              cp /src/favicon.svg      "$D/resources/img/favicon.svg"
+              echo "theme laid out:"; find /themes -type f
+          volumeMounts:
+            - { name: themes, mountPath: /themes }
+            - { name: theme-src, mountPath: /src, readOnly: true }
+      containers:
+        - name: keycloak
+          image: {{ .Values.keycloak.image }}
+          # `start` (not start-dev) for the production assembly; --import-realm
+          # ingests the mounted realm on first boot (no-op once the realm exists).
+          # --optimized would require a prior `kc.sh build`; we keep the simple
+          # boot-time build so the bundle stays operator-editable.
+          args: ["start", "--import-realm"]
+          ports:
+            - { containerPort: 8080, name: http }
+            - { containerPort: 9000, name: mgmt }   # KC 26 management iface (health/metrics)
+          env:
+            # ── Postgres store (shared bundled postgres, separate DB) ──
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: postgres
+            - name: KC_DB_URL_DATABASE
+              value: keycloak
+            - name: KC_DB_USERNAME
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: KC_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+            # ── HTTP / edge-proxy ──
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # Served under /auth so the issuer is <host>/auth/realms/zaentrum and the
+            # Traefik /auth prefix maps 1:1 (no path rewrite, no double prefix).
+            - name: KC_HTTP_RELATIVE_PATH
+              value: /auth
+            # Trust X-Forwarded-* from Traefik so Keycloak builds correct
+            # external URLs and treats the edge TLS as the client connection.
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            # Pin the frontend hostname so the issuer (a frontend value) is
+            # FIXED to the public origin regardless of the request's Host —
+            # this is what keeps the token `iss` and the discovery `issuer`
+            # identical for both browser logins and in-cluster validation.
+            - name: KC_HOSTNAME
+              valueFrom: { configMapKeyRef: { name: zaentrum-keycloak-config, key: KC_HOSTNAME } }
+            # Don't require the request Host to match KC_HOSTNAME — the same pod
+            # answers on the in-cluster name (keycloak:8080) and the public host.
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            # Health + metrics endpoints (/auth/health/*). Needed for the probe.
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            # Don't cache the mounted custom theme — so a redeploy of the theme
+            # ConfigMap takes effect without fighting template/CSS caches.
+            - name: KC_SPI_THEME_CACHE_THEMES
+              value: "false"
+            - name: KC_SPI_THEME_STATIC_MAX_AGE
+              value: "-1"
+            # ── Bootstrap admin (temporary master-realm admin) ──
+            # Used only to bootstrap; the zaentrum-realm 'admin' user (realm-admin)
+            # is the operational account and is created by the realm import. The
+            # bundled admin password is forced to change on first login.
+            - name: KEYCLOAK_ADMIN
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: username } }
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: password } }
+            # The realm import substitutes these ${VAR} placeholders in
+            # zaentrum-realm.json from the environment, so neither the confidential
+            # service-account secret nor the realm-admin bootstrap password lives
+            # in the (world-readable) imported JSON:
+            #   ${ZAENTRUM_MANAGER_SECRET}  -> zaentrum-manager client secret
+            #   ${ZAENTRUM_ADMIN_PASSWORD}  -> zaentrum-realm 'admin' user password
+            #                               (temporary:true => forced change on
+            #                               first login)
+            - name: ZAENTRUM_MANAGER_SECRET
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak, key: client-secret } }
+            - name: ZAENTRUM_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: realm-admin-password } }
+            # Demo end-user password (${DEMO_USER_PASSWORD} in the realm import). Optional so
+            # the pod still boots if the secret is absent; only consumed on a FIRST realm import
+            # (existing realms are not re-imported), so it seeds the 'demo' user on fresh installs.
+            - name: DEMO_USER_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-demo-user, key: password, optional: true } }
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+            - name: themes
+              mountPath: /opt/keycloak/themes
+          # KC 26 serves health on the MANAGEMENT port (9000) — and that interface
+          # INHERITS KC_HTTP_RELATIVE_PATH, so the path is /auth/health/* (verified:
+          # :9000/auth/health/ready -> 200, :9000/health/ready -> 404). Probing the
+          # http port (8080) 404s and the pod never goes Ready (no /auth endpoint
+          # for Traefik). So: management port 9000, path /auth/health/*.
+          readinessProbe:
+            httpGet: { path: /auth/health/ready, port: mgmt }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /auth/health/live, port: mgmt }
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: "2", memory: 1Gi }
+      volumes:
+        - name: realm-import
+          configMap:
+            name: keycloak-realm
+        - name: themes
+          emptyDir: {}
+        - name: theme-src
+          configMap:
+            name: keycloak-theme
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels: { app: keycloak }
+spec:
+  selector: { app: keycloak }
+  # Pinned ClusterIP so the services' hostAliases (zaentrum.demo.nalet.cloud →
+  # this IP) stay valid across redeploys; the issuer host resolves straight to
+  # this Service on :80 (-> container :8080, which serves /auth).
+  clusterIP: 172.30.102.125
+  ports: [{ name: http, port: 80, targetPort: http }]
+{{- end }}

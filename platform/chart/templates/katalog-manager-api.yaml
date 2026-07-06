@@ -1,0 +1,202 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-manager-api
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-manager-api
+    component: catalog
+    plane: write
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-manager-api" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: katalog-manager-api
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: katalog-manager-api
+        component: catalog
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      {{- include "z.hostAliases" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Deploy the CAP schema (cds-generated schema-postgres.sql, made
+        # idempotent) before the app starts. The demo Postgres is ephemeral, so
+        # this re-applies on every boot. Live uses a pre-deployed external DB.
+        - name: deploy-schema
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do echo "waiting for postgres…"; sleep 2; done
+              DB="postgresql://$PGUSER:$PGPASSWORD@postgres:5432/katalog"
+              # CAP views forward-reference each other; re-run until a pass is
+              # clean (idempotent: CREATE TABLE IF NOT EXISTS / OR REPLACE VIEW).
+              for i in 1 2 3 4 5 6; do
+                echo "schema pass $i"
+                out=$(psql "$DB" -f /sql/schema-postgres.sql 2>&1)
+                if echo "$out" | grep -q 'ERROR:'; then
+                  # Best-effort: a couple of db-level views live only in migrations
+                  # (not the base cds schema) — non-fatal for the demo, don't block boot.
+                  [ "$i" = 6 ] && { echo "$out" | grep 'ERROR:' | sort -u | head; echo "schema best-effort: residual errors after 6 passes (non-fatal)"; break; }
+                else
+                  echo "katalog schema deployed (clean on pass $i)"; break
+                fi
+              done
+              # Migration-created runtime objects the cds schema omits but the app's raw
+              # SQL needs (the (item_id,step) unique index for ProcessingStepService's
+              # ON CONFLICT upsert, + the overall-status views). Must succeed.
+              echo "applying schema-extra (migration runtime objects)…"
+              psql "$DB" -v ON_ERROR_STOP=1 -f /sql/schema-extra.sql
+              echo "schema-extra applied."
+              exit 0
+          env:
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+          volumeMounts:
+            - { name: schema-sql, mountPath: /sql, readOnly: true }
+      containers:
+      - name: katalog-manager-api
+        # Go + GraphQL rewrite of the CAP/Java service (built from github.com/zaentrum/katalog-manager).
+        # Reuses the existing katalog DB unchanged; reads the same env (it normalizes the
+        # Spring/JDBC datasource URL for pgx) and serves GraphQL at /query + /api/manage/query
+        # plus the REST byte/machine contracts. The portal's in-shell katalog console talks to it.
+        image: ghcr.io/zaentrum/katalog-manager:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        - name: SERVER_PORT
+          value: "8080"
+        - name: CDS_INDEX_PAGE_ENABLED
+          value: "true"
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
+          value: {{ include "z.issuer" . }}
+        - name: KATALOG_AUDIENCE
+          value: chino
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:postgresql://postgres:5432/katalog
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: zaentrum-db
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: zaentrum-db
+        - name: KEYCLOAK_KATALOG_CLIENT_ID
+          value: zaentrum-manager   # the bundled realm's confidential SA client (secret = zaentrum-keycloak)
+        - name: KEYCLOAK_KATALOG_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: client-secret
+              name: zaentrum-keycloak
+        - name: NFS_ROOT
+          value: /var/lib/katalog/media
+        - name: TMDB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: api-key
+              name: katalog-tmdb
+              optional: true
+        - name: ODOWNLOADER_API_URL
+          value: ""
+        - name: ODOWNLOADER_API_TOKEN
+          value: ""
+        - name: DOWNLOAD_GATEWAY_URL
+          value: ""
+        - name: DOWNLOAD_GATEWAY_EVENTS_ENABLED
+          value: "false"
+        # Demo: bundled single-node Kafka (plaintext, in-namespace). No mTLS →
+        # KAFKA_TLS_* intentionally blank. Isolated from the prod Strimzi.
+        - name: KAFKA_BROKERS
+          value: kafka:9092
+        - name: KAFKA_GROUP_ID
+          value: zaentrum-demo
+        - name: KAFKA_TLS_CA
+          value: ""
+        - name: KAFKA_TLS_CERT
+          value: ""
+        - name: KAFKA_TLS_KEY
+          value: ""
+        - name: CHAPTERSDB_ENABLED
+          value: "false"
+        - name: STREAM_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              key: key
+              name: zaentrum-stream-signing
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/liveness
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 5
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/readiness
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 15
+          successThreshold: 1
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 512Mi
+        volumeMounts:
+        # ONE mount of the media NFS export at the parent dir (NFS_ROOT=/var/lib/katalog/media).
+        - mountPath: /var/lib/katalog
+          name: katalog-data
+      volumes:
+      - name: katalog-data
+        persistentVolumeClaim:
+          claimName: media
+      - name: schema-sql
+        configMap: { name: katalog-schema }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-manager-api
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-manager-api
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: katalog-manager-api
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080

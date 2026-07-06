@@ -1,0 +1,174 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portal-api
+  namespace: zaentrum-demo
+  labels:
+    app: portal-api
+    role: backend
+    component: portal
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "portal-api" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: portal-api
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: portal-api
+        role: backend
+        component: portal
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      # Runs as the portal-api SA so the operator console can read/scale/restart
+      # Deployments (namespace-scoped Role below).
+      serviceAccountName: portal-api
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      {{- include "z.hostAliases" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Create the `portal` DB if it is missing. The demo Postgres is ephemeral
+        # (emptyDir) and the deploy job does NOT restart it, so a redeploy onto an
+        # already-running Postgres would otherwise lack the DB. Idempotent: connect
+        # to the maintenance DB (zaentrum) and CREATE only when absent.
+        - name: create-db
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do echo "waiting for postgres…"; sleep 2; done
+              MAINT="postgresql://$PGUSER:$PGPASSWORD@postgres:5432/zaentrum"
+              if psql "$MAINT" -tAc "SELECT 1 FROM pg_database WHERE datname='portal'" | grep -q 1; then
+                echo "portal DB already exists"
+              else
+                echo "creating portal DB…"
+                psql "$MAINT" -v ON_ERROR_STOP=1 -c "CREATE DATABASE portal"
+              fi
+          env:
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+      containers:
+      - name: app
+        # portal-api — the launchpad registry (apps/spaces/tiles). Go service built
+        # from the zaentrum-portal repo's server/ module. Applies its own embedded,
+        # idempotent schema + seed at boot, then serves /api/portal.
+        image: ghcr.io/zaentrum/portal-api:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: SERVER_PORT
+          value: "8080"
+        - name: OIDC_ISSUER
+          value: {{ include "z.issuer" . }}
+        - name: OIDC_AUDIENCE
+          value: chino
+        - name: PORTAL_ADMIN_ROLE
+          value: zaentrum-admin
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-db
+              key: user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-db
+              key: password
+        - name: PG_URL
+          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/portal?sslmode=disable
+        livenessProbe:
+          httpGet: { path: /actuator/health/liveness, port: http, scheme: HTTP }
+          initialDelaySeconds: 5
+          periodSeconds: 30
+          timeoutSeconds: 2
+          failureThreshold: 3
+        readinessProbe:
+          httpGet: { path: /actuator/health/readiness, port: http, scheme: HTTP }
+          initialDelaySeconds: 3
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        resources:
+          requests: { cpu: 20m, memory: 32Mi }
+          limits: { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portal-api
+  namespace: zaentrum-demo
+  labels:
+    app: portal-api
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: portal-api
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+---
+# The operator console's RBAC — NAMESPACE-SCOPED (no ClusterRole): the portal-api
+# only ever manages Deployments in its own namespace. Lets it list/scale/restart
+# app-tier Deployments (the service guards stateful backers) + read pods for
+# status + read the Zaentrum CR when an operator is present.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portal-api
+  namespace: zaentrum-demo
+  labels: { app: portal-api, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: portal-api
+  namespace: zaentrum-demo
+  labels: { app: portal-api, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Read/patch the Zaentrum CR (present only on an operator-managed appliance;
+  # absent in the demo → the console degrades gracefully).
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrums"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: portal-api
+  namespace: zaentrum-demo
+  labels: { app: portal-api, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: portal-api
+subjects:
+  - kind: ServiceAccount
+    name: portal-api
+    namespace: zaentrum-demo

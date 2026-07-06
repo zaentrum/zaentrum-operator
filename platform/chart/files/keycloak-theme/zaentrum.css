@@ -1,0 +1,149 @@
+/* zaentrum demo login — @nalet/design-system.
+   Square (border-radius: 0 everywhere), dark canvas #0B0F19, cloud-blue accent
+   #58A6FF, cyan focus #00A4DC, Inter (body) + JetBrains Mono (brand). */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@700;800&display=swap');
+
+:root {
+  --bg: #0b0f19;       /* canvas */
+  --surface: #161b26;  /* card */
+  --border: #2a3142;   /* hairline */
+  --text: #c9d1d9;
+  --muted: #8b949e;
+  --accent: #58a6ff;   /* cloud-blue */
+  --cyan: #00a4dc;     /* focus ring */
+  --danger: #f85149;
+  --success: #3fb950;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+body {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(88,166,255,.10), transparent 60%),
+    var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  padding: 24px;
+}
+
+.auth { width: 100%; max-width: 384px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 34px 30px 30px;
+  box-shadow: 0 16px 48px rgba(1, 4, 9, .55);
+}
+
+/* >c product glyph */
+.brand {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 800;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -2px;
+  margin-bottom: 22px;
+  user-select: none;
+}
+.brand .gt { color: var(--accent); }
+.brand .c  { color: var(--text); }
+
+h1 { font-size: 22px; font-weight: 650; margin: 0 0 4px; letter-spacing: -.2px; }
+.sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+
+form { margin: 0; }
+
+label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted);
+  margin: 16px 0 7px;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 11px 13px;
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+input::placeholder { color: #586069; }
+input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(0,164,220,.25);
+}
+
+button[type="submit"] {
+  width: 100%;
+  margin-top: 24px;
+  background: var(--accent);
+  color: #0b0f19;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 14px;
+  font-size: 15px;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter .15s, transform .02s;
+}
+button[type="submit"]:hover { filter: brightness(1.08); }
+button[type="submit"]:active { transform: translateY(1px); }
+
+.alert {
+  border: 1px solid;
+  border-radius: 0;
+  padding: 10px 13px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+.alert.error   { background: rgba(248,81,73,.12);  border-color: rgba(248,81,73,.40);  color: #ff7b72; }
+.alert.success { background: rgba(63,185,80,.12);  border-color: rgba(63,185,80,.40);  color: var(--success); }
+.alert.warning,
+.alert.info    { background: rgba(88,166,255,.10); border-color: rgba(88,166,255,.35); color: var(--accent); }
+
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 16px;
+}
+.remember input { width: auto; margin: 0; accent-color: var(--accent); }
+
+.links { margin-top: 18px; display: flex; justify-content: space-between; gap: 12px; }
+.link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 13px;
+}
+.link:hover { text-decoration: underline; }
+
+footer {
+  margin-top: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: .3px;
+}

@@ -1,0 +1,61 @@
+# zaentrum platform — self-host defaults. Each field maps 1:1 onto a Zaentrum CR
+# spec field (the operator builds these values from the CR). Defaults reproduce a
+# plain single-node self-host; the demo overrides them in values-demo.yaml.
+
+global:
+  # Image tag applied to every ghcr.io/zaentrum/* image (CR spec.version / channel).
+  version: latest
+  # Public host: OIDC issuer host + ingress host + KC_HOSTNAME.
+  hostname: zaentrum.localhost
+  # app.kubernetes.io/part-of label value.
+  partOf: zaentrum
+  # Pull secrets added to every workload (empty for public ghcr).
+  imagePullSecrets: []
+
+identity:
+  mode: bundled            # bundled (ship Keycloak) | external (federate)
+  issuer: ""               # explicit issuer URL; empty → derived from scheme+hostname
+  issuerScheme: http       # http | https  (the demo terminates TLS at the edge → https)
+  clientId: chino-web
+  audience: chino
+  loginTheme: ""           # bundled Keycloak login theme name (demo: zaentrum)
+
+features:
+  kafka: true              # bundled single-node KRaft broker
+  gpu: false               # NVENC on the stream/transcoder plane
+  pipeline: false          # analyzer/packager/transcoder/katalog-ingest media pipeline
+
+storage:
+  mediaSize: 50Gi
+  className: ""             # optional StorageClass for platform PVCs
+  provisionMedia: true      # false → an external PV backs the `media` PVC (demo NFS); chart skips the PVC
+
+network:
+  # Split-horizon: adds hostAliases (this IP → global.hostname) to the OIDC
+  # validators so in-cluster token validation reaches the public HTTPS issuer.
+  issuerHostAliasIP: ""
+
+routing:
+  provisionIngress: true    # plain-k8s Ingress (single-origin paths)
+  provisionRoutes: false    # OpenShift Routes (demo)
+
+secrets:
+  external: false           # true → secrets are pre-created (CI/demo); chart skips rendering them
+
+jobs:
+  seed: false               # seed/scan/enqueue self-populate Jobs (demo content bootstrap)
+
+databases:
+  mode: perApp              # perApp (chino/katalog/keycloak/portal) | single
+  chino: chino
+  katalog: katalog
+  keycloak: keycloak
+  portal: portal
+
+keycloak:
+  image: quay.io/keycloak/keycloak:26.0.7
+
+# Per-service replica overrides (CR spec.replicas). Unlisted services render 1.
+services:
+  packager:
+    replicas: 2

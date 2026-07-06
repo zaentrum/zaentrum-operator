@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: katalog-schema
+  labels:
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+data:
+{{ (.Files.Glob "files/sql/schema-*.sql").AsConfig | nindent 2 }}

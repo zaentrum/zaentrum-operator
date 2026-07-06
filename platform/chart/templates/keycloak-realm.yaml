@@ -1,0 +1,20 @@
+{{- if eq .Values.identity.mode "bundled" }}
+# ── zaentrum realm import ───────────────────────────────────────────────────
+# Mounted into Keycloak at /opt/keycloak/data/import and ingested with
+# --import-realm on first boot. This ConfigMap is the single source of truth
+# for the realm/client/role contract; the keycloak image carries no realm.
+#
+# ${ZAENTRUM_MANAGER_SECRET} and ${ZAENTRUM_ADMIN_PASSWORD} are substituted by
+# Keycloak from the env vars of the same name (sourced from the
+# zaentrum-keycloak / zaentrum-keycloak-admin Secrets) at import time, so
+# neither the confidential service-account secret nor the realm-admin password
+# lives in this manifest.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  labels: { app: keycloak, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+data:
+  zaentrum-realm.json: |
+{{ .Files.Get "files/keycloak-realm.json" | nindent 4 }}
+{{- end }}

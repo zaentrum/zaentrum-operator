@@ -1,0 +1,69 @@
+{{- if .Values.routing.provisionIngress }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zaentrum
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
+spec:
+  rules:
+    - host: {{ .Values.global.hostname }}
+      http:
+        paths:
+          - path: /api/manage
+            pathType: Prefix
+            backend:
+              service:
+                name: katalog-manager-api
+                port:
+                  number: 80
+          - path: /api/portal
+            pathType: Prefix
+            backend:
+              service:
+                name: portal-api
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: chino-api
+                port:
+                  number: 80
+          - path: /katalog
+            pathType: Prefix
+            backend:
+              service:
+                name: katalog-manager-ui
+                port:
+                  number: 80
+          - path: /chino
+            pathType: Prefix
+            backend:
+              service:
+                name: chino-web
+                port:
+                  number: 80
+          - path: /portal
+            pathType: Prefix
+            backend:
+              service:
+                name: zaentrum-portal
+                port:
+                  number: 80
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: zaentrum-portal
+                port:
+                  number: 80
+{{- end }}

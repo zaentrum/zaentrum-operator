@@ -1,0 +1,11 @@
+{{- if .Values.jobs.seed }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: katalog-enqueue
+  labels:
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+data:
+  enqueue.sql: |
+{{ .Files.Get "files/sql/enqueue.sql" | indent 4 }}
+{{- end }}

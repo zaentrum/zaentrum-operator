@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chino-api
+  namespace: zaentrum-demo
+  labels:
+    app: chino-api
+    role: backend
+    product: chino
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-api" "def" 1) }}
+  selector:
+    matchLabels:
+      app: chino-api
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: chino-api
+        role: backend
+        product: chino
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      {{- include "z.hostAliases" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        image: ghcr.io/zaentrum/chino-api:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: ADDR
+          value: ":8080"
+        - name: OIDC_ISSUER
+          value: {{ include "z.issuer" . }}
+        - name: OIDC_AUDIENCE
+          value: chino
+        - name: OIDC_ENABLED
+          value: "true"
+        # Per-platform PUBLIC client ids the realm registers (chino-web/tv/mobile),
+        # surfaced to neutral clients via GET /api/config so they pick the right one.
+        - name: OIDC_CLIENT_ID_TV
+          value: chino-tv
+        - name: OIDC_CLIENT_ID_MOBILE
+          value: chino-mobile
+        - name: OIDC_CLIENT_ID_WEB
+          value: chino-web
+        - name: KATALOG_BASE_URL
+          value: http://katalog-api
+        - name: STREAM_BASE_URL
+          value: http://chino-stream
+        - name: ARTWORK_BASE_URL
+          value: http://katalog-manager-api
+        - name: ANALYZER_BASE_URL
+          value: http://katalog-manager-api
+        - name: ADMIN_SUBJECTS
+          value: ""
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-db
+              key: user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-db
+              key: password
+        - name: PG_URL
+          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/chino?sslmode=disable
+        - name: STREAM_SIGNING_KEY
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-stream-signing
+              key: key
+              optional: true
+        - name: OPENPROJECT_URL
+          value: ""
+        - name: OPENPROJECT_TOKEN
+          value: ""
+        - name: OPENPROJECT_PROJECT_ID
+          value: ""
+        - name: OPENPROJECT_BUG_TYPE_ID
+          value: ""
+        livenessProbe:
+          httpGet:
+            path: /api/healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 30
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 3
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chino-api
+  namespace: zaentrum-demo
+  labels:
+    app: chino-api
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: chino-api
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080

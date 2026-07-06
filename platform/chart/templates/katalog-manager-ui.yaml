@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-manager-ui
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-manager-ui
+    role: frontend
+    component: catalog
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-manager-ui" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: katalog-manager-ui
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: katalog-manager-ui
+        role: frontend
+        component: catalog
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        # Standalone catalog-management console (GraphQL to katalog-manager). Split
+        # out of the portal so it can ship independently. Runtime-configurable base:
+        # the entrypoint lays the SPA under BASE_PATH and rewrites the asset base, so
+        # /katalog/assets/* resolve here. It talks to /api/manage (GraphQL) + /api/config.
+        image: ghcr.io/zaentrum/katalog-manager-ui:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        - name: BASE_PATH
+          value: /katalog/
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet: { path: /healthz, port: http, scheme: HTTP }
+          initialDelaySeconds: 3
+          periodSeconds: 30
+          timeoutSeconds: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet: { path: /healthz, port: http, scheme: HTTP }
+          initialDelaySeconds: 1
+          periodSeconds: 10
+          timeoutSeconds: 1
+          failureThreshold: 3
+        resources:
+          requests: { cpu: 25m, memory: 32Mi }
+          limits: { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-manager-ui
+  namespace: zaentrum-demo
+  labels:
+    app: katalog-manager-ui
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: katalog-manager-ui
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
