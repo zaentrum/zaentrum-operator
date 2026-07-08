@@ -61,6 +61,16 @@ spec:
             secretKeyRef:
               key: client-secret
               name: zaentrum-keycloak
+        # Pure Kafka triggers: consume enriched -> analyze -> emit analyzed.
+        # PLAINTEXT bundled broker; item_id keys per-item ordering.
+        - name: KAFKA_BROKERS
+          value: kafka:9092
+        - name: KAFKA_GROUP_ID
+          value: analyzer-workers
+        - name: CONSUME_TOPIC
+          value: stube.catalog.item.enriched
+        - name: PRODUCE_TOPIC
+          value: stube.catalog.item.analyzed
         - name: CLAIM_BATCH_SIZE
           value: "2"
         - name: IDLE_SLEEP_SECONDS
@@ -178,6 +188,13 @@ spec:
             secretKeyRef:
               name: zaentrum-keycloak
               key: client-secret
+        # Pure Kafka triggers: consume transcoded -> package -> terminal (no emit).
+        - name: KAFKA_BROKERS
+          value: kafka:9092
+        - name: KAFKA_GROUP_ID
+          value: packager-workers
+        - name: CONSUME_TOPIC
+          value: stube.catalog.item.transcoded
         - name: CLAIM_BATCH_SIZE
           value: "1"
         - name: IDLE_SLEEP_SECONDS
@@ -295,6 +312,15 @@ spec:
             secretKeyRef:
               name: zaentrum-keycloak
               key: client-secret
+        # Pure Kafka triggers: consume analyzed -> transcode -> emit transcoded.
+        - name: KAFKA_BROKERS
+          value: kafka:9092
+        - name: KAFKA_GROUP_ID
+          value: transcoder-workers
+        - name: CONSUME_TOPIC
+          value: stube.catalog.item.analyzed
+        - name: PRODUCE_TOPIC
+          value: stube.catalog.item.transcoded
         - name: CLAIM_BATCH_SIZE
           value: "1"
         - name: IDLE_SLEEP_SECONDS
