@@ -28,4 +28,4 @@ images:
   - name: ghcr.io/zaentrum/operator
     # The build-images CI tags images `sha-<full-git-sha>` (+ `latest`), NOT the
     # short sha — pin the full-sha tag or the pull 404s.
-    newTag: sha-f2ed5c2ec2d0feb391feed045b7592bce4778601
+    newTag: sha-602f68702ab7d4d3f1cb2295bcaa1590165177df
