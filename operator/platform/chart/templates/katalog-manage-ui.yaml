@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: katalog-manage-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: katalog-manage-ui
+    role: frontend
+    component: catalog
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-manage-ui" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: katalog-manage-ui
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: katalog-manage-ui
+        role: frontend
+        component: catalog
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: app
+        # SAME image as katalog-manager-ui, mounted at /katalog-manage: the SPA
+        # derives its app from BASE and renders the Catalog Management app (scan +
+        # settings) here, vs the Catalog (browse) app at /katalog. One build, two
+        # deployments = two distinct launchpad apps.
+        image: ghcr.io/zaentrum/katalog-manager-ui:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        - name: BASE_PATH
+          value: /katalog-manage/
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet: { path: /healthz, port: http, scheme: HTTP }
+          initialDelaySeconds: 3
+          periodSeconds: 30
+          timeoutSeconds: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet: { path: /healthz, port: http, scheme: HTTP }
+          initialDelaySeconds: 1
+          periodSeconds: 10
+          timeoutSeconds: 1
+          failureThreshold: 3
+        resources:
+          requests: { cpu: 25m, memory: 32Mi }
+          limits: { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: katalog-manage-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: katalog-manage-ui
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: katalog-manage-ui
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
