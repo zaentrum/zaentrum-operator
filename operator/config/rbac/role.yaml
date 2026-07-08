@@ -42,6 +42,12 @@ rules:
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Setting a Route's spec.host requires the custom-host sub-resource (OpenShift
+  # RBAC) — needed to CREATE a route with an explicit host (adopting an existing
+  # route with an unchanged host does not trip this, so it only surfaces on a new route).
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes/custom-host"]
+    verbs: ["create", "update"]
   # RBAC the operator hands to katalog-manager-api (first-run config propagation).
   # A controller may only grant rights it already holds, so it must carry these.
   - apiGroups: ["rbac.authorization.k8s.io"]
