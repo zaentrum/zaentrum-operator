@@ -89,6 +89,17 @@ type StorageSpec struct {
 	// when an external PV backs it (e.g. the demo's NFS export). Default true.
 	// +optional
 	ProvisionMedia *bool `json:"provisionMedia,omitempty"`
+
+	// KafkaPVC names a pre-created PVC to back the bundled Kafka broker's log dir
+	// so topics survive a pod restart/reschedule. Empty (default) → ephemeral
+	// emptyDir (topics are recreated by the demo's topics Job + producer retry).
+	// +optional
+	KafkaPVC string `json:"kafkaPvc,omitempty"`
+
+	// KafkaNode pins the bundled Kafka broker to a node (kubernetes.io/hostname),
+	// required when KafkaPVC is a node-local volume. Empty → no node pinning.
+	// +optional
+	KafkaNode string `json:"kafkaNode,omitempty"`
 }
 
 // FeaturesSpec toggles optional platform capabilities.

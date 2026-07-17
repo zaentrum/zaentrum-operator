@@ -35,6 +35,11 @@ spec:
       labels: { app: kafka, role: event-stream }
     spec:
       serviceAccountName: kafka
+      {{- if .Values.storage.kafkaNode }}
+      # Pin to the node whose local volume backs kafkaPvc (node-local storage).
+      nodeSelector:
+        kubernetes.io/hostname: {{ .Values.storage.kafkaNode }}
+      {{- end }}
       containers:
         - name: kafka
           image: apache/kafka:3.8.0
@@ -83,7 +88,13 @@ spec:
             - { name: data, mountPath: /var/lib/kafka/data }
       volumes:
         - name: data
-          emptyDir: { sizeLimit: 5Gi }   # demo: ephemeral (no dynamic provisioner on this cluster)
+          {{- if .Values.storage.kafkaPvc }}
+          # Persistent log dir → topics + offsets survive a pod restart/reschedule.
+          persistentVolumeClaim:
+            claimName: {{ .Values.storage.kafkaPvc }}
+          {{- else }}
+          emptyDir: { sizeLimit: 5Gi }   # ephemeral (no dynamic provisioner); topics recreate via the topics Job + producer retry
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

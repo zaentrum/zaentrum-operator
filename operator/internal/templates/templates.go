@@ -108,6 +108,8 @@ func (v Values) chartValues() map[string]interface{} {
 			"mediaSize":      mediaSize,
 			"className":      spec.Storage.ClassName,
 			"provisionMedia": derefBool(spec.Storage.ProvisionMedia, true),
+			"kafkaPvc":       spec.Storage.KafkaPVC,
+			"kafkaNode":      spec.Storage.KafkaNode,
 		},
 		"network": map[string]interface{}{
 			"issuerHostAliasIP": spec.Network.IssuerHostAliasIP,

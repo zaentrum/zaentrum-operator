@@ -29,6 +29,8 @@ storage:
   mediaSize: 50Gi
   className: ""             # optional StorageClass for platform PVCs
   provisionMedia: true      # false → an external PV backs the `media` PVC (demo NFS); chart skips the PVC
+  kafkaPvc: ""              # name of a pre-created PVC for kafka's log dir (topics survive restart); "" → emptyDir
+  kafkaNode: ""             # kubernetes.io/hostname to pin kafka to (needed for a node-local kafkaPvc); "" → unpinned
 
 network:
   # Split-horizon: adds hostAliases (this IP → global.hostname) to the OIDC
