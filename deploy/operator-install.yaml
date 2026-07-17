@@ -221,6 +221,17 @@ spec:
                     description: ClassName is an optional StorageClass for all platform
                       PVCs.
                     type: string
+                  kafkaNode:
+                    description: |-
+                      KafkaNode pins the bundled Kafka broker to a node (kubernetes.io/hostname),
+                      required when KafkaPVC is a node-local volume. Empty → no node pinning.
+                    type: string
+                  kafkaPvc:
+                    description: |-
+                      KafkaPVC names a pre-created PVC to back the bundled Kafka broker's log dir
+                      so topics survive a pod restart/reschedule. Empty (default) → ephemeral
+                      emptyDir (topics are recreated by the demo's topics Job + producer retry).
+                    type: string
                   mediaSize:
                     anyOf:
                     - type: integer
