@@ -96,8 +96,19 @@ the issuer host must equal the host you reach Zaentrum at, so set it in all four
 `deploy/base/ingress.yaml` host, `zaentrum-env` `OIDC_ISSUER`, `zaentrum-keycloak-config`
 `KC_HOSTNAME`, and (on the appliance) the `STUBE_ISSUER_HOST` env var on the container.
 
-See **[docs/self-hosting.md](docs/self-hosting.md)** for the operator contract and
-**[docs/architecture.md](docs/architecture.md)** for the deploy model.
+## Deploying
+
+Full deployment documentation is in **[docs/](docs/README.md)** — start there. It
+routes by audience and covers every path:
+
+- **[docs/README.md](docs/README.md)** — index + the four-layer deploy model.
+- **[docs/prerequisites.md](docs/prerequisites.md)** — cluster + external deps.
+- **[docs/self-hosting.md](docs/self-hosting.md)** — appliance · your-own-k8s · helm · k3s/Compose (+ values reference).
+- **[docs/operator.md](docs/operator.md)** — the operator + the complete `Zaentrum` CR spec reference.
+- **[docs/reference-demo.md](docs/reference-demo.md)** — how the public demo is deployed end-to-end (worked GitOps example).
+- **[docs/updating.md](docs/updating.md)** — day-2: app image · chart/operator roll · CR change.
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** — symptom → cause → fix.
+- **[docs/architecture.md](docs/architecture.md)** — how it fits together.
 
 ## Repository layout
 
@@ -111,7 +122,7 @@ operator/         the controller-manager — reconciles the Zaentrum CR into the
 deploy/           allinone (k3s-in-one) · base (real cluster) · compose · overlays  ← source of truth for deploy
 apps/admin/       the /manage admin UI            → ghcr.io/zaentrum/admin     (built here)
 platform/keycloak/ bundled identity provider      → ghcr.io/zaentrum/keycloak  (built here)
-docs/             architecture · self-hosting · operator
+docs/             DEPLOYMENT DOCS: index · prerequisites · self-hosting · operator/CR-ref · reference-demo · updating · troubleshooting · architecture
 ```
 
 Service images the manifests pull (each owned by its own `github.com/zaentrum` repo):

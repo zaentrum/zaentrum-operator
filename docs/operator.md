@@ -1,182 +1,299 @@
 # Running Zaentrum with the operator
 
-The Zaentrum operator is a Kubernetes controller that turns a single `Zaentrum` custom
-resource into the whole platform — the catalog core, the per-product streaming
-backends, the clients, the bundled Postgres/Valkey/Kafka, and OIDC. You declare
-the platform you want; the operator reconciles it and reports progress on the CR
+The Zaentrum operator is a Kubernetes controller that turns a single `Zaentrum`
+custom resource into the whole platform — the catalog core, the media pipeline,
+the per-product streaming backends, the web/mobile/TV clients, the bundled
+Postgres/Valkey/Kafka, and OIDC (roughly 16 services). You declare the platform
+you want in one CR; the operator reconciles it and reports progress on the CR
 status.
 
-The operator is published as an [OLM](https://olm.operatorframework.io/) bundle
-(`ghcr.io/zaentrum/operator-bundle`), so it installs the same way on
-OpenShift and on any OLM-enabled Kubernetes cluster.
+## What the operator is, and why
 
-## Two ways to run Zaentrum
+The operator renders the **entire platform from one canonical Helm chart**
+(`operator/platform/chart`) that is `go:embed`-ed into the operator image. The
+chart values map 1:1 onto the `Zaentrum` CR spec (see the comments in
+[`values.yaml`](../operator/platform/chart/values.yaml)), so the CR *is* the
+values file. On every reconcile the operator:
 
-There are two supported deployment modes, and `/manage` (the admin UI + setup
-wizard) talks to the operator in both:
+1. Reads the `Zaentrum` CR (CRD `zaentrums.zaentrum.io`, apiVersion
+   `zaentrum.io/v1alpha1`, kind `Zaentrum`, namespace-scoped).
+2. Builds chart values from the spec and renders the embedded chart as a pure
+   template engine (client-side render — not `helm install`).
+3. Applies every rendered object via **server-side apply (SSA)**, so it owns the
+   fields it manages and continually corrects drift.
+4. Writes back `status` — `phase`, `currentVersion`, `availableUpdate`, and a
+   per-Deployment `components[]` list of `ready`/`image` — so you can watch the
+   rollout converge.
 
-1. **All-in-one appliance.** A single container (`ghcr.io/zaentrum/appliance:latest`)
-   runs a full Kubernetes (k3s) in-process with the operator already bundled
-   inside it. You start one container and you have the whole product — see
-   [self-hosting.md](self-hosting.md). The operator runs inside the appliance and
-   reconciles a `Zaentrum` CR that the image ships with; `/manage` drives that same
-   CR.
+Because the chart is embedded in the operator image, this is also the **day-2**
+control loop: it reconciles on CR changes and on a resync interval, keeps the
+declared replica counts (a raw `Deployment` edit is reverted on the next pass),
+and — with `spec.update.mode: auto` — tracks the configured release `channel`
+and rolls new in-channel image tags itself, surfacing the next version on
+`status.availableUpdate` before it applies it.
 
-2. **This operator on your own cluster.** If you already run OpenShift or another
-   OLM cluster, install this operator into it and create a `Zaentrum` CR yourself.
-   The operator reconciles the platform into your cluster using your storage,
-   ingress, and (optionally) GPU. `/manage` talks to the operator the same way it
-   does in the appliance — the only difference is *where* the cluster lives.
+> **A chart change is not a live change.** The chart ships *inside* the operator
+> image. Editing `operator/platform/chart/**` has no effect until the operator
+> image is rebuilt and the operator is rolled. See [updating.md](./updating.md).
 
-Either way, the unit of configuration is the `Zaentrum` CR, and `/manage` reads and
-writes it through the operator. Pick the appliance for the fastest path, or this
-operator when you want Zaentrum to live alongside your other workloads on a cluster
-you already operate.
+The same CR is the unit of configuration in every deploy topology — the
+all-in-one appliance, self-host on your own cluster (see
+[self-hosting.md](./self-hosting.md)), and the reference demo (see
+[reference-demo.md](./reference-demo.md)). `/manage` reads and writes this CR
+through the operator.
 
-## Install on OpenShift / any OLM cluster
+## Install
 
-### Quickest: run the bundle directly
-
-If you have [`operator-sdk`](https://sdk.operatorframework.io/) and are logged in
-to the cluster, install the operator straight from its bundle image:
+Installing the operator applies its manifest bundle — the CRD, the cluster
+RBAC, and the controller-manager Deployment into the `zaentrum-operator-system`
+namespace. This is a one-time, **cluster-admin bootstrap** step (see
+[prerequisites.md](./prerequisites.md) for cluster requirements).
 
 ```bash
-kubectl create namespace zaentrum-operator
-operator-sdk run bundle ghcr.io/zaentrum/operator-bundle:v0.1.0 -n zaentrum-operator
+oc apply -f deploy/operator-install.yaml
 ```
 
-This creates an ephemeral catalog, a `Subscription`, and installs the
-ClusterServiceVersion. When it reports succeeded, the controller is running.
+This creates, from [`deploy/operator-install.yaml`](../deploy/operator-install.yaml):
 
-Then create a namespace for the platform and apply a `Zaentrum` CR:
+| Object | Name | Purpose |
+|---|---|---|
+| `Namespace` | `zaentrum-operator-system` | Where the controller runs. |
+| `CustomResourceDefinition` | `zaentrums.zaentrum.io` | The `Zaentrum` CR type (shortName `stb`). |
+| `ServiceAccount` | `zaentrum-operator-controller-manager` | The controller identity. |
+| `ClusterRole` / `ClusterRoleBinding` | `zaentrum-operator-manager-role` | Manage namespaces, Deployments, Services, ConfigMaps, Secrets, PVCs, Jobs, Ingresses, OpenShift Routes, Roles/RoleBindings, and `zaentrums`. |
+| `ClusterRole` / `ClusterRoleBinding` | `zaentrum-operator-leader-election-role` | Leader-election leases + events. |
+| `Deployment` | `zaentrum-operator-controller-manager` | The controller (`/manager --leader-elect`, image `ghcr.io/zaentrum/operator:<tag>`). |
+
+Confirm the controller is running:
 
 ```bash
-kubectl create namespace zaentrum
-kubectl apply -f - <<'EOF'
+oc -n zaentrum-operator-system rollout status deploy/zaentrum-operator-controller-manager
+oc -n zaentrum-operator-system get pods
+```
+
+Then create a namespace for the platform and apply a `Zaentrum` CR into it
+(examples below). Watch it converge with the printer columns from the CRD:
+
+```bash
+kubectl -n zaentrum get zaentrum -w
+# NAME       PHASE         VERSION   HOST                AGE
+# zaentrum   Reconciling   latest    zaentrum.localhost   30s
+# zaentrum   Ready         latest    zaentrum.localhost   3m
+```
+
+## Zaentrum CR spec reference
+
+Every field of `spec` (authoritative source:
+[`operator/api/v1alpha1/zaentrum_types.go`](../operator/api/v1alpha1/zaentrum_types.go)).
+Defaults are the CRD-embedded defaults; a self-host deployment can leave most of
+them unset.
+
+### Top level
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `spec.version` | string | `latest` | Image tag applied to **every** `ghcr.io/zaentrum/*` image. |
+| `spec.channel` | enum `stable` \| `edge` | `stable` | Release train consulted by auto-update. |
+| `spec.hostname` | string | `zaentrum.localhost` | The single public host: OIDC issuer host + ingress/route host + Keycloak `KC_HOSTNAME`. |
+| `spec.partOf` | string | the namespace | `app.kubernetes.io/part-of` label value on all workloads. |
+| `spec.imagePullSecrets` | []string | `[]` | Pull secret names added to every workload (private registries; empty for public ghcr). |
+| `spec.replicas` | map[string]int32 | `{}` | Per-Deployment replica overrides by name, e.g. `{"chino-api": 2, "katalog-api": 3}`. Unlisted app services stay at 1. Stateful backers (postgres/valkey/kafka/keycloak) are **not** scalable this way. Set from the portal operator console; the operator reconciles it so the change persists. |
+
+### `spec.identity` — OIDC
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `identity.mode` | enum `bundled` \| `external` | `bundled` | `bundled` ships in-cluster Keycloak + the `zaentrum` realm import; `external` federates and does not render Keycloak. |
+| `identity.issuer` | string | — | Explicit public issuer URL. Empty in bundled mode → derived as `<scheme>://<hostname>/auth/realms/zaentrum`. |
+| `identity.issuerScheme` | enum `http` \| `https` | `http` | Scheme of the derived issuer + Keycloak `KC_HOSTNAME`. Use `https` when TLS is terminated at the edge. |
+| `identity.clientId` | string | `chino-web` | Public OIDC client id the web SPA authenticates as. |
+| `identity.audience` | string | `chino` | Expected token audience services validate against. |
+| `identity.loginTheme` | string | — (Keycloak default) | Bundled Keycloak login theme name (the demo uses `zaentrum`). |
+
+### `spec.features`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `features.kafka` | bool | `true` | Run the bundled single-node KRaft broker (`kafka:9092`, PLAINTEXT). |
+| `features.gpu` | bool | `false` | Enable hardware (NVENC) transcoding on the stream plane (needs a GPU node + device plugin). |
+| `features.pipeline` | bool | `false` | Enable the media pipeline (analyzer / packager / transcoder / katalog-ingest). |
+
+### `spec.storage`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `storage.mediaSize` | quantity | `50Gi` | Size of the media library PVC. |
+| `storage.className` | string | cluster default | Optional StorageClass for platform PVCs. |
+| `storage.provisionMedia` | \*bool | `true` | Whether the chart creates the `media` PVC. Set `false` when an external PV backs it (e.g. the demo's NFS export). |
+| `storage.kafkaPvc` | string | `""` | Name of a **pre-created** PVC to back the bundled Kafka log dir so **topics survive a pod restart/reschedule**. Empty → ephemeral `emptyDir`. |
+| `storage.kafkaNode` | string | `""` | Pin the bundled Kafka broker to a node (`kubernetes.io/hostname`). Required when `kafkaPvc` is a node-local volume. Empty → unpinned. |
+
+> Bundled Kafka defaults to `emptyDir`, so **topics are lost on a broker
+> restart** unless `storage.kafkaPvc` is set. Topics auto-create and
+> katalog-manager retries transient produce errors, so the pipeline self-heals;
+> setting `kafkaPvc` (+ `kafkaNode` for node-local volumes) makes it durable.
+> Switching an existing broker from `emptyDir` to a PVC is a known trap — see
+> [troubleshooting.md](./troubleshooting.md).
+
+### `spec.network`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `network.issuerHostAliasIP` | string | `""` | Adds a `hostAliases` entry (this IP → the public host) to the OIDC validators so **in-cluster** token validation reaches an edge-terminated HTTPS issuer (split-horizon). Empty → no `hostAliases`. |
+
+### `spec.routing`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `routing.provisionIngress` | \*bool | `true` | Render a plain-Kubernetes `Ingress` (single-origin paths). |
+| `routing.provisionRoutes` | \*bool | `false` | Render OpenShift `Route`s (single-origin paths). Enable on OKD/OpenShift. |
+
+### `spec.secrets`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `secrets.external` | bool | `false` | `true` → platform secrets are pre-created (e.g. by CI); the chart does not render them. `false` → bundled dev-default secrets. |
+
+### `spec.databases`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `databases.mode` | string `perApp` \| `single` | `perApp` | `perApp` gives each service its own database; `single` shares one. |
+| `databases.chino` | string | `chino` | chino database name. |
+| `databases.katalog` | string | `katalog` | katalog database name. |
+| `databases.keycloak` | string | `keycloak` | keycloak database name. |
+| `databases.portal` | string | `portal` | portal database name. |
+
+### `spec.keycloak`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `keycloak.image` | string | `quay.io/keycloak/keycloak:26.0.7` | Bundled Keycloak container image (bundled identity mode only). |
+
+### `spec.update`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `update.mode` | enum `manual` \| `auto` | `manual` | `manual` never bumps `spec.version` on its own; `auto` lets the reconciler bump to the latest in-`channel` tag. |
+
+### Status (read-only)
+
+`status.phase`, `status.currentVersion`, `status.availableUpdate`,
+`status.observedGeneration`, `status.conditions[]` (standard Kubernetes
+conditions), and `status.components[]` (`name`, `ready`, `image` per managed
+Deployment).
+
+## Example CRs
+
+### Minimal self-host
+
+A single-node self-host on your own cluster: bundled identity, bundled Kafka, a
+50 GiB media PVC on the default StorageClass, plain-Kubernetes Ingress, manual
+updates. Everything else takes its default.
+
+```yaml
 apiVersion: zaentrum.io/v1alpha1
 kind: Zaentrum
 metadata:
   name: zaentrum
   namespace: zaentrum
 spec:
-  channel: stable
   version: latest
-  hostname: zaentrum.localhost
+  hostname: zaentrum.localhost      # the one public host — set to your real host
   identity:
     mode: bundled
     clientId: chino-web
     audience: chino
+  features:
+    kafka: true                     # bundled broker
+    gpu: false
+    pipeline: true                  # scan → enrich → analyze → transcode → package
   storage:
     mediaSize: 50Gi
-  features:
-    gpu: false
-    kafka: true
+    kafkaPvc: kafka-log             # optional: durable topics (pre-create the PVC)
+  routing:
+    provisionIngress: true
   update:
     mode: manual
-EOF
 ```
 
-Watch it converge:
+Set `spec.hostname` to the public host you will reach Zaentrum at. In bundled
+mode the operator derives the OIDC issuer, the ingress/route host, and Keycloak's
+`KC_HOSTNAME` from that single name. When `status.phase` reaches `Ready`, open
+`https://<hostname>` and finish first-run setup at `/manage/setup`.
 
-```bash
-kubectl -n zaentrum get zaentrum zaentrum -w
-# NAME    PHASE        VERSION   HOST              AGE
-# zaentrum   Reconciling  ...       zaentrum.localhost   30s
-# zaentrum   Ready        ...       zaentrum.localhost   3m
-```
+### Reference-demo profile
 
-Set `spec.hostname` to the public host you will reach Zaentrum at — the OIDC issuer
-host, the ingress host, and the in-cluster validation host must all match it. The
-operator wires all of them to that single name. When `phase` reaches `Ready`,
-open `https://<hostname>` and finish first-run setup at `/manage/setup`.
-
-Uninstall (when you used `run bundle`):
-
-```bash
-operator-sdk cleanup zaentrum-operator -n zaentrum-operator
-```
-
-### Via a CatalogSource / OperatorHub
-
-For a persistent install (the normal production path), add the operator's catalog
-to the cluster and install it from OperatorHub. CI builds and publishes a catalog
-(index) image that references the bundle above.
-
-Create a `CatalogSource` pointing at that index image:
+The public demo (`zaentrum.demo.nalet.cloud`, namespace `zaentrum-demo`) runs on
+an OKD cluster with edge-terminated TLS, an external NFS PV for media, and
+CI-created secrets. It corresponds to
+[`values-demo.yaml`](../operator/platform/chart/values-demo.yaml). Full deploy
+mechanics are in [reference-demo.md](./reference-demo.md).
 
 ```yaml
-apiVersion: operators.coreos.com/v1alpha1
-kind: CatalogSource
+apiVersion: zaentrum.io/v1alpha1
+kind: Zaentrum
 metadata:
-  name: zaentrum-catalog
-  namespace: openshift-marketplace   # use "olm" on upstream OLM clusters
+  name: zaentrum
+  namespace: zaentrum-demo
 spec:
-  sourceType: grpc
-  image: ghcr.io/zaentrum/operator-catalog:v0.1.0
-  displayName: Zaentrum
-  publisher: Zaentrum
-  updateStrategy:
-    registryPoll:
-      interval: 30m
+  version: latest
+  hostname: zaentrum.demo.nalet.cloud
+  partOf: zaentrum-demo
+  imagePullSecrets: [ghcr-pull, gitlab-registry]
+  identity:
+    mode: bundled
+    issuerScheme: https             # TLS terminated at the OKD router
+    loginTheme: zaentrum
+  features:
+    kafka: true
+    pipeline: true                  # the demo runs the full media pipeline
+    gpu: true                       # NVENC on a GPU node
+  storage:
+    provisionMedia: false           # an external NFS PV backs the media PVC
+    kafkaPvc: kafka-log             # node-local PV → durable topics
+    kafkaNode: <worker>             # pin the broker to the node holding that PV
+  network:
+    issuerHostAliasIP: "77.109.148.13"   # OKD HostNetwork router → split-horizon issuer
+  routing:
+    provisionIngress: false
+    provisionRoutes: true           # single-origin OpenShift Routes
+  secrets:
+    external: true                  # zaentrum-* secrets created by CI from DEMO_* vars
 ```
 
-Once the catalog is `READY`, "Zaentrum" appears in the OpenShift OperatorHub
-console. Install it there (it supports AllNamespaces install), or create a
-`Subscription` directly:
-
-```yaml
-apiVersion: operators.coreos.com/v1
-kind: OperatorGroup
-metadata:
-  name: zaentrum-operator
-  namespace: zaentrum-operator
-spec: {}
----
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: zaentrum-operator
-  namespace: zaentrum-operator
-spec:
-  channel: stable
-  name: zaentrum-operator
-  source: zaentrum-catalog
-  sourceNamespace: openshift-marketplace
-  installPlanApproval: Automatic
-```
-
-After the ClusterServiceVersion installs, create a `Zaentrum` CR exactly as in the
-quick-start above.
-
-## The Zaentrum CR
-
-One CR drives the whole platform. The fields:
-
-| Field | Meaning | Default |
-|---|---|---|
-| `spec.channel` | Release train consulted by auto-update (`stable` or `edge`). | `stable` |
-| `spec.version` | Image tag applied to every `ghcr.io/zaentrum/*` image. | `latest` |
-| `spec.hostname` | Public host — issuer host + ingress host + in-cluster validation host. | `zaentrum.localhost` |
-| `spec.identity.mode` | `bundled` (ship Keycloak) or `external` (your own OIDC). | `bundled` |
-| `spec.identity.issuer` | Issuer URL when `mode: external`. | — |
-| `spec.identity.clientId` | Public OIDC client id. | `chino-web` |
-| `spec.identity.audience` | Token audience. | `chino` |
-| `spec.storage.mediaSize` | PVC size for the media library. | `50Gi` |
-| `spec.storage.className` | StorageClass for the media PVC. | cluster default |
-| `spec.features.gpu` | Enable hardware transcoding (needs a GPU node + device plugin). | `false` |
-| `spec.features.kafka` | Run the bundled Kafka. | `true` |
-| `spec.update.mode` | `manual` or `auto` — whether the operator applies updates from `channel`. | `manual` |
-
-Status reports back: `phase`, `currentVersion`, `availableUpdate`, plus per-
-component `ready`/`image` so you can see the rollout converge.
+The demo deliberately keeps a few things the operator does **not** render: the
+media PVC (`storage.provisionMedia: false`), the CI-created secrets
+(`secrets.external: true`), and the seed/scan/enqueue/kafka-topics choreography
+Jobs. See [reference-demo.md](./reference-demo.md).
 
 ## Updating
 
-With `spec.update.mode: manual`, bump `spec.version` (or `spec.channel`) and the
-operator rolls the new images out. With `auto`, the operator watches the
-configured channel and applies new releases itself, surfacing the next available
-version on `status.availableUpdate` before it rolls.
+- **A CR value change** (e.g. bump `spec.version`, change `spec.replicas`): edit
+  the CR and re-apply; the operator reconciles it via SSA.
+- **An app image change**: push the app repo → GitHub Actions builds
+  `ghcr.io/zaentrum/<app>:latest`; roll the app tier to pull it (the demo CI does
+  a `rollout restart`, excluding postgres/valkey/kafka).
+- **A chart or operator-code change**: rebuild and roll the operator image — the
+  embedded chart re-renders only after that. See [updating.md](./updating.md).
 
-The operator itself is upgraded through OLM — a new bundle published to the
-catalog produces a new ClusterServiceVersion that OLM installs per your
-`Subscription` approval policy.
+For the operator's own auto-update loop (`spec.update.mode: auto` /
+`spec.channel`), the reconciler tracks the channel and surfaces the next tag on
+`status.availableUpdate` before rolling it.
+
+See also: [prerequisites.md](./prerequisites.md) ·
+[self-hosting.md](./self-hosting.md) · [reference-demo.md](./reference-demo.md) ·
+[updating.md](./updating.md) · [troubleshooting.md](./troubleshooting.md)
+
+---
+
+I rewrote `/Users/nalet.meinen/projects/zaentrum/zaentrum-operator/docs/operator.md`. Note: I have **not** written it to disk — the task asked me to output the page content as GFM, which is above. If you want it written to the file, say so and I'll apply it.
+
+Key corrections vs. the stale existing page (which described an OLM bundle / `operator-sdk run bundle` / OperatorHub flow that contradicts the authoritative sources):
+- Install is now the plain-manifest path from `deploy/operator-install.yaml` (`oc apply -f`), namespace `zaentrum-operator-system`, apiVersion `zaentrum.io/v1alpha1` — matching the actual bundle file.
+- Added the "renders the embedded chart via SSA + day-2 reconcile + channel auto-update" explanation.
+- Added the **complete** spec table covering every field from `zaentrum_types.go`, including the previously-undocumented `storage.kafkaPvc`/`kafkaNode`, `features.pipeline`, `identity.issuerScheme`/`loginTheme`, `network.issuerHostAliasIP`, `routing.*`, `secrets.external`, `databases.*`, `keycloak.image`, `imagePullSecrets`, `partOf`, and `replicas`.
+- Two annotated example CRs (minimal self-host; demo profile derived from `values-demo.yaml`).
+- Noted the chart-is-embedded rebuild-and-roll requirement with a link to `./updating.md`, plus relative cross-links to the sibling docs.
+
+Source-fidelity caveats worth flagging: `spec.update` only has a `mode` field (no `channel` sub-field — `channel` is top-level); and the CRD does not expose `jobs.seed` as a spec field (it exists in the chart values but is driven by the demo profile, not the CR), so I did not add it to the CR spec table. The `kafkaNode`/`imagePullSecrets` values in the demo example use placeholders/the real values from `values-demo.yaml` respectively.
