@@ -581,7 +581,7 @@ spec:
         - --metrics-bind-address=:8080
         command:
         - /manager
-        image: ghcr.io/zaentrum/operator:sha-b604dd6943bae59bf4fa478254f8775456c5a099
+        image: ghcr.io/zaentrum/operator:sha-cb96f3dc3d592a42e0399c58d24f8cf0379b76d9
         livenessProbe:
           httpGet:
             path: /healthz
