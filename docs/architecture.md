@@ -70,9 +70,9 @@ This isn't cosmetic. A media client/server is distributable on app stores precis
 *because* it is content-neutral. Bundling acquisition would re-import the IP problem and is
 against store and host policy.
 
-## Relationship to the private nalet deployment
+## Relationship to a private deployment
 
-`github.com/zaentrum/stube` is the **canonical, public source of truth**. The operator's real
+`github.com/zaentrum/stube` is the **canonical, public source of truth**. An operator's real
 deployment (behind their own identity provider, with their own library) consumes this repo
 and adds, *out of tree*:
 

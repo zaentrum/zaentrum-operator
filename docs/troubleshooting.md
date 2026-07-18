@@ -50,13 +50,13 @@ CRD *do* exist, the guard only fails for one of two reasons:
 **Fix** — mint a long-lived deployer token and update the group CI variable:
 
 ```bash
-# Long-lived deployer token (10 years). The deployer SA lives in ns 'stube'.
-oc create token deployer -n stube --duration=87600h
+# Long-lived deployer token. The deployer SA lives in your deploy namespace.
+oc create token <deploy-sa> -n <deploy-namespace> --duration=<long>
 
 # Push it to the group-level CI variable so every deploy uses it.
 glab api --method PUT \
   "groups/zaentrum/variables/OC_TOKEN" \
-  -f "value=$(oc create token deployer -n stube --duration=87600h)"
+  -f "value=$(oc create token <deploy-sa> -n <deploy-namespace> --duration=<long>)"
 ```
 
 If the grant is missing rather than the token, (re-)apply the bootstrap as
@@ -146,7 +146,7 @@ docker build --build-arg FFMPEG_BUILD_URL=<release-branch-tarball-url> .
 ```
 
 Bump to a newer branch **only** after verifying the GPU nodes' driver is new
-enough (`nvidia-smi` on the worker) and re-validating an encode.
+enough (`nvidia-smi` on the GPU node) and re-validating an encode.
 
 ---
 
@@ -194,7 +194,7 @@ validation without changing the public URL. Example CR fragment:
 ```yaml
 spec:
   network:
-    issuerHostAliasIP: <okd-router-cluster-ip>
+    issuerHostAliasIP: <router-ip>
 ```
 
 Apply the CR change (via CI for the demo) and let the operator reconcile; the
@@ -229,8 +229,8 @@ spec:
 ```
 
 For the demo, the node-local PV and its pre-created host dir are established by
-`zaentrum-demo/bootstrap.yaml` (`pv-worker1-zaentrum-demo-kafka`, host dir
-`/var/local-storage/a/pv/zaentrum-demo-kafka`, node `worker1`).
+`zaentrum-demo/bootstrap.yaml` (a `pv-...-kafka` PersistentVolume, a host dir on
+the node, and the `<node>` the broker is pinned to).
 
 > **Self-heals otherwise.** Even on `emptyDir`, the platform recovers on its own:
 > topics **auto-create** on first produce, and `katalog-manager` **retries**
