@@ -91,6 +91,9 @@ spec:
               key: password
         - name: PG_URL
           value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/portal?sslmode=disable
+        # Kafka event tap for the admin debug console (read-only tail + topology).
+        - name: KAFKA_BROKERS
+          value: kafka:9092
         livenessProbe:
           httpGet: { path: /actuator/health/liveness, port: http, scheme: HTTP }
           initialDelaySeconds: 5
