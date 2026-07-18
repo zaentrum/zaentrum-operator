@@ -156,7 +156,7 @@ spec:
   storage:
     mediaSize: 2Ti
     kafkaPvc: kafka-log    # pre-created PVC so Kafka topics survive a broker restart
-    kafkaNode: worker-1    # pin Kafka to the node holding a node-local kafkaPvc
+    kafkaNode: <node>      # pin Kafka to the node holding a node-local kafkaPvc
 ```
 
 The pipeline is pure event-driven: stage handoffs are Kafka events keyed by `item_id`

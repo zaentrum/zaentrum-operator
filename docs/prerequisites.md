@@ -10,7 +10,7 @@ The three topologies:
 |---|---|---|
 | **Appliance** | One container — `docker run --privileged ghcr.io/zaentrum/appliance:latest` boots an in-process single-node k3s that auto-applies `deploy/base`. Zero-clone. | [self-hosting.md](./self-hosting.md#quick-start-all-in-one) |
 | **Self-host on k8s** | Install the operator once, then apply a `Zaentrum` CR; or `helm install` the chart (`operator/platform/chart`) directly. Non-k8s `deploy/k3s` (`up.sh`) and `deploy/compose` (docker-compose + Caddy) profiles also exist. | [self-hosting.md](./self-hosting.md), [operator.md](./operator.md) |
-| **Reference demo** | The public demo at `zaentrum.demo.nalet.cloud` on an OKD cluster, deployed by GitLab CI. | [reference-demo.md](./reference-demo.md) |
+| **Reference demo** | The public demo at `https://zaentrum.demo.nalet.cloud` on an OKD cluster, deployed by CI from a deploy-only repo. | [reference-demo.md](./reference-demo.md) |
 
 ## At a glance
 
@@ -18,7 +18,7 @@ The three topologies:
 |---|:---:|:---:|:---:|
 | Container runtime (Docker/Podman) | required | — | — |
 | A Kubernetes / OKD cluster | bundled (k3s) | required | required (OKD) |
-| Media library storage (NFS or a StorageClass) | container disk | required | NFS (`nas001:/media-demo`) |
+| Media library storage (NFS or a StorageClass) | container disk | required | NFS (`<nfs-server>:/media-demo`) |
 | Node-local storage for the bundled Kafka PV (topic persistence) | optional | optional | required |
 | GPU node + matching Nvidia driver (`features.gpu`) | optional | optional (if pipeline) | required (pipeline) |
 | Public DNS + TLS for the hostname | LAN/`*.localhost` | required | OKD edge TLS |
@@ -93,7 +93,7 @@ You bring the cluster and its supporting infrastructure; the operator renders th
   ```yaml
   storage:
     kafkaPvc: kafka-data
-    kafkaNode: worker1.example.com
+    kafkaNode: <node>
   ```
 
   If you point the platform at an **external** Kafka cluster instead (`features.kafka: false`, brokers
@@ -130,7 +130,7 @@ the ffmpeg-nvenc ↔ driver version coupling applies to you.
 
 ## Reference demo (OKD)
 
-The public demo is deployed by GitLab CI from the deploy-only repo `gitlab.nalet.cloud/zaentrum/deploy`
+The public demo is deployed by CI from your deploy repo (a private, deploy-only repo)
 into namespace `zaentrum-demo` on an OKD cluster. It runs the **full media pipeline** with GPU NVENC.
 Most of the setup is one-time cluster-admin bootstrap; the rest is CI. Full walkthrough:
 [reference-demo.md](./reference-demo.md).
@@ -153,27 +153,27 @@ An OKD cluster, plus a cluster-admin who runs these **once** (CI cannot — it c
    oc apply -f zaentrum-demo/bootstrap.yaml
    ```
 
-3. **Pre-create the Kafka PV host dir** on the pinned node (the demo pins Kafka to `worker1`):
+3. **Pre-create the Kafka PV host dir** on the pinned node (the demo pins Kafka to a `<node>`):
 
    ```bash
-   oc debug node/worker1.okd.nalet.cloud
+   oc debug node/<node>
    # mkdir -p /host/var/local-storage/a/pv/zaentrum-demo-kafka && chmod 0777 ...
    ```
 
 4. **Set CI variables** (see below).
 
-The deploy ServiceAccount (`stube:deployer`) is namespace-scoped and needs two cluster-scoped **reads**
+The deploy ServiceAccount (`<deploy-namespace>:<deploy-sa>`) is namespace-scoped and needs two cluster-scoped **reads**
 for the deploy job's pre-flight guards — `get namespaces/zaentrum-demo` and
 `get customresourcedefinitions/zaentrums.zaentrum.io` — granted by the `resourceNames`-scoped
 `zaentrum-demo-ns-get` ClusterRole in `bootstrap.yaml`.
 
 ### Storage
 
-- **Media**: an **NFS server** exporting the demo library. The bootstrap PV binds `nas001:/media-demo`
+- **Media**: an **NFS server** exporting the demo library. The bootstrap PV binds `<nfs-server>:/media-demo`
   (RWX, `Retain`) to the `media` claim; the CR keeps `storage.provisionMedia: false` so the operator
   consumes it. The demo must serve only distributable content (Creative Commons / public domain).
 - **Kafka**: a **node-local PV** for topic persistence — `storage.kafkaPvc: kafka-data`,
-  `storage.kafkaNode: worker1.okd.nalet.cloud`, backed by the `pv-worker1-zaentrum-demo-kafka` PV in
+  `storage.kafkaNode: <node>`, backed by the node-local `zaentrum-demo-kafka` PV in
   `bootstrap.yaml`, with the host dir from step 3.
 
 ### GPU
@@ -185,7 +185,7 @@ driver** — see [GPU](#gpu-nvenc).
 
 - Host `zaentrum.demo.nalet.cloud`, TLS terminated at the **OKD edge router**
   (`identity.issuerScheme: https`, `routing.provisionRoutes: true`).
-- **Split-horizon**: `network.issuerHostAliasIP: "77.109.148.13"` points the in-cluster OIDC validators
+- **Split-horizon**: `network.issuerHostAliasIP: "<router-ip>"` points the in-cluster OIDC validators
   at the router node so token validation reaches the edge-terminated TLS. See
   [Split-horizon issuer resolution](#split-horizon-issuer-resolution).
 
@@ -197,7 +197,7 @@ choreography — the operator forces `jobs.seed: false`).
 
 | Scope | Variable | What it is |
 |---|---|---|
-| Group | `OC_SERVER`, `OC_TOKEN` | OKD API URL + a long-lived deployer SA token (`oc create token deployer -n stube --duration=87600h`). |
+| Group | `OC_SERVER`, `OC_TOKEN` | OKD API URL + a long-lived deployer SA token (`oc create token <deploy-sa> -n <deploy-namespace> --duration=<long>`). |
 | Project | `DEMO_DB_PW`, `DEMO_MANAGER_SECRET`, `DEMO_KC_ADMIN_PW`, `DEMO_REALM_ADMIN_PW`, `DEMO_USER_PW` | Secrets CI creates as the `zaentrum-*` secrets. |
 | Group | `GHCR_PULL_TOKEN`, `GHCR_PULL_USER` | A GitHub PAT with `read:packages` for the `ghcr-pull` secret. |
 

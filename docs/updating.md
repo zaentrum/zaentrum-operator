@@ -100,7 +100,7 @@ so it only takes effect after the operator is rebuilt and rolled.
 5. **Run a CI deploy** (flow’s tail below / [Running a CI deploy](#running-a-ci-deploy))
    so the operator re-renders the platform from the new chart and rolls the affected
    tiers. The operator reconciles via server-side apply; give it up to ~2 min to
-   converge (`kubectl -n zaentrum-demo get zaentrum,pods`).
+   converge (`kubectl -n <deploy-namespace> get zaentrum,pods`).
 
 ### Adding a new CR spec field ⚠️
 
@@ -128,7 +128,7 @@ the same operator reconciles the edited CR.
 
 1. **Edit the CR.** For the reference demo that is
    [`deploy/zaentrum-demo/okd/zaentrum.yaml`](https://github.com/zaentrum/zaentrum-operator)
-   in the GitLab `zaentrum/deploy` repo. Spec fields map 1:1 onto the chart values
+   in your deploy repo (a private, deploy-only repo). Spec fields map 1:1 onto the chart values
    (see the field table in [operator.md](./operator.md) and the `values.yaml`
    comments). For example, to make the bundled Kafka log persist across restarts:
 
@@ -136,7 +136,7 @@ the same operator reconciles the edited CR.
    spec:
      storage:
        kafkaPvc: kafka-data              # empty => ephemeral emptyDir (topics lost on restart)
-       kafkaNode: worker1.okd.nalet.cloud
+       kafkaNode: <node>
    ```
 
 2. **Run a CI deploy** ([Running a CI deploy](#running-a-ci-deploy)). CI applies the
@@ -152,8 +152,8 @@ the same operator reconciles the edited CR.
 ## Running a CI deploy
 
 Flows A, B, and C all finish with the same GitLab CI job. It is defined in
-[`deploy/.gitlab-ci.yml`](https://github.com/zaentrum/zaentrum-operator) in the
-GitLab-only `zaentrum/deploy` repo as `deploy:zaentrum-demo`:
+[`deploy/.gitlab-ci.yml`](https://github.com/zaentrum/zaentrum-operator) in
+your deploy repo (a private, deploy-only repo) as `deploy:zaentrum-demo`:
 
 - **`main`-only** and **manual**, gated on `CI_ENABLED=true`
   (`workflow.rules`). Pipelines stay dormant otherwise.
@@ -164,7 +164,7 @@ GitLab-only `zaentrum/deploy` repo as `deploy:zaentrum-demo`:
 Trigger it from the repo, then play the manual job:
 
 ```bash
-glab ci run -b main -R zaentrum/deploy
+glab ci run -b main -R <deploy-repo>
 # then play the manual `deploy:zaentrum-demo` job in the pipeline UI (or `glab ci`)
 ```
 

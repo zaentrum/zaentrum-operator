@@ -124,7 +124,7 @@ them unset.
 |---|---|---|---|
 | `storage.mediaSize` | quantity | `50Gi` | Size of the media library PVC. |
 | `storage.className` | string | cluster default | Optional StorageClass for platform PVCs. |
-| `storage.provisionMedia` | \*bool | `true` | Whether the chart creates the `media` PVC. Set `false` when an external PV backs it (e.g. the demo's NFS export). |
+| `storage.provisionMedia` | \*bool | `true` | Whether the chart creates the `media` PVC. Set `false` when an external PV backs it (e.g. an NFS export). |
 | `storage.kafkaPvc` | string | `""` | Name of a **pre-created** PVC to back the bundled Kafka log dir so **topics survive a pod restart/reschedule**. Empty → ephemeral `emptyDir`. |
 | `storage.kafkaNode` | string | `""` | Pin the bundled Kafka broker to a node (`kubernetes.io/hostname`). Required when `kafkaPvc` is a node-local volume. Empty → unpinned. |
 
@@ -199,7 +199,7 @@ metadata:
   namespace: zaentrum
 spec:
   version: latest
-  hostname: zaentrum.localhost      # the one public host — set to your real host
+  hostname: zaentrum.example.com      # the one public host — set to your real host
   identity:
     mode: bundled
     clientId: chino-web
@@ -240,10 +240,10 @@ spec:
   version: latest
   hostname: zaentrum.demo.nalet.cloud
   partOf: zaentrum-demo
-  imagePullSecrets: [ghcr-pull, gitlab-registry]
+  imagePullSecrets: [ghcr-pull, registry-pull]   # names of pre-created pull secrets
   identity:
     mode: bundled
-    issuerScheme: https             # TLS terminated at the OKD router
+    issuerScheme: https             # TLS terminated at the OpenShift router
     loginTheme: zaentrum
   features:
     kafka: true
@@ -252,14 +252,14 @@ spec:
   storage:
     provisionMedia: false           # an external NFS PV backs the media PVC
     kafkaPvc: kafka-log             # node-local PV → durable topics
-    kafkaNode: <worker>             # pin the broker to the node holding that PV
+    kafkaNode: <node>               # pin the broker to the node holding that PV
   network:
-    issuerHostAliasIP: "77.109.148.13"   # OKD HostNetwork router → split-horizon issuer
+    issuerHostAliasIP: "<router-ip>"   # HostNetwork router IP → split-horizon issuer
   routing:
     provisionIngress: false
     provisionRoutes: true           # single-origin OpenShift Routes
   secrets:
-    external: true                  # zaentrum-* secrets created by CI from DEMO_* vars
+    external: true                  # zaentrum-* secrets pre-created by CI
 ```
 
 The demo deliberately keeps a few things the operator does **not** render: the
@@ -284,16 +284,3 @@ For the operator's own auto-update loop (`spec.update.mode: auto` /
 See also: [prerequisites.md](./prerequisites.md) ·
 [self-hosting.md](./self-hosting.md) · [reference-demo.md](./reference-demo.md) ·
 [updating.md](./updating.md) · [troubleshooting.md](./troubleshooting.md)
-
----
-
-I rewrote `/Users/nalet.meinen/projects/zaentrum/zaentrum-operator/docs/operator.md`. Note: I have **not** written it to disk — the task asked me to output the page content as GFM, which is above. If you want it written to the file, say so and I'll apply it.
-
-Key corrections vs. the stale existing page (which described an OLM bundle / `operator-sdk run bundle` / OperatorHub flow that contradicts the authoritative sources):
-- Install is now the plain-manifest path from `deploy/operator-install.yaml` (`oc apply -f`), namespace `zaentrum-operator-system`, apiVersion `zaentrum.io/v1alpha1` — matching the actual bundle file.
-- Added the "renders the embedded chart via SSA + day-2 reconcile + channel auto-update" explanation.
-- Added the **complete** spec table covering every field from `zaentrum_types.go`, including the previously-undocumented `storage.kafkaPvc`/`kafkaNode`, `features.pipeline`, `identity.issuerScheme`/`loginTheme`, `network.issuerHostAliasIP`, `routing.*`, `secrets.external`, `databases.*`, `keycloak.image`, `imagePullSecrets`, `partOf`, and `replicas`.
-- Two annotated example CRs (minimal self-host; demo profile derived from `values-demo.yaml`).
-- Noted the chart-is-embedded rebuild-and-roll requirement with a link to `./updating.md`, plus relative cross-links to the sibling docs.
-
-Source-fidelity caveats worth flagging: `spec.update` only has a `mode` field (no `channel` sub-field — `channel` is top-level); and the CRD does not expose `jobs.seed` as a spec field (it exists in the chart values but is driven by the demo profile, not the CR), so I did not add it to the CR spec table. The `kafkaNode`/`imagePullSecrets` values in the demo example use placeholders/the real values from `values-demo.yaml` respectively.
