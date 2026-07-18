@@ -71,22 +71,6 @@ spec:
   port: { targetPort: http }
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
 ---
-# /katalog-manage → the Catalog Management app (the same katalog image mounted at
-# /katalog-manage; renders scan + settings, vs Catalog browse at /katalog). The
-# router matches the longer path first, so it never collides with /katalog.
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: zaentrum-demo-katalog-manage
-  labels: { app: katalog-manage-ui, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
-  annotations: { haproxy.router.openshift.io/timeout: "4h" }
-spec:
-  host: {{ .Values.global.hostname }}
-  path: /katalog-manage
-  to: { kind: Service, name: katalog-manage-ui, weight: 100 }
-  port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
----
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
