@@ -31,13 +31,6 @@ spec:
                 name: chino-api
                 port:
                   number: 80
-          - path: /katalog-manage
-            pathType: Prefix
-            backend:
-              service:
-                name: katalog-manage-ui
-                port:
-                  number: 80
           - path: /katalog
             pathType: Prefix
             backend:
