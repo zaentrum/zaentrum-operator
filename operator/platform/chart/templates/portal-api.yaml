@@ -152,6 +152,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
+  # The log viewer reads the pod log subresource.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
   # Read/patch the Zaentrum CR (present only on an operator-managed appliance;
   # absent in the demo → the console degrades gracefully).
   - apiGroups: ["zaentrum.io"]
