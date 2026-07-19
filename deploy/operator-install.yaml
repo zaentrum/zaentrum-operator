@@ -77,6 +77,21 @@ spec:
                   chino:
                     default: chino
                     type: string
+                  external:
+                    description: External configures the shared database cluster
+                      used when Mode is "external".
+                    properties:
+                      host:
+                        description: Host of the shared cluster, e.g. postgres.nalet.cloud.
+                        type: string
+                      port:
+                        default: 5432
+                        format: int32
+                        type: integer
+                      sslmode:
+                        default: require
+                        type: string
+                    type: object
                   katalog:
                     default: katalog
                     type: string
@@ -85,10 +100,34 @@ spec:
                     type: string
                   mode:
                     default: perApp
-                    description: Mode is "perApp" (a DB per service) or "single".
+                    description: Mode is "perApp" (a DB per service), "single",
+                      or "external" (shared cluster).
                     type: string
                   portal:
                     default: portal
+                    type: string
+                type: object
+              eventStreaming:
+                description: EventStreaming selects the bundled broker or a shared
+                  external Kafka.
+                properties:
+                  bootstrap:
+                    description: Bootstrap is the external bootstrap server list.
+                    type: string
+                  certSecret:
+                    description: CertSecret names a secret in this namespace with
+                      user.crt/user.key/ca.crt for mTLS; empty = plaintext.
+                    type: string
+                  mode:
+                    default: bundled
+                    enum:
+                    - bundled
+                    - external
+                    type: string
+                  topicPrefix:
+                    default: stube.
+                    description: TopicPrefix is the per-tenant topic namespace on
+                      a shared cluster (e.g. "zaentrum-beta.").
                     type: string
                 type: object
               features:
@@ -195,6 +234,23 @@ spec:
               routing:
                 description: Routing selects Ingress vs OpenShift Routes.
                 properties:
+                  hosts:
+                    description: Hosts names the per-product public hosts used in
+                      subdomains mode.
+                    properties:
+                      chino:
+                        description: Chino is the host serving the chino SPA at
+                          "/", e.g. chino.beta.nalet.cloud.
+                        type: string
+                    type: object
+                  mode:
+                    default: pathRouted
+                    description: Mode is "pathRouted" (everything on Hostname) or
+                      "subdomains" (chino gets its own host; additive).
+                    enum:
+                    - pathRouted
+                    - subdomains
+                    type: string
                   provisionIngress:
                     description: ProvisionIngress renders a plain-Kubernetes Ingress.
                       Default true.

@@ -63,14 +63,13 @@ spec:
               name: zaentrum-keycloak
         # Pure Kafka triggers: consume enriched -> analyze -> emit analyzed.
         # PLAINTEXT bundled broker; item_id keys per-item ordering.
-        - name: KAFKA_BROKERS
-          value: kafka:9092
+{{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
           value: analyzer-workers
         - name: CONSUME_TOPIC
-          value: stube.catalog.item.enriched
+          value: {{ include "z.topicPrefix" . }}catalog.item.enriched
         - name: PRODUCE_TOPIC
-          value: stube.catalog.item.analyzed
+          value: {{ include "z.topicPrefix" . }}catalog.item.analyzed
         - name: CLAIM_BATCH_SIZE
           value: "2"
         - name: IDLE_SLEEP_SECONDS
@@ -114,10 +113,16 @@ spec:
         # twice in one pod hard-hangs the in-tree NFS kubelet mount, so we never do that.
         - name: katalog-data
           mountPath: /var/lib/katalog
+{{- with include "z.kafkaCertMount" . }}
+{{ . | indent 8 }}
+{{- end }}
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
           claimName: media
+{{- with include "z.kafkaCertVolume" . }}
+{{ . | indent 6 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -189,12 +194,11 @@ spec:
               name: zaentrum-keycloak
               key: client-secret
         # Pure Kafka triggers: consume transcoded -> package -> terminal (no emit).
-        - name: KAFKA_BROKERS
-          value: kafka:9092
+{{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
           value: packager-workers
         - name: CONSUME_TOPIC
-          value: stube.catalog.item.transcoded
+          value: {{ include "z.topicPrefix" . }}catalog.item.transcoded
         - name: CLAIM_BATCH_SIZE
           value: "1"
         - name: IDLE_SLEEP_SECONDS
@@ -235,10 +239,16 @@ spec:
         # from /var/lib/katalog/packages (shared) and writes the HLS package back there.
         - name: katalog-data
           mountPath: /var/lib/katalog
+{{- with include "z.kafkaCertMount" . }}
+{{ . | indent 8 }}
+{{- end }}
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
           claimName: media
+{{- with include "z.kafkaCertVolume" . }}
+{{ . | indent 6 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -313,14 +323,13 @@ spec:
               name: zaentrum-keycloak
               key: client-secret
         # Pure Kafka triggers: consume analyzed -> transcode -> emit transcoded.
-        - name: KAFKA_BROKERS
-          value: kafka:9092
+{{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
           value: transcoder-workers
         - name: CONSUME_TOPIC
-          value: stube.catalog.item.analyzed
+          value: {{ include "z.topicPrefix" . }}catalog.item.analyzed
         - name: PRODUCE_TOPIC
-          value: stube.catalog.item.transcoded
+          value: {{ include "z.topicPrefix" . }}catalog.item.transcoded
         - name: CLAIM_BATCH_SIZE
           value: "1"
         - name: IDLE_SLEEP_SECONDS
@@ -373,10 +382,16 @@ spec:
         # /var/lib/katalog/media, writes transcoded output to the shared /var/lib/katalog/packages.
         - mountPath: /var/lib/katalog
           name: katalog-data
+{{- with include "z.kafkaCertMount" . }}
+{{ . | indent 8 }}
+{{- end }}
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
           claimName: media
+{{- with include "z.kafkaCertVolume" . }}
+{{ . | indent 6 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -438,14 +453,22 @@ spec:
               value: http://katalog-api
             - name: KATALOG_MANAGER_API_URL
               value: http://katalog-manager-api
-            - name: KAFKA_BROKERS
-              value: kafka:9092
+{{ include "z.kafkaEnv" . | indent 12 }}
+{{- if and (eq .Values.eventStreaming.mode "external") .Values.eventStreaming.certSecret }}
+            - name: KAFKA_TLS_CA
+              value: /etc/kafka-cert/ca.crt
+            - name: KAFKA_TLS_CERT
+              value: /etc/kafka-cert/user.crt
+            - name: KAFKA_TLS_KEY
+              value: /etc/kafka-cert/user.key
+{{- else }}
             - name: KAFKA_TLS_CA
               value: ""
             - name: KAFKA_TLS_CERT
               value: ""
             - name: KAFKA_TLS_KEY
               value: ""
+{{- end }}
             - name: KAFKA_GROUP_ID
               value: zaentrum-demo
           ports:
@@ -479,6 +502,13 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+{{- if and (eq .Values.eventStreaming.mode "external") .Values.eventStreaming.certSecret }}
+          volumeMounts:
+            - { name: kafka-cert, mountPath: /etc/kafka-cert, readOnly: true }
+      volumes:
+        - name: kafka-cert
+          secret: { secretName: {{ .Values.eventStreaming.certSecret | quote }} }
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

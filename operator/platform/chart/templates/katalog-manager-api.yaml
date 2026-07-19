@@ -41,8 +41,13 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+{{- if eq .Values.databases.mode "external" }}
+              DB="postgresql://$PGUSER:$PGPASSWORD@{{ include "z.pgHost" . }}/{{ .Values.databases.katalog }}?sslmode={{ include "z.pgSSLMode" . }}"
+              until psql "$DB" -c 'select 1' >/dev/null 2>&1; do echo "waiting for postgres…"; sleep 2; done
+{{- else }}
               until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do echo "waiting for postgres…"; sleep 2; done
               DB="postgresql://$PGUSER:$PGPASSWORD@postgres:5432/katalog"
+{{- end }}
               # CAP views forward-reference each other; re-run until a pass is
               # clean (idempotent: CREATE TABLE IF NOT EXISTS / OR REPLACE VIEW).
               for i in 1 2 3 4 5 6; do
@@ -88,7 +93,11 @@ spec:
         - name: KATALOG_AUDIENCE
           value: chino
         - name: SPRING_DATASOURCE_URL
+{{- if eq .Values.databases.mode "external" }}
+          value: jdbc:postgresql://{{ include "z.pgHost" . }}/{{ .Values.databases.katalog }}?sslmode={{ include "z.pgSSLMode" . }}
+{{- else }}
           value: jdbc:postgresql://postgres:5432/katalog
+{{- end }}
         - name: SPRING_DATASOURCE_USERNAME
           valueFrom:
             secretKeyRef:
@@ -124,8 +133,7 @@ spec:
           value: "false"
         # Demo: bundled single-node Kafka (plaintext, in-namespace). No mTLS →
         # KAFKA_TLS_* intentionally blank. Isolated from the prod Strimzi.
-        - name: KAFKA_BROKERS
-          value: kafka:9092
+{{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
           value: zaentrum-demo
         - name: KAFKA_TLS_CA
@@ -176,10 +184,16 @@ spec:
         # ONE mount of the media NFS export at the parent dir (NFS_ROOT=/var/lib/katalog/media).
         - mountPath: /var/lib/katalog
           name: katalog-data
+{{- with include "z.kafkaCertMount" . }}
+{{ . | indent 8 }}
+{{- end }}
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
           claimName: media
+{{- with include "z.kafkaCertVolume" . }}
+{{ . | indent 6 }}
+{{- end }}
       - name: schema-sql
         configMap: { name: katalog-schema }
 ---

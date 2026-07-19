@@ -58,6 +58,7 @@ spec:
       # POSTGRES_DB=zaentrum), so create it before Keycloak's JPA store connects.
       # Idempotent: skips creation when the database already exists.
       initContainers:
+{{- if ne .Values.databases.mode "external" }}
         - name: create-keycloak-db
           image: postgres:16-alpine
           command: ["/bin/sh", "-c"]
@@ -80,6 +81,7 @@ spec:
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: PGPASSWORD
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+{{- end }}
         # Lay out the custom login theme (from the keycloak-theme ConfigMap) into the
         # Keycloak themes dir structure on a shared emptyDir. The built-in themes
         # (base/keycloak/keycloak.v2) come from the themes JAR, so only 'zaentrum' lives here.
@@ -114,10 +116,19 @@ spec:
             # ── Postgres store (shared bundled postgres, separate DB) ──
             - name: KC_DB
               value: postgres
+{{- if eq .Values.databases.mode "external" }}
+            - name: KC_DB_URL_HOST
+              value: {{ .Values.databases.external.host }}
+            - name: KC_DB_URL_PORT
+              value: {{ .Values.databases.external.port | default 5432 | quote }}
+            - name: KC_DB_URL_PROPERTIES
+              value: "?sslmode={{ .Values.databases.external.sslmode | default "require" }}"
+{{- else }}
             - name: KC_DB_URL_HOST
               value: postgres
+{{- end }}
             - name: KC_DB_URL_DATABASE
-              value: keycloak
+              value: {{ .Values.databases.keycloak }}
             - name: KC_DB_USERNAME
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: KC_DB_PASSWORD

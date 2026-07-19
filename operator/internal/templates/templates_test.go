@@ -125,3 +125,52 @@ func TestReplicasOverride(t *testing.T) {
 	assert.Equal(t, int64(3), replicas(t, objs, "chino-api"), "override applied")
 	assert.Equal(t, int64(1), replicas(t, objs, "chino-web"), "unlisted defaults to 1")
 }
+
+// Shared-services beta profile: external identity + shared Kafka (mTLS, tenant
+// topic prefix) + shared Postgres + a chino subdomain. Asserts the chart drops
+// every bundled backer and wires the tenant endpoints through.
+func TestRenderSharedBetaProfile(t *testing.T) {
+	z := base("zaentrum-beta")
+	z.Spec.Hostname = "zaentrum.beta.nalet.cloud"
+	z.Spec.Identity.Mode = "external"
+	z.Spec.Identity.Issuer = "https://sso.nalet.cloud/realms/nalet"
+	z.Spec.Features.Pipeline = true
+	no, yes := false, true
+	z.Spec.Routing.ProvisionIngress = &no
+	z.Spec.Routing.ProvisionRoutes = &yes
+	z.Spec.Routing.Mode = "subdomains"
+	z.Spec.Routing.Hosts.Chino = "chino.beta.nalet.cloud"
+	z.Spec.EventStreaming.Mode = "external"
+	z.Spec.EventStreaming.Bootstrap = "platform-kafka-kafka-bootstrap.platform-event-streaming.svc:9093"
+	z.Spec.EventStreaming.CertSecret = "kafka-mtls"
+	z.Spec.EventStreaming.TopicPrefix = "zaentrum-beta."
+	z.Spec.Databases.Mode = "external"
+	z.Spec.Databases.Katalog = "katalog_beta"
+	z.Spec.Databases.Chino = "chino_beta"
+	z.Spec.Databases.Portal = "portal_beta"
+	z.Spec.Databases.External.Host = "postgres.nalet.cloud"
+	z.Spec.Databases.External.SSLMode = "require"
+	z.Spec.Secrets.External = true
+	_ = yes
+
+	objs, err := Render(NewValues(z))
+	require.NoError(t, err)
+
+	assert.Nil(t, find(t, objs, "Deployment", "kafka"), "no bundled broker")
+	assert.Nil(t, find(t, objs, "Deployment", "postgres"), "no bundled postgres")
+	assert.Nil(t, find(t, objs, "Deployment", "keycloak"), "external identity")
+	assert.NotNil(t, find(t, objs, "Route", "chino-sub-root"), "chino subdomain route")
+	assert.NotNil(t, find(t, objs, "Route", "chino-sub-api"), "chino subdomain api route")
+
+	dep := find(t, objs, "Deployment", "chino-api")
+	require.NotNil(t, dep)
+	blob := fmt.Sprintf("%v", dep.Object)
+	assert.Contains(t, blob, "platform-kafka-kafka-bootstrap.platform-event-streaming.svc:9093", "shared bootstrap")
+	assert.Contains(t, blob, "zaentrum-beta.", "tenant topic prefix")
+	assert.Contains(t, blob, "postgres.nalet.cloud:5432/chino_beta?sslmode=require", "shared DSN")
+	assert.Contains(t, blob, "kafka-mtls", "cert secret mounted")
+
+	web := find(t, objs, "Deployment", "chino-web")
+	require.NotNil(t, web)
+	assert.Contains(t, fmt.Sprintf("%v", web.Object), "BASE_PATH value:/", "SPA at / on the subdomain")
+}

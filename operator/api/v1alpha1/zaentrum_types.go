@@ -138,6 +138,52 @@ type RoutingSpec struct {
 	// ProvisionRoutes renders OpenShift Routes (single-origin paths). Default false.
 	// +optional
 	ProvisionRoutes *bool `json:"provisionRoutes,omitempty"`
+
+	// Mode is "pathRouted" (everything on Hostname — profile B1, the default) or
+	// "subdomains" (chino gets its own host serving the SPA at /; additive — the
+	// path-routed surfaces on Hostname remain).
+	// +kubebuilder:validation:Enum=pathRouted;subdomains
+	// +kubebuilder:default=pathRouted
+	// +optional
+	Mode string `json:"mode,omitempty"`
+
+	// Hosts names the per-product public hosts used in subdomains mode.
+	// +optional
+	Hosts RoutingHosts `json:"hosts,omitempty"`
+}
+
+// RoutingHosts are the per-product public hosts (subdomains mode).
+type RoutingHosts struct {
+	// Chino is the host serving the chino SPA at "/", e.g. chino.beta.nalet.cloud.
+	// +optional
+	Chino string `json:"chino,omitempty"`
+}
+
+// EventStreamingSpec selects the Kafka the platform rides: the bundled
+// single-node broker, or a shared external cluster (per-tenant topic prefix +
+// mTLS) — e.g. the platform Strimzi at platform-event-streaming.
+type EventStreamingSpec struct {
+	// Mode is "bundled" (default) or "external".
+	// +kubebuilder:validation:Enum=bundled;external
+	// +kubebuilder:default=bundled
+	// +optional
+	Mode string `json:"mode,omitempty"`
+
+	// Bootstrap is the external bootstrap server list, e.g.
+	// platform-kafka-kafka-bootstrap.platform-event-streaming.svc:9093.
+	// +optional
+	Bootstrap string `json:"bootstrap,omitempty"`
+
+	// CertSecret names a secret IN THIS NAMESPACE holding user.crt/user.key/
+	// ca.crt (a copied KafkaUser secret) for mTLS; empty = plaintext.
+	// +optional
+	CertSecret string `json:"certSecret,omitempty"`
+
+	// TopicPrefix is the per-tenant topic namespace on a shared cluster
+	// (e.g. "zaentrum-beta."). Default "stube.".
+	// +kubebuilder:default="stube."
+	// +optional
+	TopicPrefix string `json:"topicPrefix,omitempty"`
 }
 
 // SecretsSpec controls secret provisioning.
@@ -150,7 +196,7 @@ type SecretsSpec struct {
 
 // DatabasesSpec configures the per-app database layout.
 type DatabasesSpec struct {
-	// Mode is "perApp" (a DB per service) or "single".
+	// Mode is "perApp" (a DB per service), "single", or "external" (shared cluster).
 	// +kubebuilder:default=perApp
 	// +optional
 	Mode string `json:"mode,omitempty"`
@@ -166,6 +212,26 @@ type DatabasesSpec struct {
 	// +kubebuilder:default=portal
 	// +optional
 	Portal string `json:"portal,omitempty"`
+
+	// External configures the shared database cluster used when Mode is
+	// "external": the chart skips the bundled postgres + create-db init
+	// containers (DB provisioning is the tenant's job) and the names above then
+	// address databases ON the shared cluster (e.g. chino_beta).
+	// +optional
+	External DatabaseExternalSpec `json:"external,omitempty"`
+}
+
+// DatabaseExternalSpec points the platform at a shared Postgres.
+type DatabaseExternalSpec struct {
+	// Host of the shared cluster, e.g. postgres.nalet.cloud.
+	// +optional
+	Host string `json:"host,omitempty"`
+	// +kubebuilder:default=5432
+	// +optional
+	Port int32 `json:"port,omitempty"`
+	// +kubebuilder:default=require
+	// +optional
+	SSLMode string `json:"sslmode,omitempty"`
 }
 
 // KeycloakSpec configures the bundled Keycloak image.
@@ -204,6 +270,10 @@ type ZaentrumSpec struct {
 	// Identity configures the OIDC provider.
 	// +optional
 	Identity IdentitySpec `json:"identity,omitempty"`
+
+	// EventStreaming selects the bundled broker or a shared external Kafka.
+	// +optional
+	EventStreaming EventStreamingSpec `json:"eventStreaming,omitempty"`
 
 	// Storage configures persistent storage.
 	// +optional

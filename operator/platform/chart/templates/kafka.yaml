@@ -1,4 +1,4 @@
-{{- if .Values.features.kafka }}
+{{- if and .Values.features.kafka (ne .Values.eventStreaming.mode "external") }}
 # ── kafka: single-node KRaft broker (no Zookeeper) ──
 # Carries the internal event stream (library change events the management API
 # emits, consumed by enrichment/notification workers). One broker is plenty
