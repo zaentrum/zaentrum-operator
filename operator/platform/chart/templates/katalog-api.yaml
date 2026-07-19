@@ -53,7 +53,7 @@ spec:
               name: zaentrum-db
               key: password
         - name: KATALOG_API_PG_URL
-          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/katalog?sslmode=disable
+          value: {{ include "z.pgURL" (dict "root" . "db" .Values.databases.katalog) }}
         livenessProbe:
           httpGet:
             path: /healthz

@@ -117,6 +117,16 @@ func (v Values) chartValues() map[string]interface{} {
 		"routing": map[string]interface{}{
 			"provisionIngress": derefBool(spec.Routing.ProvisionIngress, true),
 			"provisionRoutes":  derefBool(spec.Routing.ProvisionRoutes, false),
+			"mode":             orDefault(spec.Routing.Mode, "pathRouted"),
+			"hosts": map[string]interface{}{
+				"chino": spec.Routing.Hosts.Chino,
+			},
+		},
+		"eventStreaming": map[string]interface{}{
+			"mode":        orDefault(spec.EventStreaming.Mode, "bundled"),
+			"bootstrap":   spec.EventStreaming.Bootstrap,
+			"certSecret":  spec.EventStreaming.CertSecret,
+			"topicPrefix": orDefault(spec.EventStreaming.TopicPrefix, "stube."),
 		},
 		"secrets": map[string]interface{}{
 			"external": spec.Secrets.External,
@@ -130,12 +140,24 @@ func (v Values) chartValues() map[string]interface{} {
 			"katalog":  orDefault(spec.Databases.Katalog, "katalog"),
 			"keycloak": orDefault(spec.Databases.Keycloak, "keycloak"),
 			"portal":   orDefault(spec.Databases.Portal, "portal"),
+			"external": map[string]interface{}{
+				"host":    spec.Databases.External.Host,
+				"port":    int(orDefaultInt32(spec.Databases.External.Port, 5432)),
+				"sslmode": orDefault(spec.Databases.External.SSLMode, "require"),
+			},
 		},
 		"keycloak": map[string]interface{}{
 			"image": orDefault(spec.Keycloak.Image, "quay.io/keycloak/keycloak:26.0.7"),
 		},
 		"services": services,
 	}
+}
+
+func orDefaultInt32(v, def int32) int32 {
+	if v == 0 {
+		return def
+	}
+	return v
 }
 
 // loadChart loads the embedded chart into a *chart.Chart.

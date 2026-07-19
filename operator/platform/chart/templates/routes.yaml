@@ -156,3 +156,45 @@ spec:
   port: { targetPort: http }
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
 {{- end }}
+
+{{- if and .Values.routing.provisionRoutes (eq .Values.routing.mode "subdomains") .Values.routing.hosts.chino }}
+# ── chino subdomain (routing.mode=subdomains): the chino SPA at / on its own
+# host, its API + OIDC callback beside it. The main-host routes above stay —
+# this is ADDITIVE (the launchpad tile flips to this host via the registry). ──
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: chino-sub-root
+  labels: { app: chino-web, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.routing.hosts.chino }}
+  path: /
+  to: { kind: Service, name: chino-web, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: chino-sub-api
+  labels: { app: chino-api, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.routing.hosts.chino }}
+  path: /api
+  to: { kind: Service, name: chino-api, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: chino-sub-auth-callback
+  labels: { app: chino-web, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.routing.hosts.chino }}
+  path: /auth/callback
+  to: { kind: Service, name: chino-web, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+{{- end }}

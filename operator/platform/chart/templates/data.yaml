@@ -1,3 +1,4 @@
+{{- if ne .Values.databases.mode "external" }}
 # Demo Postgres + Valkey — EPHEMERAL (emptyDir): a demo auto-resets, and emptyDir
 # sidesteps the no-dynamic-provisioner storage blocker on this cluster.
 # OKD restricted-v2 runs an arbitrary high UID, so PGDATA is a subdir the
@@ -64,6 +65,7 @@ metadata:
 spec:
   selector: { app: postgres }
   ports: [{ name: pg, port: 5432, targetPort: pg }]
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment

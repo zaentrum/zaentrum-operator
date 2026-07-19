@@ -36,6 +36,7 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+{{- if ne .Values.databases.mode "external" }}
       initContainers:
         # Create the `portal` DB if it is missing. The demo Postgres is ephemeral
         # (emptyDir) and the deploy job does NOT restart it, so a redeploy onto an
@@ -59,6 +60,7 @@ spec:
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: PGPASSWORD
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+{{- end }}
       containers:
       - name: app
         # portal-api — the launchpad registry (apps/spaces/tiles). Go service built
@@ -90,10 +92,9 @@ spec:
               name: zaentrum-db
               key: password
         - name: PG_URL
-          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/portal?sslmode=disable
+          value: {{ include "z.pgURL" (dict "root" . "db" .Values.databases.portal) }}
         # Kafka event tap for the admin debug console (read-only tail + topology).
-        - name: KAFKA_BROKERS
-          value: kafka:9092
+{{ include "z.kafkaEnv" . | indent 8 }}
         livenessProbe:
           httpGet: { path: /actuator/health/liveness, port: http, scheme: HTTP }
           initialDelaySeconds: 5
@@ -109,6 +110,13 @@ spec:
         resources:
           requests: { cpu: 20m, memory: 32Mi }
           limits: { cpu: 200m, memory: 128Mi }
+{{- if and (eq .Values.eventStreaming.mode "external") .Values.eventStreaming.certSecret }}
+        volumeMounts:
+        - { name: kafka-cert, mountPath: /etc/kafka-cert, readOnly: true }
+      volumes:
+      - name: kafka-cert
+        secret: { secretName: {{ .Values.eventStreaming.certSecret | quote }} }
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

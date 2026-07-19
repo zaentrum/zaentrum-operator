@@ -148,7 +148,11 @@ spec:
           args:
             - |
               set -eu
+{{- if eq .Values.databases.mode "external" }}
+              DB="postgresql://$PGUSER:$PGPASSWORD@{{ include "z.pgHost" . }}/{{ .Values.databases.katalog }}?sslmode={{ include "z.pgSSLMode" . }}"
+{{- else }}
               DB="postgresql://$PGUSER:$PGPASSWORD@postgres:5432/katalog"
+{{- end }}
               echo "[enqueue] waiting for seeded content + scanned items…"
               i=0
               while :; do

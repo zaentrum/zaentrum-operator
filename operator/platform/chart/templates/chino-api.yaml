@@ -45,8 +45,7 @@ spec:
           value: ":8080"
         # Live-refresh SSE bridge (/api/v1/events): tail the catalog Kafka topics
         # so browsers refresh when the pipeline moves. Empty => bridge inert.
-        - name: KAFKA_BROKERS
-          value: kafka:9092
+{{ include "z.kafkaEnv" . | indent 8 }}
         - name: OIDC_ISSUER
           value: {{ include "z.issuer" . }}
         - name: OIDC_AUDIENCE
@@ -82,7 +81,7 @@ spec:
               name: zaentrum-db
               key: password
         - name: PG_URL
-          value: postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/chino?sslmode=disable
+          value: {{ include "z.pgURL" (dict "root" . "db" .Values.databases.chino) }}
         - name: STREAM_SIGNING_KEY
           valueFrom:
             secretKeyRef:
@@ -124,6 +123,13 @@ spec:
           requests:
             cpu: 50m
             memory: 64Mi
+{{- if and (eq .Values.eventStreaming.mode "external") .Values.eventStreaming.certSecret }}
+        volumeMounts:
+        - { name: kafka-cert, mountPath: /etc/kafka-cert, readOnly: true }
+      volumes:
+      - name: kafka-cert
+        secret: { secretName: {{ .Values.eventStreaming.certSecret | quote }} }
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

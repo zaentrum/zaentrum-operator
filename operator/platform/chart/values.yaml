@@ -21,7 +21,7 @@ identity:
   loginTheme: ""           # bundled Keycloak login theme name (demo: zaentrum)
 
 features:
-  kafka: true              # bundled single-node KRaft broker
+  kafka: true              # bundled single-node KRaft broker (ignored when eventStreaming.mode=external)
   gpu: false               # NVENC on the stream/transcoder plane
   pipeline: false          # analyzer/packager/transcoder/katalog-ingest media pipeline
 
@@ -32,6 +32,14 @@ storage:
   kafkaPvc: ""              # name of a pre-created PVC for kafka's log dir (topics survive restart); "" → emptyDir
   kafkaNode: ""             # kubernetes.io/hostname to pin kafka to (needed for a node-local kafkaPvc); "" → unpinned
 
+# Event streaming: the bundled broker, or a shared external cluster (per-tenant
+# topic prefix + mTLS). External mode skips the bundled kafka entirely.
+eventStreaming:
+  mode: bundled             # bundled | external
+  bootstrap: ""             # external: bootstrap servers, e.g. platform-kafka-kafka-bootstrap.platform-event-streaming.svc:9093
+  certSecret: ""            # external: secret in THIS namespace with user.crt/user.key/ca.crt (a copied KafkaUser secret); "" → plaintext
+  topicPrefix: "stube."     # per-tenant topic namespace on a shared cluster (e.g. "zaentrum-beta.")
+
 network:
   # Split-horizon: adds hostAliases (this IP → global.hostname) to the OIDC
   # validators so in-cluster token validation reaches the public HTTPS issuer.
@@ -40,6 +48,13 @@ network:
 routing:
   provisionIngress: true    # plain-k8s Ingress (single-origin paths)
   provisionRoutes: false    # OpenShift Routes (demo)
+  # pathRouted = everything on global.hostname (profile B1, the demo).
+  # subdomains = chino gets its OWN host (hosts.chino) serving the SPA at /
+  #              (+ /api, /stream there); the platform surfaces stay on
+  #              global.hostname. Requires DNS + TLS for the extra host.
+  mode: pathRouted          # pathRouted | subdomains
+  hosts:
+    chino: ""               # subdomains: e.g. chino.beta.nalet.cloud
 
 secrets:
   external: false           # true → secrets are pre-created (CI/demo); chart skips rendering them
@@ -48,11 +63,18 @@ jobs:
   seed: false               # seed/scan/enqueue self-populate Jobs (demo content bootstrap)
 
 databases:
-  mode: perApp              # perApp (chino/katalog/keycloak/portal) | single
+  mode: perApp              # perApp (bundled, DB per service) | single | external (shared cluster)
   chino: chino
   katalog: katalog
   keycloak: keycloak
   portal: portal
+  # external mode: the shared HA Postgres — the chart skips the bundled postgres
+  # + create-db initContainers (DB provisioning is the tenant's job); the db
+  # names above then name databases ON the shared cluster (e.g. chino_beta).
+  external:
+    host: ""                # e.g. postgres.nalet.cloud
+    port: 5432
+    sslmode: require
 
 keycloak:
   image: quay.io/keycloak/keycloak:26.0.7
