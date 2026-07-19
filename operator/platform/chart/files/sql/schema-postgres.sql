@@ -16,8 +16,13 @@ CREATE TABLE IF NOT EXISTS com_nalet_katalog_Items (
   seasonNumber INTEGER,
   episodeNumber INTEGER,
   tagline VARCHAR(500),
+  metadataLocked BOOLEAN NOT NULL DEFAULT false,
   PRIMARY KEY(ID)
 );
+-- Upgrade path for databases created before metadataLocked existed (this file is
+-- applied idempotently on every deploy). true = a manual metadata edit; the
+-- enricher then leaves title/year/description/tagline untouched.
+ALTER TABLE com_nalet_katalog_Items ADD COLUMN IF NOT EXISTS metadataLocked BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS com_nalet_katalog_ItemExternalIds (
   ID VARCHAR(36) NOT NULL,
