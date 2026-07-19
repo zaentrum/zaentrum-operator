@@ -96,6 +96,25 @@ imagePullSecrets:
 {{- end -}}
 {{- end -}}
 
+{{/* z.workerOIDCExternalEnv — pipeline-worker client-credentials against an
+     EXTERNAL realm: token endpoint derived from the issuer; client id+secret
+     from the CI-provided zaentrum-worker-oidc Secret (mirrors the katalog-oidc
+     pattern prod stube already runs by hand). */}}
+{{- define "z.workerOIDCExternalEnv" -}}
+- name: OIDC_TOKEN_URL
+  value: {{ include "z.issuer" . }}/protocol/openid-connect/token
+- name: OIDC_CLIENT_ID
+  valueFrom:
+    secretKeyRef:
+      key: client-id
+      name: zaentrum-worker-oidc
+- name: OIDC_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      key: client-secret
+      name: zaentrum-worker-oidc
+{{- end -}}
+
 {{/* z.pgHost — host:port of the platform database (bundled or shared). */}}
 {{- define "z.pgHost" -}}
 {{- if eq .Values.databases.mode "external" -}}{{ required "databases.external.host is required in external mode" .Values.databases.external.host }}:{{ .Values.databases.external.port | default 5432 }}{{- else -}}postgres:5432{{- end -}}
