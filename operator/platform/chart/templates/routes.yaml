@@ -125,8 +125,10 @@ spec:
   to: { kind: Service, name: portal-api, weight: 100 }
   port: { targetPort: http }
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+{{- if eq .Values.identity.mode "bundled" }}
 ---
 # Bundled headless Keycloak under /auth → issuer https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum
+# (external identity has no in-namespace keycloak Service — the route would 503).
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -138,6 +140,7 @@ spec:
   to: { kind: Service, name: keycloak, weight: 100 }
   port: { targetPort: http }
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+{{- end }}
 ---
 # The neutral chino-web SPA's OIDC redirect_uri is origin/auth/callback, which on this
 # SINGLE-ORIGIN demo collides with the /auth → keycloak route above (in prod Keycloak is

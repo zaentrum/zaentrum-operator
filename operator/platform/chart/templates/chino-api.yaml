@@ -54,12 +54,14 @@ spec:
           value: "true"
         # Per-platform PUBLIC client ids the realm registers (chino-web/tv/mobile),
         # surfaced to neutral clients via GET /api/config so they pick the right one.
+        # The WEB id is the CR's identity.clientId (e.g. chino-beta on the shared
+        # realm) — it drives BOTH SPAs (chino-web + the portal shell read /api/config).
         - name: OIDC_CLIENT_ID_TV
           value: chino-tv
         - name: OIDC_CLIENT_ID_MOBILE
           value: chino-mobile
         - name: OIDC_CLIENT_ID_WEB
-          value: chino-web
+          value: {{ .Values.identity.clientId }}
         - name: KATALOG_BASE_URL
           value: http://katalog-api
         - name: STREAM_BASE_URL
