@@ -53,6 +53,20 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Held ONLY so the operator may GRANT them to the portal-api Role (operator
+  # console: list/scale/restart deployments, read pod status + logs). The RBAC
+  # escalation check compares the granted rules against the grantor's on Role
+  # CREATE — a fresh namespace fails without these even though the demo (whose
+  # Role pre-existed with identical rules) reconciles fine.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
