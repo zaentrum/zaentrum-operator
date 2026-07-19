@@ -62,6 +62,15 @@ spec:
           value: chino-mobile
         - name: OIDC_CLIENT_ID_WEB
           value: {{ .Values.identity.clientId }}
+        # The portal shell's client: its own zaentrum-web on the bundled realm;
+        # on a shared realm it rides the per-instance client (same one as web —
+        # its redirect URIs cover both hosts).
+        - name: OIDC_CLIENT_ID_PORTAL
+{{- if eq .Values.identity.mode "external" }}
+          value: {{ .Values.identity.clientId }}
+{{- else }}
+          value: zaentrum-web
+{{- end }}
         - name: KATALOG_BASE_URL
           value: http://katalog-api
         - name: STREAM_BASE_URL
