@@ -188,4 +188,14 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	an := fmt.Sprintf("%v", find(t, objs, "Deployment", "analyzer").Object)
 	assert.Contains(t, an, "https://sso.nalet.cloud/realms/nalet/protocol/openid-connect/token",
 		"worker token endpoint derived from the external issuer")
+
+	// identity.clientId flows to /api/config's WEB client id — both SPAs
+	// (chino-web + the portal shell) authenticate as it.
+	z.Spec.Identity.ClientID = "chino-beta"
+	objs2, err := Render(NewValues(z))
+	require.NoError(t, err)
+	api := fmt.Sprintf("%v", find(t, objs2, "Deployment", "chino-api").Object)
+	assert.Contains(t, api, "OIDC_CLIENT_ID_WEB value:chino-beta", "CR clientId reaches /api/config")
+	assert.Nil(t, find(t, objs2, "Route", "zaentrum-demo-auth"), "no bundled-keycloak /auth route in external identity")
+	assert.NotNil(t, find(t, objs2, "Route", "zaentrum-demo-auth-callback"), "SPA callback route stays")
 }
