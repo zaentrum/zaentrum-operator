@@ -93,6 +93,12 @@ spec:
               key: password
         - name: PG_URL
           value: {{ include "z.pgURL" (dict "root" . "db" .Values.databases.portal) }}
+{{- if and (eq .Values.routing.mode "subdomains") .Values.routing.hosts.chino }}
+        # Subdomain routing: the chino tile opens the real origin (boot upgrades
+        # the seed-default registry URL; admin edits are never clobbered).
+        - name: CHINO_PUBLIC_URL
+          value: https://{{ .Values.routing.hosts.chino }}/
+{{- end }}
         # Kafka event tap for the admin debug console (read-only tail + topology).
 {{ include "z.kafkaEnv" . | indent 8 }}
         livenessProbe:

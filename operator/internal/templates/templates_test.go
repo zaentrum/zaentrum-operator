@@ -197,6 +197,8 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	api := fmt.Sprintf("%v", find(t, objs2, "Deployment", "chino-api").Object)
 	assert.Contains(t, api, "OIDC_CLIENT_ID_WEB value:chino-beta", "CR clientId reaches /api/config")
 	assert.Contains(t, api, "OIDC_CLIENT_ID_PORTAL value:chino-beta", "portal rides the per-instance client on a shared realm")
+	pa := fmt.Sprintf("%v", find(t, objs2, "Deployment", "portal-api").Object)
+	assert.Contains(t, pa, "CHINO_PUBLIC_URL value:https://chino.beta.nalet.cloud/", "chino tile gets the subdomain origin")
 	assert.Nil(t, find(t, objs2, "Route", "zaentrum-demo-auth"), "no bundled-keycloak /auth route in external identity")
 	assert.NotNil(t, find(t, objs2, "Route", "zaentrum-demo-auth-callback"), "SPA callback route stays")
 }
