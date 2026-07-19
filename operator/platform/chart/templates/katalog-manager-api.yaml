@@ -108,6 +108,22 @@ spec:
             secretKeyRef:
               key: password
               name: zaentrum-db
+{{- if eq .Values.identity.mode "external" }}
+        # External realm: the per-instance worker client (optional, mirroring prod
+        # stube's katalog-oidc — the manager runs fine without it).
+        - name: KEYCLOAK_KATALOG_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: client-id
+              name: zaentrum-worker-oidc
+              optional: true
+        - name: KEYCLOAK_KATALOG_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: client-secret
+              name: zaentrum-worker-oidc
+              optional: true
+{{- else }}
         - name: KEYCLOAK_KATALOG_CLIENT_ID
           value: zaentrum-manager   # the bundled realm's confidential SA client (secret = zaentrum-keycloak)
         - name: KEYCLOAK_KATALOG_CLIENT_SECRET
@@ -115,6 +131,7 @@ spec:
             secretKeyRef:
               key: client-secret
               name: zaentrum-keycloak
+{{- end }}
         - name: NFS_ROOT
           value: /var/lib/katalog/media
         - name: TMDB_API_KEY

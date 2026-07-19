@@ -173,4 +173,19 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	web := find(t, objs, "Deployment", "chino-web")
 	require.NotNil(t, web)
 	assert.Contains(t, fmt.Sprintf("%v", web.Object), "BASE_PATH value:/", "SPA at / on the subdomain")
+
+	// External identity: no beta workload may reference the bundled-realm secret
+	// (it is never rendered outside bundled mode → CreateContainerConfigError).
+	// Workers mint client-credentials at the external issuer with the CI-provided
+	// zaentrum-worker-oidc client instead.
+	for _, name := range []string{"analyzer", "transcoder", "packager", "katalog-manager-api"} {
+		d := find(t, objs, "Deployment", name)
+		require.NotNil(t, d, name)
+		blob := fmt.Sprintf("%v", d.Object)
+		assert.NotContains(t, blob, "zaentrum-keycloak", "%s must not reference the bundled realm secret", name)
+		assert.Contains(t, blob, "zaentrum-worker-oidc", "%s uses the external worker client", name)
+	}
+	an := fmt.Sprintf("%v", find(t, objs, "Deployment", "analyzer").Object)
+	assert.Contains(t, an, "https://sso.nalet.cloud/realms/nalet/protocol/openid-connect/token",
+		"worker token endpoint derived from the external issuer")
 }

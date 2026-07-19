@@ -48,6 +48,9 @@ spec:
         # Matches packager/transcoder.
         - name: KATALOG_API_URL
           value: http://katalog-manager-api
+{{- if eq .Values.identity.mode "external" }}
+{{ include "z.workerOIDCExternalEnv" . | indent 8 }}
+{{- else }}
         # Token endpoint via the in-cluster Keycloak Service, NOT the public origin:
         # the HostNetwork router 403s the client-credentials grant; the Service path
         # works (proven by the scan Job). Issued token's iss is still the public origin
@@ -61,6 +64,7 @@ spec:
             secretKeyRef:
               key: client-secret
               name: zaentrum-keycloak
+{{- end }}
         # Pure Kafka triggers: consume enriched -> analyze -> emit analyzed.
         # PLAINTEXT bundled broker; item_id keys per-item ordering.
 {{ include "z.kafkaEnv" . | indent 8 }}
@@ -182,6 +186,9 @@ spec:
         env:
         - name: KATALOG_API_URL
           value: http://katalog-manager-api
+{{- if eq .Values.identity.mode "external" }}
+{{ include "z.workerOIDCExternalEnv" . | indent 8 }}
+{{- else }}
         # In-cluster Keycloak Service (the public origin 403s client-credentials via
         # the HostNetwork router; issued token's iss stays the public origin).
         - name: OIDC_TOKEN_URL
@@ -193,6 +200,7 @@ spec:
             secretKeyRef:
               name: zaentrum-keycloak
               key: client-secret
+{{- end }}
         # Pure Kafka triggers: consume transcoded -> package -> terminal (no emit).
 {{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
@@ -311,6 +319,9 @@ spec:
         env:
         - name: KATALOG_API_URL
           value: http://katalog-manager-api
+{{- if eq .Values.identity.mode "external" }}
+{{ include "z.workerOIDCExternalEnv" . | indent 8 }}
+{{- else }}
         # In-cluster Keycloak Service (the public origin 403s client-credentials via
         # the HostNetwork router; issued token's iss stays the public origin).
         - name: OIDC_TOKEN_URL
@@ -322,6 +333,7 @@ spec:
             secretKeyRef:
               name: zaentrum-keycloak
               key: client-secret
+{{- end }}
         # Pure Kafka triggers: consume analyzed -> transcode -> emit transcoded.
 {{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
