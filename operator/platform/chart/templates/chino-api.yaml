@@ -79,6 +79,10 @@ spec:
           value: http://katalog-manager-api
         - name: ANALYZER_BASE_URL
           value: http://katalog-manager-api
+        # Portal registry — addon UI-extension slots (/api/v1/extensions).
+        # Neutral: empty registry => no extra UI.
+        - name: PORTAL_BASE_URL
+          value: http://portal-api
         - name: ADMIN_SUBJECTS
           value: ""
         - name: DB_USER
