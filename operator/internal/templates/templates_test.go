@@ -2,6 +2,7 @@ package templates
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,8 +113,17 @@ func TestRenderDemoProfile(t *testing.T) {
 	sp, _, _ := unstructured.NestedMap(dep.Object, "spec", "template", "spec")
 	_, hasHA := sp["hostAliases"]
 	assert.True(t, hasHA, "chino-api carries split-horizon hostAliases")
-	assert.Contains(t, fmt.Sprintf("%v", dep.Object),
+	blob := fmt.Sprintf("%v", dep.Object)
+	assert.Contains(t, blob,
 		"https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum", "https issuer in env")
+	// The extension seam is neutral core: chino-api points at portal-api, but the
+	// rendered core carries NO acquisition/addon vocabulary.
+	assert.Contains(t, blob, "PORTAL_BASE_URL", "chino-api wired to the portal registry")
+	all := fmt.Sprintf("%v", objs)
+	for _, forbidden := range []string{"acquire", "download-gateway", "qbittorrent", "wanted"} {
+		assert.NotContains(t, strings.ToLower(all), forbidden,
+			"core render must not mention acquisition (%s)", forbidden)
+	}
 }
 
 // spec.replicas overrides an app-tier Deployment; unlisted default to 1.
