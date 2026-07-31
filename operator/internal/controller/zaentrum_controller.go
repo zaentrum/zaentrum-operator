@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	"github.com/zaentrum/zaentrum-operator/operator/internal/digest"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/templates"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/updates"
 )
@@ -41,6 +43,15 @@ type ZaentrumReconciler struct {
 	ReleasesURL string
 	// Updates fetches/parses the channel document. The zero value is usable.
 	Updates updates.Client
+
+	// PinDigests resolves each ghcr.io/zaentrum/* image on a moving tag to its
+	// current digest before apply, so a newly-pushed image actually rolls. A
+	// re-rendered `:latest` is otherwise byte-identical and server-side apply is
+	// a no-op, so nothing restarts. Off leaves the tag in place.
+	PinDigests bool
+	// Digest is the registry resolver. A shared instance keeps its digest cache
+	// warm across the 30s reconciles.
+	Digest *digest.Resolver
 }
 
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums,verbs=get;list;watch;create;update;patch;delete
@@ -86,6 +97,14 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	z.Status.Phase = "Reconciling"
 
+	// Pin our own images to digests so a fresh push on a moving tag actually
+	// rolls. Applied unconditionally: pinning a concrete tag to its digest is a
+	// harmless no-op flap-wise (that digest never moves), while a moving tag —
+	// "latest" OR a channel tag like "edge" — is exactly the case that needs it.
+	// Best-effort: an unresolvable image keeps its tag, so a registry hiccup
+	// degrades to today's behaviour instead of blocking the reconcile.
+	r.pinDigests(ctx, &z, objs)
+
 	// Apply each object via server-side apply with our field manager. Set the
 	// Zaentrum as owner on namespaced resources so they GC with the CR (the
 	// cluster-scoped Namespace cannot carry a namespaced owner ref, so skip it).
@@ -125,6 +144,54 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// pinDigests rewrites the rendered ghcr.io/zaentrum/* images to their current
+// digests. It authenticates the registry with the CR's pull secret so private
+// repositories resolve too, and never fails the reconcile — an image it cannot
+// resolve simply keeps its tag.
+func (r *ZaentrumReconciler) pinDigests(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, objs []*unstructured.Unstructured) {
+	if !r.PinDigests {
+		return
+	}
+	logger := log.FromContext(ctx)
+	resolver := r.Digest
+	if resolver == nil {
+		resolver = digest.New(r.pullCreds(ctx, z))
+	} else {
+		resolver.SetCreds(r.pullCreds(ctx, z))
+	}
+	n, errs := resolver.PinImages(ctx, objs, digest.ZaentrumImages)
+	for _, err := range errs {
+		logger.Info("digest pin skipped for an image (kept its tag)", "error", err.Error())
+	}
+	if n > 0 {
+		logger.Info("pinned images to digests", "count", n)
+	}
+}
+
+// pullCreds harvests registry credentials from the CR's imagePullSecrets so the
+// digest resolver can read private manifests. Missing/unreadable secrets are not
+// fatal — resolution just falls back to anonymous, and any private lookup then
+// degrades to keeping the tag.
+func (r *ZaentrumReconciler) pullCreds(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) map[string]string {
+	creds := map[string]string{}
+	for _, name := range z.Spec.ImagePullSecrets {
+		var sec corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: name}, &sec); err != nil {
+			continue
+		}
+		body := sec.Data[corev1.DockerConfigJsonKey]
+		if len(body) == 0 {
+			continue
+		}
+		if c, err := digest.CredsFromDockerConfig(body); err == nil {
+			for host, cred := range c {
+				creds[host] = cred
+			}
+		}
+	}
+	return creds
 }
 
 // resolveUpdate performs Stage-2 channel discovery for one reconcile pass and
