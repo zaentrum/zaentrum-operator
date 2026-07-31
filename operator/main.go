@@ -16,6 +16,7 @@ import (
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/controller"
+	"github.com/zaentrum/zaentrum-operator/operator/internal/digest"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/updates"
 )
 
@@ -61,10 +62,18 @@ func main() {
 		releasesURL = updates.DefaultReleasesURL
 	}
 
+	// PIN_DIGESTS makes a moving tag (:latest) roll on a new push: each
+	// ghcr.io/zaentrum/* image is resolved to its current digest before apply,
+	// so a fresh image changes the rendered spec instead of being a no-op. On by
+	// default; set PIN_DIGESTS=false to keep bare tags.
+	pinDigests := os.Getenv("PIN_DIGESTS") != "false"
+
 	if err := (&controller.ZaentrumReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		ReleasesURL: releasesURL,
+		PinDigests:  pinDigests,
+		Digest:      digest.New(nil),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Zaentrum")
 		os.Exit(1)
