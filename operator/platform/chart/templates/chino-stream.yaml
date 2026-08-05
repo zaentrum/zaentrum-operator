@@ -45,8 +45,20 @@ spec:
           value: ":8080"
         - name: KATALOG_API_BASE_URL
           value: http://katalog-api
+        # The root every asset path is validated against (play/hls.go
+        # resolveSource rejects anything outside it). It must be the parent of
+        # where content ACTUALLY lives.
+        #
+        # This was /var/lib/katalog/media, which does not exist in the pod at
+        # all — only .../packages is mounted, and every playbackassets row is
+        # under it. So every asset failed the prefix check with "path outside
+        # media root", which the handler returns as both 403 and 404, and the
+        # player showed an infinite "Preparing your movie…" with no error. That
+        # made playback impossible on any client that cannot decode the
+        # packaged HEVC directly, because the transcode fallback could never
+        # open the source.
         - name: MEDIA_ROOT
-          value: /var/lib/katalog/media
+          value: /var/lib/katalog
         - name: OIDC_ISSUER
           value: {{ include "z.issuer" . }}
         - name: OIDC_AUDIENCE
