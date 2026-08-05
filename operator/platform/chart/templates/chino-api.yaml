@@ -56,10 +56,16 @@ spec:
         # surfaced to neutral clients via GET /api/config so they pick the right one.
         # The WEB id is the CR's identity.clientId (e.g. chino-beta on the shared
         # realm) — it drives BOTH SPAs (chino-web + the portal shell read /api/config).
-        - name: OIDC_CLIENT_ID_TV
-          value: chino-tv
-        - name: OIDC_CLIENT_ID_MOBILE
-          value: chino-mobile
+        # NO tv/mobile overrides. The code already defaults both to "chino"
+        # (config.go envDefault), which is a real client with the device grant
+        # enabled. Overriding them here advertised two ids that do not work:
+        #   chino-tv     -> invalid_client       (no such client in the realm)
+        #   chino-mobile -> unauthorized_client  (device grant not enabled)
+        # The clients read these from /api/config and only fall back to "chino"
+        # when the field is ABSENT — so setting them broke device sign-in on
+        # every phone and TV, and is the root cause of the long-standing Tizen
+        # invalid_client failure. Set one again only after creating the client
+        # AND enabling its device grant.
         - name: OIDC_CLIENT_ID_WEB
           value: {{ .Values.identity.clientId }}
         # The portal shell's client: its own zaentrum-web on the bundled realm;
