@@ -4,6 +4,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -37,6 +38,11 @@ const (
 type ZaentrumReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// stalled collects components whose rollout Kubernetes has given up on,
+	// gathered during refreshComponents and consumed when the phase is set.
+	// Reset every reconcile.
+	stalled []string
 
 	// ReleasesURL is the channel document the reconciler consults for Stage-2
 	// auto-update discovery. Empty falls back to updates.DefaultReleasesURL.
@@ -130,10 +136,20 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	z.Status.AvailableUpdate = decision.AvailableUpdate
 	z.Status.ObservedGeneration = z.Generation
 
-	if allReady {
+	switch {
+	case allReady:
 		z.Status.Phase = "Ready"
 		r.setReady(&z, metav1.ConditionTrue, "AllComponentsReady", "all components are ready")
-	} else {
+	case len(r.stalled) > 0:
+		// Distinct from Progressing on purpose. A rollout that has given up is
+		// not "still working on it", and calling both the same is what makes a
+		// wedged platform invisible: the old pods keep serving, so nothing
+		// looks wrong anywhere.
+		z.Status.Phase = "Degraded"
+		msg := "rollout stalled: " + strings.Join(r.stalled, ", ")
+		r.setReady(&z, metav1.ConditionFalse, "RolloutStalled", msg)
+		logger.Info("rollout stalled", "components", strings.Join(r.stalled, ", "))
+	default:
 		z.Status.Phase = "Progressing"
 		r.setReady(&z, metav1.ConditionFalse, "ComponentsNotReady", "waiting for components to become ready")
 	}
@@ -263,6 +279,7 @@ func (r *ZaentrumReconciler) applyAll(ctx context.Context, z *zaentrumv1alpha1.Z
 func (r *ZaentrumReconciler) refreshComponents(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, objs []*unstructured.Unstructured) (bool, error) {
 	var comps []zaentrumv1alpha1.ComponentStatus
 	allReady := true
+	r.stalled = nil
 
 	for _, obj := range objs {
 		if obj.GetKind() != "Deployment" {
@@ -288,9 +305,25 @@ func (r *ZaentrumReconciler) refreshComponents(ctx context.Context, z *zaentrumv
 		if dep.Spec.Replicas != nil {
 			desired = *dep.Spec.Replicas
 		}
+		// NOTE: AvailableReplicas counts the OLD ReplicaSet too. A deployment
+		// whose new pods cannot start still reports its previous pods as
+		// available, so this alone says "fine" while nothing new can roll. That
+		// is exactly how an expired registry credential froze every component
+		// for nine hours while the site kept serving and the CR kept saying
+		// "Progressing" — a string that reads the same after 30 seconds as
+		// after half a day.
 		ready := dep.Status.AvailableReplicas >= desired && desired > 0
 		if !ready {
 			allReady = false
+		}
+
+		// Kubernetes already decides when a rollout has given up: the
+		// Progressing condition flips to False with ProgressDeadlineExceeded
+		// after progressDeadlineSeconds. Surface that rather than re-deriving
+		// it, and name the component so the reason is actionable.
+		if stalledReason := rolloutStalled(&dep); stalledReason != "" {
+			allReady = false
+			r.stalled = append(r.stalled, fmt.Sprintf("%s (%s)", name, stalledReason))
 		}
 		comps = append(comps, zaentrumv1alpha1.ComponentStatus{Name: name, Ready: ready, Image: image})
 	}
@@ -340,4 +373,33 @@ func (r *ZaentrumReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&zaentrumv1alpha1.Zaentrum{}).
 		Owns(&appsv1.Deployment{}).
 		Complete(r)
+}
+
+// rolloutStalled reports why a Deployment's rollout has given up, or "" if it
+// is healthy or still legitimately in progress.
+//
+// It reads Kubernetes' own verdict (Progressing=False, normally
+// ProgressDeadlineExceeded) rather than inventing a timer. The extra
+// UpdatedReplicas check catches the case this was written for: the new
+// ReplicaSet cannot produce a single pod — an unpullable image, an unschedulable
+// node — while the previous pods keep every readiness signal green.
+func rolloutStalled(dep *appsv1.Deployment) string {
+	desired := int32(1)
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
+	for _, c := range dep.Status.Conditions {
+		if c.Type == appsv1.DeploymentProgressing && c.Status == corev1.ConditionFalse {
+			reason := c.Reason
+			if reason == "" {
+				reason = "ProgressDeadlineExceeded"
+			}
+			if dep.Status.UpdatedReplicas < desired {
+				return fmt.Sprintf("%s, %d/%d updated replicas",
+					reason, dep.Status.UpdatedReplicas, desired)
+			}
+			return reason
+		}
+	}
+	return ""
 }
