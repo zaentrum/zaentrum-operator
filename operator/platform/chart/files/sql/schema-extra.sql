@@ -72,3 +72,36 @@ FROM com_nalet_katalog_itemprocessingsteps AS s;
 
 CREATE OR REPLACE VIEW KatalogService_ItemOverallStatus AS
 SELECT * FROM com_nalet_katalog_itemoverallstatus;
+
+-- ── catalog search ──────────────────────────────────────────────────────────
+--
+-- Without this, EVERY catalog search 500s and the UI reports "No results" — so
+-- a user searching for a film that is playing on the home page is told it does
+-- not exist. katalog-api's list query references items.search_vector
+-- unconditionally; production has the column, beta never got it, and the
+-- failure is silent because the caller soft-fails an error into an empty list.
+--
+-- Copied verbatim from the production database rather than re-derived: a
+-- GENERATED column with a different expression is not a no-op, it is a second
+-- full table rewrite under ACCESS EXCLUSIVE on a 77,770-row table.
+CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- unaccent() is STABLE, not IMMUTABLE, so it cannot be used in a generated
+-- column directly. This wrapper pins the dictionary, which makes it genuinely
+-- immutable and therefore indexable.
+CREATE OR REPLACE FUNCTION public.immutable_unaccent(text)
+  RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+AS $function$ SELECT public.unaccent('public.unaccent'::regdictionary, $1) $function$;
+
+-- Title and sort title weigh above description.
+ALTER TABLE com_nalet_katalog_items
+  ADD COLUMN IF NOT EXISTS search_vector tsvector
+  GENERATED ALWAYS AS (
+    setweight(to_tsvector('simple', immutable_unaccent(COALESCE(title, ''::varchar)::text)), 'A') ||
+    setweight(to_tsvector('simple', immutable_unaccent(COALESCE(sorttitle, ''::varchar)::text)), 'A') ||
+    setweight(to_tsvector('simple', immutable_unaccent(COALESCE(description, ''::text))), 'B')
+  ) STORED;
+
+CREATE INDEX IF NOT EXISTS items_search_vector_idx
+  ON com_nalet_katalog_items USING gin (search_vector);
