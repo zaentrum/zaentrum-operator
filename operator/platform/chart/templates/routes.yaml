@@ -127,7 +127,7 @@ spec:
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
 {{- if eq .Values.identity.mode "bundled" }}
 ---
-# Bundled headless Keycloak under /auth → issuer https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum
+# Bundled headless Keycloak under /auth → issuer https://<hostname>/auth/realms/zaentrum
 # (external identity has no in-namespace keycloak Service — the route would 503).
 apiVersion: route.openshift.io/v1
 kind: Route

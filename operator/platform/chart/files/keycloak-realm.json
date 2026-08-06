@@ -455,7 +455,7 @@
       "emailVerified": true,
       "firstName": "Demo",
       "lastName": "User",
-      "email": "demo@zaentrum.demo.nalet.cloud",
+      "email": "demo@example.com",
       "credentials": [
         {
           "type": "password",

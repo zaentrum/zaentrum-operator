@@ -5,6 +5,16 @@ on:
   pull_request: {}
 
 jobs:
+  # The public boundary the open-source strategy calls "enforced, not trusted".
+  # It was neither until 2026-08-06: the published operator image was found to
+  # carry postgres.nalet.cloud, chino.beta.nalet.cloud and sso.nalet.cloud,
+  # compiled in via the chart templates the binary embeds. Nothing checked.
+  neutrality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-neutrality.sh
+
   # kind's real job: smoke-test that the manifests apply on a throwaway
   # vanilla cluster (NOT a runtime — see docs/architecture.md).
   manifests:
