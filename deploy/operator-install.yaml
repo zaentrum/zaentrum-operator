@@ -82,7 +82,7 @@ spec:
                       used when Mode is "external".
                     properties:
                       host:
-                        description: Host of the shared cluster, e.g. postgres.nalet.cloud.
+                        description: Host of the shared cluster, e.g. postgres.example.com.
                         type: string
                       port:
                         default: 5432
@@ -240,7 +240,7 @@ spec:
                     properties:
                       chino:
                         description: Chino is the host serving the chino SPA at
-                          "/", e.g. chino.beta.nalet.cloud.
+                          "/", e.g. chino.example.com.
                         type: string
                     type: object
                   mode:

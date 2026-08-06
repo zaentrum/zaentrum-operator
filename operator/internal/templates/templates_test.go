@@ -81,7 +81,7 @@ func TestRenderSelfHost(t *testing.T) {
 // demoCR mirrors the demo profile (values-demo.yaml).
 func demoCR(ns string) *zaentrumv1alpha1.Zaentrum {
 	z := base(ns)
-	z.Spec.Hostname = "zaentrum.demo.nalet.cloud"
+	z.Spec.Hostname = "zaentrum.demo.nalet.cloud"  // neutrality-guard:allow
 	z.Spec.Identity.IssuerScheme = "https"
 	z.Spec.Identity.LoginTheme = "zaentrum"
 	z.Spec.Features.Pipeline = true
@@ -115,12 +115,12 @@ func TestRenderDemoProfile(t *testing.T) {
 	assert.True(t, hasHA, "chino-api carries split-horizon hostAliases")
 	blob := fmt.Sprintf("%v", dep.Object)
 	assert.Contains(t, blob,
-		"https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum", "https issuer in env")
+		"https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum", "https issuer in env")  // neutrality-guard:allow
 	// The extension seam is neutral core: chino-api points at portal-api, but the
 	// rendered core carries NO acquisition/addon vocabulary.
 	assert.Contains(t, blob, "PORTAL_BASE_URL", "chino-api wired to the portal registry")
 	all := fmt.Sprintf("%v", objs)
-	for _, forbidden := range []string{"acquire", "download-gateway", "qbittorrent", "wanted"} {
+	for _, forbidden := range []string{"acquire", "download-gateway", "qbittorrent", "wanted"} {  // neutrality-guard:allow
 		assert.NotContains(t, strings.ToLower(all), forbidden,
 			"core render must not mention acquisition (%s)", forbidden)
 	}
@@ -141,15 +141,15 @@ func TestReplicasOverride(t *testing.T) {
 // every bundled backer and wires the tenant endpoints through.
 func TestRenderSharedBetaProfile(t *testing.T) {
 	z := base("zaentrum-beta")
-	z.Spec.Hostname = "zaentrum.beta.nalet.cloud"
+	z.Spec.Hostname = "zaentrum.beta.example.com"
 	z.Spec.Identity.Mode = "external"
-	z.Spec.Identity.Issuer = "https://sso.nalet.cloud/realms/nalet"
+	z.Spec.Identity.Issuer = "https://sso.example.com/realms/nalet"
 	z.Spec.Features.Pipeline = true
 	no, yes := false, true
 	z.Spec.Routing.ProvisionIngress = &no
 	z.Spec.Routing.ProvisionRoutes = &yes
 	z.Spec.Routing.Mode = "subdomains"
-	z.Spec.Routing.Hosts.Chino = "chino.beta.nalet.cloud"
+	z.Spec.Routing.Hosts.Chino = "chino.example.com"
 	z.Spec.EventStreaming.Mode = "external"
 	z.Spec.EventStreaming.Bootstrap = "platform-kafka-kafka-bootstrap.platform-event-streaming.svc:9093"
 	z.Spec.EventStreaming.CertSecret = "kafka-mtls"
@@ -158,7 +158,7 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	z.Spec.Databases.Katalog = "katalog_beta"
 	z.Spec.Databases.Chino = "chino_beta"
 	z.Spec.Databases.Portal = "portal_beta"
-	z.Spec.Databases.External.Host = "postgres.nalet.cloud"
+	z.Spec.Databases.External.Host = "postgres.example.com"
 	z.Spec.Databases.External.SSLMode = "require"
 	z.Spec.Secrets.External = true
 	_ = yes
@@ -177,7 +177,7 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	blob := fmt.Sprintf("%v", dep.Object)
 	assert.Contains(t, blob, "platform-kafka-kafka-bootstrap.platform-event-streaming.svc:9093", "shared bootstrap")
 	assert.Contains(t, blob, "zaentrum-beta.", "tenant topic prefix")
-	assert.Contains(t, blob, "postgres.nalet.cloud:5432/chino_beta?sslmode=require", "shared DSN")
+	assert.Contains(t, blob, "postgres.example.com:5432/chino_beta?sslmode=require", "shared DSN")
 	assert.Contains(t, blob, "kafka-mtls", "cert secret mounted")
 
 	web := find(t, objs, "Deployment", "chino-web")
@@ -196,7 +196,7 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 		assert.Contains(t, blob, "zaentrum-worker-oidc", "%s uses the external worker client", name)
 	}
 	an := fmt.Sprintf("%v", find(t, objs, "Deployment", "analyzer").Object)
-	assert.Contains(t, an, "https://sso.nalet.cloud/realms/nalet/protocol/openid-connect/token",
+	assert.Contains(t, an, "https://sso.example.com/realms/nalet/protocol/openid-connect/token",
 		"worker token endpoint derived from the external issuer")
 
 	// identity.clientId flows to /api/config's WEB client id — both SPAs
@@ -208,7 +208,7 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	assert.Contains(t, api, "OIDC_CLIENT_ID_WEB value:chino-beta", "CR clientId reaches /api/config")
 	assert.Contains(t, api, "OIDC_CLIENT_ID_PORTAL value:chino-beta", "portal rides the per-instance client on a shared realm")
 	pa := fmt.Sprintf("%v", find(t, objs2, "Deployment", "portal-api").Object)
-	assert.Contains(t, pa, "CHINO_PUBLIC_URL value:https://chino.beta.nalet.cloud/", "chino tile gets the subdomain origin")
+	assert.Contains(t, pa, "CHINO_PUBLIC_URL value:https://chino.example.com/", "chino tile gets the subdomain origin")
 	assert.Nil(t, find(t, objs2, "Route", "zaentrum-demo-auth"), "no bundled-keycloak /auth route in external identity")
 	assert.NotNil(t, find(t, objs2, "Route", "zaentrum-demo-auth-callback"), "SPA callback route stays")
 }

@@ -54,7 +54,7 @@ routing:
   #              global.hostname. Requires DNS + TLS for the extra host.
   mode: pathRouted          # pathRouted | subdomains
   hosts:
-    chino: ""               # subdomains: e.g. chino.beta.nalet.cloud
+    chino: ""               # subdomains: e.g. chino.example.com
 
 secrets:
   external: false           # true → secrets are pre-created (CI/demo); chart skips rendering them
@@ -72,7 +72,7 @@ databases:
   # + create-db initContainers (DB provisioning is the tenant's job); the db
   # names above then name databases ON the shared cluster (e.g. chino_beta).
   external:
-    host: ""                # e.g. postgres.nalet.cloud
+    host: ""                # e.g. postgres.example.com
     port: 5432
     sslmode: require
 

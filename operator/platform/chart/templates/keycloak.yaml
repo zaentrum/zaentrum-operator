@@ -231,7 +231,7 @@ metadata:
   labels: { app: keycloak }
 spec:
   selector: { app: keycloak }
-  # Pinned ClusterIP so the services' hostAliases (zaentrum.demo.nalet.cloud →
+  # Pinned ClusterIP so the services' hostAliases (the platform hostname →
   # this IP) stay valid across redeploys; the issuer host resolves straight to
   # this Service on :80 (-> container :8080, which serves /auth).
   clusterIP: 172.30.102.125

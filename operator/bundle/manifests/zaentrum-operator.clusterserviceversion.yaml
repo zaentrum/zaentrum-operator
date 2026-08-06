@@ -64,7 +64,7 @@ spec:
     `currentVersion`, `availableUpdate`, and per-component readiness).
 
     The bundle is content-neutral: it ships only the platform. It never fetches
-    content and has no downloaders or indexer integrations.
+    content and has no downloaders or indexer integrations. # neutrality-guard:allow
   maturity: alpha
   version: 0.1.0
   minKubeVersion: 1.27.0

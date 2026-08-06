@@ -154,7 +154,7 @@ type RoutingSpec struct {
 
 // RoutingHosts are the per-product public hosts (subdomains mode).
 type RoutingHosts struct {
-	// Chino is the host serving the chino SPA at "/", e.g. chino.beta.nalet.cloud.
+	// Chino is the host serving the chino SPA at "/", e.g. chino.example.com.
 	// +optional
 	Chino string `json:"chino,omitempty"`
 }
@@ -223,7 +223,7 @@ type DatabasesSpec struct {
 
 // DatabaseExternalSpec points the platform at a shared Postgres.
 type DatabaseExternalSpec struct {
-	// Host of the shared cluster, e.g. postgres.nalet.cloud.
+	// Host of the shared cluster, e.g. postgres.example.com.
 	// +optional
 	Host string `json:"host,omitempty"`
 	// +kubebuilder:default=5432
