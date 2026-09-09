@@ -11,7 +11,6 @@
   "verifyEmail": false,
   "rememberMe": true,
   "bruteForceProtected": true,
-
   "accessTokenLifespan": 300,
   "accessTokenLifespanForImplicitFlow": 900,
   "ssoSessionIdleTimeout": 1800,
@@ -19,15 +18,14 @@
   "offlineSessionIdleTimeout": 2592000,
   "offlineSessionMaxLifespanEnabled": false,
   "actionTokenGeneratedByUserLifespan": 300,
-
   "defaultSignatureAlgorithm": "RS256",
   "revokeRefreshToken": false,
-
   "oauth2DeviceCodeLifespan": 600,
   "oauth2DevicePollingInterval": 5,
-
-  "defaultRoles": ["offline_access", "uma_authorization"],
-
+  "defaultRoles": [
+    "offline_access",
+    "uma_authorization"
+  ],
   "roles": {
     "realm": [
       {
@@ -53,10 +51,15 @@
         "description": "Zaentrum administrator. Manage the catalog and other users via the Zaentrum /manage console.",
         "composite": false,
         "clientRole": false
+      },
+      {
+        "name": "zaentrum-addon",
+        "description": "An addon's service account. Grants self-registration of the addon's own UI contributions (portal-api /api/portal/extensions). Assign it to the service-account user of an addon's confidential client; never to a person.",
+        "composite": false,
+        "clientRole": false
       }
     ]
   },
-
   "clientScopes": [
     {
       "name": "offline_access",
@@ -196,10 +199,15 @@
       ]
     }
   ],
-
-  "defaultDefaultClientScopes": ["profile", "email", "roles", "web-origins"],
-  "defaultOptionalClientScopes": ["offline_access"],
-
+  "defaultDefaultClientScopes": [
+    "profile",
+    "email",
+    "roles",
+    "web-origins"
+  ],
+  "defaultOptionalClientScopes": [
+    "offline_access"
+  ],
   "clients": [
     {
       "clientId": "chino-web",
@@ -215,15 +223,26 @@
       "bearerOnly": false,
       "frontchannelLogout": true,
       "rootUrl": "${authBaseUrl}",
-      "redirectUris": ["*"],
-      "webOrigins": ["*"],
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "true",
         "post.logout.redirect.uris": "+"
       },
-      "defaultClientScopes": ["profile", "email", "roles", "web-origins"],
-      "optionalClientScopes": ["offline_access"],
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
       "protocolMappers": [
         {
           "name": "audience-chino",
@@ -259,8 +278,15 @@
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "true"
       },
-      "defaultClientScopes": ["profile", "email", "roles", "web-origins"],
-      "optionalClientScopes": ["offline_access"],
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
       "protocolMappers": [
         {
           "name": "audience-chino",
@@ -290,15 +316,24 @@
       "serviceAccountsEnabled": false,
       "bearerOnly": false,
       "frontchannelLogout": true,
-      "redirectUris": ["*"],
+      "redirectUris": [
+        "*"
+      ],
       "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "true",
         "post.logout.redirect.uris": "+"
       },
-      "defaultClientScopes": ["profile", "email", "roles", "web-origins"],
-      "optionalClientScopes": ["offline_access"],
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
       "protocolMappers": [
         {
           "name": "audience-chino",
@@ -335,11 +370,12 @@
         "use.refresh.tokens": "false",
         "client_credentials.use_refresh_token": "false"
       },
-      "defaultClientScopes": ["roles"],
+      "defaultClientScopes": [
+        "roles"
+      ],
       "optionalClientScopes": []
     }
   ],
-
   "users": [
     {
       "username": "admin",
@@ -348,7 +384,9 @@
       "firstName": "Zaentrum",
       "lastName": "Administrator",
       "email": "admin@zaentrum.local",
-      "requiredActions": ["UPDATE_PASSWORD"],
+      "requiredActions": [
+        "UPDATE_PASSWORD"
+      ],
       "credentials": [
         {
           "type": "password",
@@ -356,9 +394,15 @@
           "temporary": true
         }
       ],
-      "realmRoles": ["zaentrum-admin", "zaentrum-user", "offline_access"],
+      "realmRoles": [
+        "zaentrum-admin",
+        "zaentrum-user",
+        "offline_access"
+      ],
       "clientRoles": {
-        "realm-management": ["realm-admin"]
+        "realm-management": [
+          "realm-admin"
+        ]
       }
     },
     {
@@ -366,7 +410,12 @@
       "enabled": true,
       "serviceAccountClientId": "zaentrum-manager",
       "clientRoles": {
-        "realm-management": ["manage-users", "view-users", "query-users", "view-realm"]
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users",
+          "view-realm"
+        ]
       }
     }
   ]

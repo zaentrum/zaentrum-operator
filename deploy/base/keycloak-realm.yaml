@@ -79,6 +79,12 @@ data:
             "description": "Zaentrum administrator. Manage the catalog and other users via the Zaentrum /manage console.",
             "composite": false,
             "clientRole": false
+          },
+          {
+            "name": "zaentrum-addon",
+            "description": "An addon's service account. Grants self-registration of the addon's own UI contributions (portal-api /api/portal/extensions). Assign it to the service-account user of an addon's confidential client; never to a person.",
+            "composite": false,
+            "clientRole": false
           }
         ]
       },

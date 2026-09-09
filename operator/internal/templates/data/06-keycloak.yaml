@@ -40,7 +40,8 @@ data:
           { "name": "offline_access", "description": "${role_offline-access}", "composite": false, "clientRole": false },
           { "name": "uma_authorization", "description": "${role_uma_authorization}", "composite": false, "clientRole": false },
           { "name": "zaentrum-user", "description": "Default Zaentrum end user. Granted to interactive accounts on the public clients.", "composite": false, "clientRole": false },
-          { "name": "zaentrum-admin", "description": "Zaentrum administrator. Manage the catalog and other users via the Zaentrum /manage console.", "composite": false, "clientRole": false }
+          { "name": "zaentrum-admin", "description": "Zaentrum administrator. Manage the catalog and other users via the Zaentrum /manage console.", "composite": false, "clientRole": false },
+          { "name": "zaentrum-addon", "description": "An addon's service account. Grants self-registration of the addon's own UI contributions (portal-api /api/portal/extensions). Assign it to the service-account user of an addon's confidential client; never to a person.", "composite": false, "clientRole": false }
         ]
       },
       "clientScopes": [
