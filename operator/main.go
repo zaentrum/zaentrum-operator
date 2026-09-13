@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -43,12 +44,35 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// Leader-election timings, deliberately far longer than the library
+	// defaults (15s lease / 10s renew / 2s retry).
+	//
+	// Losing the lease makes controller-runtime EXIT the process — correct for
+	// a multi-replica manager, where another replica takes over immediately.
+	// This operator runs a single replica, so the only thing a lost lease
+	// produces is a restart and a gap in reconciliation. With the defaults, an
+	// API server that is unreachable for eleven seconds is enough: that is what
+	// killed this operator 23 times in 32 days on a small cluster whose control
+	// plane blips during etcd compaction.
+	//
+	// Stretching the deadline to 50s rides out those blips. The cost is bounded
+	// and paid only in the case this operator does not have: with two replicas,
+	// a takeover after a hard pod kill would wait out the 60s lease. Releasing
+	// on cancel keeps graceful shutdowns (a rollout) instant regardless.
+	leaseDuration := 60 * time.Second
+	renewDeadline := 50 * time.Second
+	retryPeriod := 10 * time.Second
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "zaentrum-operator.zaentrum.io",
+		Scheme:                        scheme,
+		Metrics:                       metricsserver.Options{BindAddress: metricsAddr},
+		HealthProbeBindAddress:        probeAddr,
+		LeaderElection:                enableLeaderElection,
+		LeaderElectionID:              "zaentrum-operator.zaentrum.io",
+		LeaseDuration:                 &leaseDuration,
+		RenewDeadline:                 &renewDeadline,
+		RetryPeriod:                   &retryPeriod,
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
