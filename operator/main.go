@@ -1,5 +1,6 @@
 // Command zaentrum-operator runs the controller-runtime manager that reconciles
-// the Zaentrum platform from a single Zaentrum CR.
+// the Zaentrum platform from a single Zaentrum CR, and the addon charts
+// installed next to it from ZaentrumAddon CRs.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	"github.com/zaentrum/zaentrum-operator/operator/internal/addon"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/controller"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/digest"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/updates"
@@ -100,6 +102,21 @@ func main() {
 		Digest:      digest.New(nil),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Zaentrum")
+		os.Exit(1)
+	}
+
+	// Addons (ZaentrumAddon: Helm charts installed next to the platform) run
+	// in a controller of their own, started once their API is served, so
+	// neither an addon nor a missing addon CRD can stop the platform
+	// reconciler.
+	addons := &controller.ZaentrumAddonReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		APIReader: mgr.GetAPIReader(),
+		Charts:    &addon.Fetcher{},
+	}
+	if err := mgr.Add(controller.AddonControllerWhenServed(mgr, addons)); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ZaentrumAddon")
 		os.Exit(1)
 	}
 

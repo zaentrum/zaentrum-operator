@@ -1,4 +1,5 @@
-// Package controller implements the Zaentrum platform reconciler.
+// Package controller implements the Zaentrum platform reconciler and the
+// ZaentrumAddon reconciler that installs addon charts next to it.
 package controller
 
 import (
