@@ -52,8 +52,10 @@ func TestRenderExampleChart(t *testing.T) {
 	pull, _, _ := unstructured.NestedSlice(dep.Object, "spec", "template", "spec", "imagePullSecrets")
 	assert.Equal(t, []interface{}{map[string]interface{}{"name": "registry-pull"}}, pull)
 
-	assert.Empty(t, Violations(out.Objects, GuardInput{Namespace: testNamespace, MediaClaim: "media", Primary: "worker"}),
-		"the example chart passes every guardrail")
+	assert.Empty(t, Violations(out.Objects, GuardInput{
+		Namespace: testNamespace, MediaClaim: "media", Primary: "worker",
+		EventsTLSSecret: "kafka-mtls", PullSecrets: []string{"registry-pull"},
+	}), "the example chart passes every guardrail")
 	assert.Len(t, out.Checksum, 64)
 }
 
@@ -74,16 +76,50 @@ func TestRenderSchemaErrors(t *testing.T) {
 	assert.Contains(t, fmt.Sprint(errs), "greeting")
 }
 
+// A template error reports only its location, never the chart-controlled
+// message body (which can echo a secret value through `fail`).
 func TestRenderTemplateError(t *testing.T) {
 	chrt := &chart.Chart{
 		Metadata: &chart.Metadata{APIVersion: "v2", Name: "broken", Version: "0.1.0"},
 		Templates: []*chart.File{{Name: "templates/cm.yaml", Data: []byte(
-			"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ required \"name is required\" .Values.name }}\n")}},
+			"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ required \"s3cret name is required\" .Values.name }}\n")}},
 	}
 	out, errs := Render(RenderInput{Chart: chrt, Name: "broken", Namespace: testNamespace, Values: map[string]interface{}{}})
 	assert.Nil(t, out)
 	require.Len(t, errs, 1)
-	assert.Contains(t, errs[0], "name is required")
+	assert.Equal(t, "template error at broken/templates/cm.yaml:4:11", errs[0])
+	assert.NotContains(t, errs[0], "s3cret name is required", "the message body is never surfaced")
+}
+
+// A chart cannot leak a value through `fail`: the error is location-only.
+func TestRenderFailLeak(t *testing.T) {
+	chrt := &chart.Chart{
+		Metadata: &chart.Metadata{APIVersion: "v2", Name: "leaky", Version: "0.1.0"},
+		Templates: []*chart.File{{Name: "templates/x.yaml", Data: []byte(
+			`{{ fail (printf "TOKEN=%s" .Values.zaentrum.issuer) }}`)}},
+	}
+	vals := LayerValues(nil, nil, platformValues())
+	out, errs := Render(RenderInput{Chart: chrt, Name: "leaky", Namespace: testNamespace, Values: vals})
+	assert.Nil(t, out)
+	require.Len(t, errs, 1)
+	assert.Equal(t, "template error at leaky/templates/x.yaml:1:3", errs[0])
+	assert.NotContains(t, fmt.Sprint(errs), "sso.example.org")
+}
+
+// An invalid rendered document reports only the file, not its (secret-bearing)
+// content.
+func TestRenderInvalidYAMLNoLeak(t *testing.T) {
+	chrt := &chart.Chart{
+		Metadata: &chart.Metadata{APIVersion: "v2", Name: "bad", Version: "0.1.0"},
+		Templates: []*chart.File{{Name: "templates/x.yaml", Data: []byte(
+			"apiVersion: v1\nkind: ConfigMap\n\tsecret: {{ .Values.zaentrum.issuer }}\n")}},
+	}
+	vals := LayerValues(nil, nil, platformValues())
+	out, errs := Render(RenderInput{Chart: chrt, Name: "bad", Namespace: testNamespace, Values: vals})
+	assert.Nil(t, out)
+	require.NotEmpty(t, errs)
+	assert.Equal(t, "bad/templates/x.yaml: rendered output is not valid YAML", errs[0])
+	assert.NotContains(t, fmt.Sprint(errs), "sso.example.org")
 }
 
 func TestSchemaErrorsPerChart(t *testing.T) {

@@ -106,21 +106,37 @@ kind: ServiceAccount
 metadata: {name: worker}
 ---
 apiVersion: v1
+kind: Secret
+metadata: {name: worker}
+type: Opaque
+---
+apiVersion: v1
 kind: ConfigMap
 metadata: {name: cfg, namespace: zaentrum-beta}
 ---
+apiVersion: v1
+kind: Service
+metadata: {name: worker}
+spec: {type: ClusterIP, ports: [{port: 80}]}
+---
 ` + workload(`{serviceAccountName: worker,
+      automountServiceAccountToken: true,
       securityContext: {runAsNonRoot: true, runAsUser: 1000},
+      imagePullSecrets: [{name: registry-pull}],
       volumes: [
         {name: own, persistentVolumeClaim: {claimName: worker-data}},
         {name: media, persistentVolumeClaim: {claimName: media}},
         {name: cfg, configMap: {name: cfg}},
         {name: sec, secret: {secretName: worker}},
+        {name: tls, secret: {secretName: kafka-mtls}},
         {name: tmp, emptyDir: {}},
         {name: bare},
-        {name: proj, projected: {sources: []}},
+        {name: proj, projected: {sources: [{secret: {name: worker}}, {configMap: {name: cfg}}]}},
         {name: info, downwardAPI: {items: []}}],
       containers: [{name: app, image: app, ports: [{containerPort: 8080}],
+        env: [{name: T, valueFrom: {secretKeyRef: {name: kafka-mtls, key: ca.crt}}},
+              {name: C, valueFrom: {configMapKeyRef: {name: cfg, key: x}}}],
+        envFrom: [{secretRef: {name: worker}}],
         securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}}]}`) + `---
 apiVersion: batch/v1
 kind: Job
@@ -129,7 +145,15 @@ spec:
   template:
     spec: {restartPolicy: Never, serviceAccountName: default, containers: [{name: app, image: app}]}
 `
-	assert.Empty(t, guard(t, manifest))
+	// The media claim, the chart's own SA/Secret/ConfigMap/PVC, the platform
+	// events TLS secret and the platform pull secret are all allowed.
+	assert.Empty(t, Violations(objects(t, manifest), GuardInput{
+		Namespace:       testNamespace,
+		MediaClaim:      "media",
+		EventsTLSSecret: "kafka-mtls",
+		PullSecrets:     []string{"registry-pull"},
+		Reserved:        map[string]bool{"Secret/zaentrum-addon-example-generated": true},
+	}))
 }
 
 func TestGuardrailPrimaryService(t *testing.T) {

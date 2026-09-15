@@ -23,6 +23,9 @@ type ValuesSource struct {
 	Found bool
 	// Data is the object's data (a ConfigMap's binaryData included).
 	Data map[string][]byte
+	// Reject, when set, refuses this source: it is not read and the reason is a
+	// values error (a confused-deputy reference the addon may not read).
+	Reject string
 }
 
 // UserValues merges spec.values and then the valuesFrom sources in order: the
@@ -54,6 +57,11 @@ func applySource(dst map[string]interface{}, src ValuesSource) error {
 		key = DefaultValuesKey
 	}
 	what := fmt.Sprintf("valuesFrom %s/%s", ref.Kind, ref.Name)
+	// A rejected source is a policy refusal, not an absence: always an error,
+	// even when the ref is optional.
+	if src.Reject != "" {
+		return fmt.Errorf("%s: %s", what, src.Reject)
+	}
 	if !src.Found {
 		if ref.Optional {
 			return nil

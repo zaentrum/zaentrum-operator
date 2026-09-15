@@ -140,3 +140,29 @@ func TestLayerValuesCopies(t *testing.T) {
 	assert.Equal(t, "v", user["nested"].(map[string]interface{})["k"])
 	assert.Equal(t, "https://sso.example.org/realms/x", platform["issuer"])
 }
+
+// A rejected source (a confused-deputy reference) is always a values error and
+// contributes nothing — even when the ref is marked optional.
+func TestUserValuesRejectedSource(t *testing.T) {
+	src := ValuesSource{
+		Ref:    zaentrumv1alpha1.AddonValuesReference{Kind: "Secret", Name: "chino-db-credentials", TargetPath: "leak", Optional: true},
+		Reject: "not the addon's own values object",
+	}
+	vals, errs := UserValues(nil, []ValuesSource{src})
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "valuesFrom Secret/chino-db-credentials: not the addon's own values object")
+	assert.Empty(t, vals, "a rejected source merges nothing")
+}
+
+func TestOwnsValuesObject(t *testing.T) {
+	own := map[string]string{LabelAddon: "example"}
+	assert.True(t, OwnsValuesObject("example", "zaentrum-addon-example-values", own))
+	assert.True(t, OwnsValuesObject("example", "zaentrum-addon-example-generated", own))
+	// Right label, wrong name.
+	assert.False(t, OwnsValuesObject("example", "chino-db-credentials", own))
+	// Right name, wrong/missing label.
+	assert.False(t, OwnsValuesObject("example", "zaentrum-addon-example-values", map[string]string{LabelAddon: "other"}))
+	assert.False(t, OwnsValuesObject("example", "zaentrum-addon-example-values", nil))
+	// A different addon's prefix must not match.
+	assert.False(t, OwnsValuesObject("example", "zaentrum-addon-other-values", map[string]string{LabelAddon: "example"}))
+}

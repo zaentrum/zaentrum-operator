@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/remotes/docker"
@@ -43,12 +46,15 @@ type Archive struct {
 //
 // The zero value is usable.
 type Fetcher struct {
-	// Transport is the HTTP transport; nil uses http.DefaultTransport.
+	// Transport is the HTTP transport; nil builds an SSRF-guarded one.
 	Transport http.RoundTripper
 	// PlainHTTP talks to OCI registries over http. Tests only.
 	PlainHTTP bool
 	// TTL overrides DefaultRefTTL.
 	TTL time.Duration
+	// allowLoopback lets the SSRF guard dial loopback (httptest servers). Tests
+	// only; loopback is refused in production.
+	allowLoopback bool
 
 	mu       sync.Mutex
 	archives map[string]*cachedArchive // by archive digest, and by OCI manifest digest
@@ -244,7 +250,117 @@ func (f *Fetcher) transport() http.RoundTripper {
 	if f.Transport != nil {
 		return f.Transport
 	}
-	return http.DefaultTransport
+	g := newDialGuard(f.allowLoopback)
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           g.dialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
+}
+
+// cloudMetadataIPs are the well-known link-local/CGNAT/ULA addresses cloud
+// metadata services answer on. 169.254.169.254 is also caught as link-local,
+// but the others need listing.
+var cloudMetadataIPs = []net.IP{
+	net.ParseIP("169.254.169.254"), // AWS/GCP/Azure IMDS
+	net.ParseIP("100.100.100.200"), // Alibaba
+	net.ParseIP("fd00:ec2::254"),   // AWS IMDS over IPv6
+}
+
+// dialGuard refuses connections that reach the host itself, link-local ranges
+// (metadata services), the unspecified address or the in-cluster API server —
+// the SSRF targets a chart URL or OCI registry must never reach. RFC1918 stays
+// allowed: self-hosters run registries on private networks. The IP check runs
+// in the dialer Control hook, after DNS resolution, so a rebinding record that
+// resolves to a public IP for a pre-check but a private one for the connection
+// cannot slip through.
+type dialGuard struct {
+	allowLoopback bool
+	dialer        *net.Dialer
+	blockedHosts  map[string]bool
+	blockedIPs    []net.IP
+}
+
+func newDialGuard(allowLoopback bool) *dialGuard {
+	g := &dialGuard{
+		allowLoopback: allowLoopback,
+		blockedHosts: map[string]bool{
+			"kubernetes":                           true,
+			"kubernetes.default":                   true,
+			"kubernetes.default.svc":               true,
+			"kubernetes.default.svc.cluster.local": true,
+		},
+	}
+	// The in-cluster API server's own address, however it is spelled.
+	if h := os.Getenv("KUBERNETES_SERVICE_HOST"); h != "" {
+		if ip := net.ParseIP(strings.Trim(h, "[]")); ip != nil {
+			g.blockedIPs = append(g.blockedIPs, ip)
+		} else {
+			g.blockedHosts[strings.ToLower(h)] = true
+		}
+	}
+	g.dialer = &net.Dialer{Timeout: FetchTimeout, Control: g.control}
+	return g
+}
+
+func (g *dialGuard) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if host, _, err := net.SplitHostPort(address); err == nil && g.blockedHost(host) {
+		return nil, fmt.Errorf("refusing to connect to %q: in-cluster API server", host)
+	}
+	return g.dialer.DialContext(ctx, network, address)
+}
+
+func (g *dialGuard) blockedHost(host string) bool {
+	return g.blockedHosts[strings.ToLower(strings.TrimSuffix(host, "."))]
+}
+
+// control runs after DNS resolution with the concrete IP about to be dialed.
+func (g *dialGuard) control(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil
+	}
+	if err := guardResolvedIP(ip, g.allowLoopback); err != nil {
+		return err
+	}
+	for _, b := range g.blockedIPs {
+		if ip.Equal(b) {
+			return fmt.Errorf("refusing to connect to %s: in-cluster API server", ip)
+		}
+	}
+	return nil
+}
+
+// guardResolvedIP refuses a resolved address that a chart fetch must never
+// reach: loopback (unless allowed), the unspecified address, link-local ranges
+// (169.254.0.0/16, fe80::/10 — cloud metadata), and the specific cloud-metadata
+// addresses outside those ranges. RFC1918 / ULA are allowed.
+func guardResolvedIP(ip net.IP, allowLoopback bool) error {
+	switch {
+	case ip.IsLoopback():
+		if allowLoopback {
+			return nil
+		}
+		return fmt.Errorf("refusing to connect to loopback address %s", ip)
+	case ip.IsUnspecified():
+		return fmt.Errorf("refusing to connect to unspecified address %s", ip)
+	case ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast():
+		return fmt.Errorf("refusing to connect to link-local address %s", ip)
+	}
+	for _, m := range cloudMetadataIPs {
+		if ip.Equal(m) {
+			return fmt.Errorf("refusing to connect to cloud metadata address %s", ip)
+		}
+	}
+	return nil
 }
 
 func (f *Fetcher) ttl() time.Duration {

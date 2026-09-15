@@ -63,6 +63,21 @@ func GeneratedSecretName(addon string) string {
 	return "zaentrum-addon-" + addon + "-generated"
 }
 
+// ValuesObjectPrefix is the name prefix an addon's own values objects share
+// (the portal writes <prefix>values, the operator <prefix>generated).
+func ValuesObjectPrefix(addon string) string {
+	return "zaentrum-addon-" + addon + "-"
+}
+
+// OwnsValuesObject reports whether a Secret/ConfigMap named name with labels
+// labels is one this addon may read through valuesFrom or adopt: its name must
+// start with the addon's values prefix AND it must carry zaentrum.io/addon=<name>.
+// This blocks the confused-deputy read of a platform secret the operator can
+// see but the addon has no claim to.
+func OwnsValuesObject(addon, name string, labels map[string]string) bool {
+	return strings.HasPrefix(name, ValuesObjectPrefix(addon)) && labels[LabelAddon] == addon
+}
+
 // Digest returns the sha256 digest of data as "sha256:<hex>".
 func Digest(data []byte) string {
 	sum := sha256.Sum256(data)

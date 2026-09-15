@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -48,18 +51,25 @@ func Render(in RenderInput) (out *Rendered, valuesErrors []string) {
 	// that is a values error, not a reason to crash the reconcile.
 	defer func() {
 		if r := recover(); r != nil {
-			out, valuesErrors = nil, []string{fmt.Sprintf("render: %v", r)}
+			// A panic value can carry a chart-supplied value; report nothing but
+			// that the render failed.
+			out, valuesErrors = nil, []string{"render failed: invalid values or template"}
 		}
 	}()
 
 	chrt := in.Chart
 	vals := copyMap(in.Values)
 	if err := chartutil.ProcessDependenciesWithMerge(chrt, vals); err != nil {
-		return nil, []string{fmt.Sprintf("chart dependencies: %v", err)}
+		// Dependency errors are about condition paths and subchart names, not
+		// values; keep them generic rather than echoing the merged tree.
+		return nil, []string{"chart dependencies could not be processed"}
 	}
-	final, err := chartutil.CoalesceValues(chrt, vals)
+	final, err := coalesceQuiet(chrt, vals)
 	if err != nil {
-		return nil, []string{fmt.Sprintf("values: %v", err)}
+		// The only error CoalesceValues returns is a subchart type mismatch (no
+		// value in the text); its value-bearing conflict messages are warnings,
+		// which coalesceQuiet discards so they never reach the operator log.
+		return nil, []string{"values: " + err.Error()}
 	}
 	// The reserved block overrides the chart's own defaults too.
 	if platform, ok := in.Values[PlatformKey]; ok {
@@ -84,7 +94,10 @@ func Render(in RenderInput) (out *Rendered, valuesErrors []string) {
 	}
 	files, err := engine.Render(chrt, top)
 	if err != nil {
-		return nil, []string{err.Error()}
+		// A template parse/execution error's body is chart-controlled and can
+		// echo a secret value (Helm's `fail` prints its argument verbatim).
+		// Report only the location, never the message body.
+		return nil, []string{sanitizeTemplateError(err)}
 	}
 	objs, errs := decodeRendered(files)
 	if len(errs) > 0 {
@@ -96,6 +109,46 @@ func Render(in RenderInput) (out *Rendered, valuesErrors []string) {
 	}
 	sum := sha256.Sum256(body)
 	return &Rendered{Objects: objs, Checksum: hex.EncodeToString(sum[:])}, nil
+}
+
+// coalesceLogMu serialises the brief stdlib-logger redirect in coalesceQuiet.
+var coalesceLogMu sync.Mutex
+
+// coalesceQuiet runs chartutil.CoalesceValues with the standard logger muted,
+// because Helm's coalesce writes its type-conflict warnings — which include the
+// conflicting VALUE — to the package logger (the operator's stdout). Muting it
+// keeps a chart from logging a user's secret through a crafted values conflict.
+func coalesceQuiet(chrt *chart.Chart, vals map[string]interface{}) (map[string]interface{}, error) {
+	coalesceLogMu.Lock()
+	defer coalesceLogMu.Unlock()
+	out := log.Writer()
+	flags := log.Flags()
+	prefix := log.Prefix()
+	log.SetOutput(io.Discard)
+	defer func() {
+		log.SetOutput(out)
+		log.SetFlags(flags)
+		log.SetPrefix(prefix)
+	}()
+	return chartutil.CoalesceValues(chrt, vals)
+}
+
+// templateErrorLoc matches the "(chart/templates/x.yaml:12:3)" location Helm's
+// engine puts in a parse/execution error.
+var templateErrorLoc = regexp.MustCompile(`\(([^()]+?\.(?:yaml|yml|tpl|txt):\d+(?::\d+)?)\)`)
+
+// sanitizeTemplateError reduces a Helm template parse/execution error to its
+// location only. The error's message body is chart-controlled and may echo a
+// secret value (e.g. via the `fail` function), so it is never surfaced.
+func sanitizeTemplateError(err error) string {
+	if m := templateErrorLoc.FindStringSubmatch(err.Error()); m != nil {
+		return "template error at " + m[1]
+	}
+	// Fall back to the bare "template: name:line:col:" prefix text/template emits.
+	if m := regexp.MustCompile(`template: (\S+?:\d+(?::\d+)?):`).FindStringSubmatch(err.Error()); m != nil {
+		return "template error at " + m[1]
+	}
+	return "template render failed"
 }
 
 // SchemaForStatus returns the raw values.schema.json for the plan, or a values
@@ -154,7 +207,9 @@ func decodeRendered(files map[string]string) ([]*unstructured.Unstructured, []st
 				break
 			}
 			if err != nil {
-				errs = append(errs, fmt.Sprintf("%s: %v", name, err))
+				// The decode error quotes the offending document, which may hold
+				// a rendered secret value; report only the file.
+				errs = append(errs, name+": rendered output is not valid YAML")
 				break
 			}
 			if len(raw) == 0 {

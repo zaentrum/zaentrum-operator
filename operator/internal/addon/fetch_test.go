@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -167,7 +168,7 @@ func TestFetchOCI(t *testing.T) {
 	archive := exampleArchive(t)
 	srv, manifestDigest := ociRegistry(t, "charts/example", "0.1.0", archive)
 	host := strings.TrimPrefix(srv.URL, "http://")
-	f := &Fetcher{PlainHTTP: true}
+	f := &Fetcher{PlainHTTP: true, allowLoopback: true}
 	ref := zaentrumv1alpha1.AddonChart{Ref: "oci://" + host + "/charts/example", Version: "0.1.0"}
 
 	a, err := f.Fetch(context.Background(), ref, true)
@@ -178,19 +179,19 @@ func TestFetchOCI(t *testing.T) {
 	for name, pin := range map[string]string{"archive digest": Digest(archive), "manifest digest": manifestDigest} {
 		pinned := ref
 		pinned.Digest = pin
-		_, err := (&Fetcher{PlainHTTP: true}).Fetch(context.Background(), pinned, true)
+		_, err := (&Fetcher{PlainHTTP: true, allowLoopback: true}).Fetch(context.Background(), pinned, true)
 		assert.NoError(t, err, "chart.digest may pin the %s", name)
 	}
 
 	pinned := ref
 	pinned.Digest = "sha256:" + strings.Repeat("1", 64)
-	_, err = (&Fetcher{PlainHTTP: true}).Fetch(context.Background(), pinned, true)
+	_, err = (&Fetcher{PlainHTTP: true, allowLoopback: true}).Fetch(context.Background(), pinned, true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "chart digest mismatch")
 
 	missing := ref
 	missing.Version = "9.9.9"
-	_, err = (&Fetcher{PlainHTTP: true}).Fetch(context.Background(), missing, true)
+	_, err = (&Fetcher{PlainHTTP: true, allowLoopback: true}).Fetch(context.Background(), missing, true)
 	assert.Error(t, err)
 }
 
@@ -255,4 +256,60 @@ func TestValidateName(t *testing.T) {
 	assert.Error(t, ValidateName(strings.Repeat("a", MaxNameLength+1)))
 	assert.Error(t, ValidateName("Example"))
 	assert.Error(t, ValidateName("example.addon"))
+}
+
+// guardResolvedIP refuses exactly the addresses a chart fetch must never reach.
+func TestGuardResolvedIP(t *testing.T) {
+	blocked := []string{
+		"127.0.0.1", "::1", "0.0.0.0", "::",
+		"169.254.169.254", "169.254.0.1", "fe80::1", // link-local
+		"100.100.100.200", "fd00:ec2::254", // cloud metadata outside link-local
+	}
+	for _, s := range blocked {
+		assert.Error(t, guardResolvedIP(net.ParseIP(s), false), "want %s blocked", s)
+	}
+	allowed := []string{
+		"10.0.0.5", "192.168.1.1", "172.16.0.9", // RFC1918 (self-hosted registries)
+		"8.8.8.8", "1.1.1.1", "2606:4700::1111", // public
+		"fd12:3456:789a::1", // ULA other than the metadata address
+	}
+	for _, s := range allowed {
+		assert.NoError(t, guardResolvedIP(net.ParseIP(s), false), "want %s allowed", s)
+	}
+	// Loopback is allowed only for tests.
+	assert.NoError(t, guardResolvedIP(net.ParseIP("127.0.0.1"), true))
+}
+
+// The dial guard blocks the in-cluster API server by IP (KUBERNETES_SERVICE_HOST)
+// and by the kubernetes.default* hostnames.
+func TestDialGuardBlocksAPIServer(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "203.0.113.9")
+	g := newDialGuard(false)
+	assert.Error(t, g.control("tcp", "203.0.113.9:443", nil), "KUBERNETES_SERVICE_HOST IP blocked")
+	assert.NoError(t, g.control("tcp", "8.8.8.8:443", nil))
+	for _, h := range []string{"kubernetes.default", "kubernetes.default.svc", "kubernetes.default.svc.cluster.local", "kubernetes"} {
+		_, err := g.dialContext(context.Background(), "tcp", h+":443")
+		assert.Error(t, err, "%s should be blocked", h)
+	}
+}
+
+// End to end: a guarded Fetcher refuses SSRF targets, over https and OCI, with
+// no traffic (literal IPs fail in Control; the API hostname fails pre-resolve).
+func TestFetchRefusesSSRF(t *testing.T) {
+	f := &Fetcher{} // Transport nil -> the real SSRF-guarded transport; loopback refused
+	for _, tc := range []struct{ ref, want string }{
+		{"https://169.254.169.254/chart.tgz", "link-local"},
+		{"https://[fd00:ec2::254]/chart.tgz", "metadata"},
+		{"https://100.100.100.200/chart.tgz", "metadata"},
+		{"https://127.0.0.1/chart.tgz", "loopback"},
+		{"https://[::1]/chart.tgz", "loopback"},
+		{"https://kubernetes.default/chart.tgz", "in-cluster API"},
+	} {
+		_, err := f.Fetch(context.Background(), zaentrumv1alpha1.AddonChart{Ref: tc.ref}, true)
+		if assert.Error(t, err, tc.ref) {
+			assert.Contains(t, err.Error(), tc.want, tc.ref)
+		}
+	}
+	_, err := f.Fetch(context.Background(), zaentrumv1alpha1.AddonChart{Ref: "oci://127.0.0.1:5000/charts/example", Version: "0.1.0"}, true)
+	assert.Error(t, err, "OCI loopback refused")
 }
