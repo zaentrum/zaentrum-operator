@@ -319,6 +319,12 @@ func Decorate(objs []*unstructured.Unstructured, d Decoration) {
 		if o.GetKind() != "Deployment" && o.GetKind() != "Job" {
 			continue
 		}
+		if o.GetKind() == "Job" {
+			// The operator applies what the chart renders on every pass: a
+			// finished Job the TTL controller deleted would be created — and
+			// run — again. Finished addon Jobs stay until the chart drops them.
+			unstructured.RemoveNestedField(o.Object, "spec", "ttlSecondsAfterFinished")
+		}
 		tmpl := childMap(o.Object, "spec", "template")
 		// Only new label keys on the pod template: a chart's selector must keep
 		// matching the labels it chose.

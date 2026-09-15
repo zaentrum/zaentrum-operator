@@ -206,6 +206,7 @@ apiVersion: batch/v1
 kind: Job
 metadata: {name: once}
 spec:
+  ttlSecondsAfterFinished: 60
   template:
     metadata: {labels: {job: once}}
     spec:
@@ -247,6 +248,8 @@ spec:
 
 	job := findObject(objs, "Job", "once")
 	assert.Empty(t, job.GetLabels()["zaentrum.io/component"], "components are Deployments")
+	_, hasTTL, _ := unstructured.NestedFieldNoCopy(job.Object, "spec", "ttlSecondsAfterFinished")
+	assert.False(t, hasTTL, "a finished Job is kept, not deleted and re-run")
 	checksum, _, _ = unstructured.NestedString(job.Object, "spec", "template", "metadata", "annotations", "zaentrum.io/values-checksum")
 	assert.Equal(t, "abc", checksum)
 	seccomp, _, _ := unstructured.NestedString(job.Object, "spec", "template", "spec", "securityContext", "seccompProfile", "type")
