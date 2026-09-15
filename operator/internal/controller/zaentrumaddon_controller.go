@@ -42,6 +42,16 @@ const (
 	// ZaentrumAddon API became usable.
 	addonAPIPollInterval = time.Minute
 
+	// valuesSecretGrace is how old an unreferenced values Secret must be before
+	// it is collected: the portal creates a Secret first and points the addon
+	// at it second, and must never lose that race.
+	valuesSecretGrace = 10 * time.Minute
+	// orphanValuesGrace is how old a values Secret of an addon that does not
+	// exist must be before the sweep deletes it.
+	orphanValuesGrace = time.Hour
+	// valuesSweepInterval is how often orphaned values Secrets are swept.
+	valuesSweepInterval = 30 * time.Minute
+
 	condTypePlanned = "Planned"
 )
 
@@ -68,6 +78,10 @@ type ZaentrumAddonReconciler struct {
 	// Charts fetches chart archives. A shared instance keeps its cache warm
 	// across reconciles; nil uses one owned by the reconciler.
 	Charts ChartSource
+
+	// Now is the clock values Secret collection measures age with; nil is
+	// time.Now. Tests set it.
+	Now func() time.Time
 }
 
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrumaddons,verbs=get;list;watch;create;update;patch;delete
@@ -99,11 +113,169 @@ func (r *ZaentrumAddonReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
+	var collectAgain time.Duration
+	if addon.ValidateName(a.Name) == nil {
+		var err error
+		if collectAgain, err = r.collectValuesSecrets(ctx, &a); err != nil {
+			// Housekeeping: a failed collection never blocks the plan.
+			log.FromContext(ctx).Info("values secret collection failed; trying again", "addon", a.Name, "error", err.Error())
+			collectAgain = addonRequeueRetry
+		}
+	}
+
 	result, err := r.reconcileAddon(ctx, &a)
 	if serr := r.Status().Update(ctx, &a); serr != nil && err == nil {
 		return ctrl.Result{}, serr
 	}
+	result.RequeueAfter = sooner(result.RequeueAfter, collectAgain)
 	return result, err
+}
+
+// collectValuesSecrets deletes the addon's values Secrets nothing reads any
+// more. The portal never deletes a Secret: each secret write creates a new,
+// immutable one and repoints valuesFrom at it, leaving the previous one
+// behind. A Secret is collected only when it is labelled for this addon, named
+// as its values, owned by this addon alone or by nothing, referenced by no
+// valuesFrom entry, not the generated Secret, not kept, and older than the
+// grace the portal needs between creating it and pointing the addon at it.
+// Returns when to look again for a Secret still inside that grace (0 = none).
+// Only metadata is read.
+func (r *ZaentrumAddonReconciler) collectValuesSecrets(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon) (time.Duration, error) {
+	referenced := map[string]bool{}
+	for _, ref := range a.Spec.ValuesFrom {
+		if ref.Kind == "Secret" {
+			referenced[ref.Name] = true
+		}
+	}
+	secrets := &metav1.PartialObjectMetadataList{}
+	secrets.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("SecretList"))
+	if err := r.reader().List(ctx, secrets, client.InNamespace(a.Namespace), client.MatchingLabels{addon.LabelAddon: a.Name}); err != nil {
+		return 0, fmt.Errorf("list values secrets: %w", err)
+	}
+	now := r.now()
+	var again time.Duration
+	for i := range secrets.Items {
+		s := &secrets.Items[i]
+		if !addon.IsValuesSecretName(a.Name, s.Name) || s.Name == addon.GeneratedSecretName(a.Name) ||
+			referenced[s.Name] || s.Labels[addon.LabelKeep] == "true" || !ownedOnlyBy(s, a.UID) {
+			continue
+		}
+		if age := now.Sub(s.CreationTimestamp.Time); age < valuesSecretGrace {
+			again = sooner(again, valuesSecretGrace-age+time.Second)
+			continue
+		}
+		if err := r.deleteSecret(ctx, s); err != nil {
+			return again, err
+		}
+		log.FromContext(ctx).Info("deleted an unreferenced values secret", "addon", a.Name, "secret", s.Name)
+	}
+	return again, nil
+}
+
+// SweepOrphanedValues deletes values Secrets whose ZaentrumAddon does not exist
+// at all — left by a portal write for an addon that was never created, or that
+// failed before pointing the addon at the Secret. A Secret goes only when it is
+// labelled zaentrum.io/addon=<name> and named as that addon's values, no
+// ZaentrumAddon <name> exists in its namespace, it is not kept, it has no owner
+// but a ZaentrumAddon, and it is older than an hour. Only metadata is read.
+func (r *ZaentrumAddonReconciler) SweepOrphanedValues(ctx context.Context) error {
+	var addons zaentrumv1alpha1.ZaentrumAddonList
+	if err := r.reader().List(ctx, &addons); err != nil {
+		return fmt.Errorf("list addons: %w", err)
+	}
+	exists := map[types.NamespacedName]bool{}
+	for _, a := range addons.Items {
+		exists[types.NamespacedName{Namespace: a.Namespace, Name: a.Name}] = true
+	}
+	secrets := &metav1.PartialObjectMetadataList{}
+	secrets.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("SecretList"))
+	if err := r.reader().List(ctx, secrets, client.HasLabels{addon.LabelAddon}); err != nil {
+		return fmt.Errorf("list values secrets: %w", err)
+	}
+	now := r.now()
+	for i := range secrets.Items {
+		s := &secrets.Items[i]
+		name := s.Labels[addon.LabelAddon]
+		if name == "" || !addon.IsValuesSecretName(name, s.Name) || s.Labels[addon.LabelKeep] == "true" ||
+			exists[types.NamespacedName{Namespace: s.Namespace, Name: name}] ||
+			now.Sub(s.CreationTimestamp.Time) < orphanValuesGrace || ownedByOtherThanAddons(s) {
+			continue
+		}
+		if err := r.deleteSecret(ctx, s); err != nil {
+			return err
+		}
+		log.FromContext(ctx).Info("deleted an orphaned values secret", "namespace", s.Namespace, "secret", s.Name)
+	}
+	return nil
+}
+
+// valuesSweep runs SweepOrphanedValues now and every valuesSweepInterval.
+func (r *ZaentrumAddonReconciler) valuesSweep() manager.Runnable {
+	return manager.RunnableFunc(func(ctx context.Context) error {
+		logger := ctrl.Log.WithName("addons")
+		for {
+			if err := r.SweepOrphanedValues(ctx); err != nil {
+				logger.Info("orphaned values sweep failed; trying again next interval", "error", err.Error())
+			}
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(valuesSweepInterval):
+			}
+		}
+	})
+}
+
+// deleteSecret deletes the listed Secret, and only that very object (UID
+// precondition). One already gone is fine.
+func (r *ZaentrumAddonReconciler) deleteSecret(ctx context.Context, s *metav1.PartialObjectMetadata) error {
+	s.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
+	uid := s.UID
+	if err := r.Delete(ctx, s, client.Preconditions{UID: &uid}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete values secret %s/%s: %w", s.Namespace, s.Name, err)
+	}
+	return nil
+}
+
+// ownedOnlyBy reports whether an object has no owner references, or only ones
+// to the given owner.
+func ownedOnlyBy(o metav1.Object, uid types.UID) bool {
+	for _, ref := range o.GetOwnerReferences() {
+		if ref.UID != uid {
+			return false
+		}
+	}
+	return true
+}
+
+// ownedByOtherThanAddons reports whether an object has an owner that is not a
+// ZaentrumAddon — something else claims it.
+func ownedByOtherThanAddons(o metav1.Object) bool {
+	for _, ref := range o.GetOwnerReferences() {
+		if ref.Kind != "ZaentrumAddon" || !strings.HasPrefix(ref.APIVersion, zaentrumv1alpha1.GroupVersion.Group+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// sooner is the earlier of two requeue delays, where 0 means none.
+func sooner(a, b time.Duration) time.Duration {
+	switch {
+	case a == 0:
+		return b
+	case b == 0 || a < b:
+		return a
+	default:
+		return b
+	}
+}
+
+func (r *ZaentrumAddonReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon) (ctrl.Result, error) {
@@ -947,8 +1119,11 @@ func AddonControllerWhenServed(mgr ctrl.Manager, r *ZaentrumAddonReconciler) man
 			if err == nil {
 				if err := r.SetupWithManager(mgr); err != nil {
 					logger.Error(err, "unable to start the addon controller")
-				} else {
-					logger.Info("addon controller started")
+					return nil
+				}
+				logger.Info("addon controller started")
+				if err := mgr.Add(r.valuesSweep()); err != nil {
+					logger.Error(err, "unable to start the orphaned values sweep")
 				}
 				return nil
 			}

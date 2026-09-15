@@ -223,3 +223,123 @@ func TestAddonRemovedKeepErrorRetries(t *testing.T) {
 	assert.ErrorContains(t, reconcileRemoval(t, r), "keep values secret zaentrum-addon-example-values-x7k2p: api unavailable")
 	assert.False(t, addonGone(t, c), "the finalizer holds until the values are kept")
 }
+
+// On reconcile, exactly the addon's unreferenced values Secrets past the grace
+// are collected; everything else stays.
+func TestCollectValuesSecrets(t *testing.T) {
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	yes := true
+	a := testAddon(true) // valuesFrom -> zaentrum-addon-example-values (testValuesSecret)
+	referenced := testValuesSecret()
+	referenced.CreationTimestamp = metav1.NewTime(now.Add(-30 * time.Minute))
+
+	gone := []*corev1.Secret{
+		valuesSecret("zaentrum-addon-example-values-old", "example", "addon-uid", 20*time.Minute, now),
+		valuesSecret("zaentrum-addon-example-values-unowned", "example", "", 11*time.Minute, now),
+	}
+	young := valuesSecret("zaentrum-addon-example-values-young", "example", "", 2*time.Minute, now)
+	kept := valuesSecret("zaentrum-addon-example-values-kept", "example", "", time.Hour, now)
+	kept.Labels[addon.LabelKeep] = "true"
+	foreign := valuesSecret("zaentrum-addon-example-values-foreign", "example", "someone-else", time.Hour, now)
+	mixed := valuesSecret("zaentrum-addon-example-values-mixed", "example", "addon-uid", time.Hour, now)
+	mixed.OwnerReferences = append(mixed.OwnerReferences, metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: "x", UID: "cm-uid"})
+	generated := valuesSecret("zaentrum-addon-example-generated", "example", "", time.Hour, now)
+	generated.OwnerReferences = []metav1.OwnerReference{{
+		APIVersion: zaentrumv1alpha1.GroupVersion.String(), Kind: "ZaentrumAddon", Name: "example", UID: "addon-uid", Controller: &yes,
+	}}
+	chartSecret := valuesSecret("worker", "example", "addon-uid", time.Hour, now)
+	mislabelled := valuesSecret("zaentrum-addon-example-values-mislabelled", "other", "", time.Hour, now)
+	otherAddon := valuesSecret("zaentrum-addon-example-values-x", "example-values", "", time.Hour, now) // addon "example-values" extends the prefix
+
+	objs := []client.Object{testPlatform(), a, referenced, young, kept, foreign, mixed, generated, chartSecret, mislabelled, otherAddon}
+	for _, s := range gone {
+		objs = append(objs, s)
+	}
+	r, c := newAddonReconciler(t, exampleCharts(t), objs...)
+	r.Now = func() time.Time { return now }
+
+	again, err := r.collectValuesSecrets(context.Background(), a)
+	require.NoError(t, err)
+	assert.Equal(t, 8*time.Minute+time.Second, again, "look again when the young Secret leaves its grace")
+
+	for _, s := range gone {
+		_, ok := getSecret(t, c, s.Name)
+		assert.False(t, ok, "%s is collected", s.Name)
+	}
+	for _, s := range []*corev1.Secret{referenced, young, kept, foreign, mixed, generated, chartSecret, mislabelled, otherAddon} {
+		_, ok := getSecret(t, c, s.Name)
+		assert.True(t, ok, "%s stays", s.Name)
+	}
+}
+
+// Through a full reconcile, collection runs and a Secret still inside its grace
+// pulls the next reconcile forward.
+func TestReconcileRequeuesForValuesGrace(t *testing.T) {
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	young := valuesSecret("zaentrum-addon-example-values-young", "example", "", valuesSecretGrace-5*time.Second, now)
+	old := valuesSecret("zaentrum-addon-example-values-old", "example", "", time.Hour, now)
+	r, c := newAddonReconciler(t, exampleCharts(t), testPlatform(), testAddon(true), testValuesSecret(), young, old)
+	r.Now = func() time.Time { return now }
+
+	res, a := reconcileExample(t, r)
+	assert.Equal(t, zaentrumv1alpha1.AddonPlanned, a.Status.Phase)
+	assert.Equal(t, 6*time.Second, res.RequeueAfter, "sooner than the settled requeue")
+	_, ok := getSecret(t, c, old.Name)
+	assert.False(t, ok)
+	_, ok = getSecret(t, c, young.Name)
+	assert.True(t, ok)
+}
+
+// The sweep deletes values Secrets of addons that do not exist, past an hour
+// and not kept — per namespace — and nothing else.
+func TestSweepOrphanedValues(t *testing.T) {
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	inNS := func(s *corev1.Secret, ns string) *corev1.Secret { s.Namespace = ns; return s }
+
+	orphans := []*corev1.Secret{
+		valuesSecret("zaentrum-addon-gone-values-a", "gone", "", 2*time.Hour, now),
+		valuesSecret("zaentrum-addon-gone-values-b", "gone", "stale-addon-uid", 2*time.Hour, now), // owner was the deleted addon
+		inNS(valuesSecret("zaentrum-addon-example-values-y", "example", "", 2*time.Hour, now), "elsewhere"),
+	}
+	young := valuesSecret("zaentrum-addon-gone-values-young", "gone", "", 30*time.Minute, now)
+	kept := valuesSecret("zaentrum-addon-gone-values-kept", "gone", "", 2*time.Hour, now)
+	kept.Labels[addon.LabelKeep] = "true"
+	live := valuesSecret("zaentrum-addon-example-values-x", "example", "", 2*time.Hour, now) // its addon exists here
+	generated := valuesSecret("zaentrum-addon-gone-generated", "gone", "", 2*time.Hour, now)
+	foreign := valuesSecret("zaentrum-addon-gone-values-foreign", "gone", "", 2*time.Hour, now)
+	foreign.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "x", UID: "cm-uid"}}
+	mismatch := valuesSecret("zaentrum-addon-other-values-z", "gone", "", 2*time.Hour, now)
+	unlabelled := valuesSecret("zaentrum-addon-gone-values-nolabel", "gone", "", 2*time.Hour, now)
+	unlabelled.Labels = nil
+
+	objs := []client.Object{testPlatform(), testAddon(true), young, kept, live, generated, foreign, mismatch, unlabelled}
+	for _, s := range orphans {
+		objs = append(objs, s)
+	}
+	r, c := newAddonReconciler(t, exampleCharts(t), objs...)
+	r.Now = func() time.Time { return now }
+	require.NoError(t, r.SweepOrphanedValues(context.Background()))
+
+	get := func(s *corev1.Secret) bool {
+		err := c.Get(context.Background(), types.NamespacedName{Namespace: s.Namespace, Name: s.Name}, &corev1.Secret{})
+		if apierrors.IsNotFound(err) {
+			return false
+		}
+		require.NoError(t, err)
+		return true
+	}
+	for _, s := range orphans {
+		assert.False(t, get(s), "%s/%s is swept", s.Namespace, s.Name)
+	}
+	for _, s := range []*corev1.Secret{young, kept, live, generated, foreign, mismatch, unlabelled} {
+		assert.True(t, get(s), "%s stays", s.Name)
+	}
+}
+
+func TestSooner(t *testing.T) {
+	assert.Equal(t, time.Duration(0), sooner(0, 0))
+	assert.Equal(t, 3*time.Second, sooner(0, 3*time.Second))
+	assert.Equal(t, 3*time.Second, sooner(3*time.Second, 0))
+	assert.Equal(t, 2*time.Second, sooner(3*time.Second, 2*time.Second))
+	assert.Equal(t, 2*time.Second, sooner(2*time.Second, 3*time.Second))
+}
