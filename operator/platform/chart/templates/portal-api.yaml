@@ -143,9 +143,9 @@ spec:
     targetPort: 8080
 ---
 # The operator console's RBAC — NAMESPACE-SCOPED (no ClusterRole): the portal-api
-# only ever manages Deployments in its own namespace. Lets it list/scale/restart
-# app-tier Deployments (the service guards stateful backers) + read pods for
-# status + read the Zaentrum CR when an operator is present.
+# only ever acts in its own namespace. Lets it list/scale/restart app-tier
+# Deployments (the service guards stateful backers) + read pods for status +
+# read the Zaentrum CR when an operator is present + manage addon charts.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -178,6 +178,16 @@ rules:
   - apiGroups: ["zaentrum.io"]
     resources: ["zaentrums"]
     verbs: ["get", "list", "patch"]
+  # Addon charts: the settings wizard plans, installs, upgrades and removes
+  # ZaentrumAddon resources; the operator does the installing.
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrumaddons"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # An addon's secret inputs: portal-api writes the values Secret but never
+  # reads a secret value back — deliberately no get/list/watch.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

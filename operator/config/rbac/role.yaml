@@ -13,11 +13,26 @@ rules:
   - apiGroups: ["zaentrum.io"]
     resources: ["zaentrums/finalizers"]
     verbs: ["update"]
+  # ZaentrumAddon — addon Helm charts the operator installs next to the
+  # platform. The full verb set is also what the operator grants portal-api
+  # (the settings wizard creates, updates and removes addons), and a grantor
+  # must hold what it grants. finalizers/update lets applied objects carry a
+  # blocking owner reference to their addon.
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrumaddons"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrumaddons/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["zaentrum.io"]
+    resources: ["zaentrumaddons/finalizers"]
+    verbs: ["update"]
   # Namespace (cluster-scoped) — created/owned by the operator.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
-  # Core namespaced kinds rendered by the templates.
+  # Core namespaced kinds rendered by the templates and by addon charts.
+  # Addons may render exactly these kinds plus Deployments and Jobs.
   - apiGroups: [""]
     resources:
       - configmaps
@@ -53,11 +68,12 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Held ONLY so the operator may GRANT them to the portal-api Role (operator
+  # Held so the operator may GRANT them to the portal-api Role (operator
   # console: list/scale/restart deployments, read pod status + logs). The RBAC
   # escalation check compares the granted rules against the grantor's on Role
   # CREATE — a fresh namespace fails without these even though the demo (whose
-  # Role pre-existed with identical rules) reconciles fine.
+  # Role pre-existed with identical rules) reconciles fine. The addon
+  # controller also lists pods, to say why an addon component is not ready.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
