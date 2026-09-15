@@ -74,6 +74,8 @@ type ZaentrumAddonReconciler struct {
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrumaddons/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrumaddons/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;patch;delete
 
 // Reconcile plans the addon — fetch, values, render, guardrails — and, unless
 // it is suspended, applies the plan with server-side apply, prunes what the
@@ -84,8 +86,17 @@ func (r *ZaentrumAddonReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !a.DeletionTimestamp.IsZero() {
-		// Owner references garbage-collect everything the addon applied.
-		return ctrl.Result{}, nil
+		return r.finalize(ctx, &a)
+	}
+	if !controllerutil.ContainsFinalizer(&a, addon.FinalizerValues) {
+		// First, so an addon removed right after it was created still gets the
+		// chance to keep its values. The patch refreshes a's resourceVersion for
+		// the status update below.
+		base := a.DeepCopy()
+		controllerutil.AddFinalizer(&a, addon.FinalizerValues)
+		if err := r.Patch(ctx, &a, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
+		}
 	}
 
 	result, err := r.reconcileAddon(ctx, &a)
@@ -268,6 +279,98 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 	logger.Info("reconciled addon", "phase", a.Status.Phase, "chart", plan.Chart.Name, "version", plan.Chart.Version,
 		"objects", len(rendered.Objects))
 	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// finalize lets a ZaentrumAddon being removed go. Owner references take care of
+// what the addon applied and the values Secrets it adopted; the finalizer only
+// exists so an addon removed with zaentrum.io/keep-values: "true" can hand its
+// values and generated Secrets back first. It never holds a removal for good:
+// with the platform gone or the namespace terminating it just lets go.
+func (r *ZaentrumAddonReconciler) finalize(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(a, addon.FinalizerValues) {
+		return ctrl.Result{}, nil
+	}
+	logger := log.FromContext(ctx)
+	if a.Annotations[addon.AnnotationKeepValues] == "true" {
+		reason, err := r.cannotKeepValues(ctx, a)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if reason != "" {
+			logger.Info("addon removed without keeping its values: "+reason, "addon", a.Name)
+		} else if err := r.keepValues(ctx, a); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	base := a.DeepCopy()
+	controllerutil.RemoveFinalizer(a, addon.FinalizerValues)
+	if err := r.Patch(ctx, a, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	return ctrl.Result{}, nil
+}
+
+// cannotKeepValues says why an addon's values cannot be kept on removal — its
+// namespace is going away (and everything in it), or there is no platform left
+// — or returns "" when they can.
+func (r *ZaentrumAddonReconciler) cannotKeepValues(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon) (string, error) {
+	var ns corev1.Namespace
+	switch err := r.reader().Get(ctx, types.NamespacedName{Name: a.Namespace}, &ns); {
+	case apierrors.IsNotFound(err):
+		return "the namespace is gone", nil
+	case err != nil:
+		return "", fmt.Errorf("read namespace: %w", err)
+	case !ns.DeletionTimestamp.IsZero() || ns.Status.Phase == corev1.NamespaceTerminating:
+		return "the namespace is terminating", nil
+	}
+	var platforms zaentrumv1alpha1.ZaentrumList
+	if err := r.List(ctx, &platforms, client.InNamespace(a.Namespace)); err != nil {
+		return "", fmt.Errorf("list platforms: %w", err)
+	}
+	if len(platforms.Items) == 0 {
+		return "no platform in this namespace", nil
+	}
+	return "", nil
+}
+
+// keepValues hands an addon's values and generated Secrets back before the
+// addon goes: this addon's owner references come off, so garbage collection
+// leaves them, and zaentrum.io/keep=true makes the operator's own collection
+// skip them. A Secret that disappeared meanwhile has nothing left to keep.
+// Only metadata is read and written — never a secret value.
+func (r *ZaentrumAddonReconciler) keepValues(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon) error {
+	logger := log.FromContext(ctx)
+	secrets := &metav1.PartialObjectMetadataList{}
+	secrets.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("SecretList"))
+	if err := r.reader().List(ctx, secrets, client.InNamespace(a.Namespace), client.MatchingLabels{addon.LabelAddon: a.Name}); err != nil {
+		return fmt.Errorf("list values secrets: %w", err)
+	}
+	for i := range secrets.Items {
+		s := &secrets.Items[i]
+		if !addon.IsValuesSecretName(a.Name, s.Name) && s.Name != addon.GeneratedSecretName(a.Name) {
+			continue
+		}
+		s.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
+		base := s.DeepCopy()
+		var owners []metav1.OwnerReference
+		for _, ref := range s.OwnerReferences {
+			if ref.UID != a.UID {
+				owners = append(owners, ref)
+			}
+		}
+		s.OwnerReferences = owners
+		if s.Labels == nil {
+			s.Labels = map[string]string{}
+		}
+		s.Labels[addon.LabelKeep] = "true"
+		switch err := r.Patch(ctx, s, client.MergeFrom(base)); {
+		case apierrors.IsNotFound(err):
+			logger.Info("values secret disappeared before it could be kept", "addon", a.Name, "secret", s.Name)
+		case err != nil:
+			return fmt.Errorf("keep values secret %s: %w", s.Name, err)
+		}
+	}
+	return nil
 }
 
 func (r *ZaentrumAddonReconciler) reader() client.Reader {

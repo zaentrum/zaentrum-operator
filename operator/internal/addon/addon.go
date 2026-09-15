@@ -57,6 +57,14 @@ const (
 	// squatting another addon's values Secret name would feed that addon.
 	ReservedNamePrefix = "zaentrum-addon-"
 
+	// FinalizerValues holds a ZaentrumAddon's removal until the operator has
+	// handed its values Secrets back, when it was asked to keep them.
+	FinalizerValues = "zaentrum.io/addon-values"
+	// AnnotationKeepValues set to "true" on a ZaentrumAddon keeps its values and
+	// generated Secrets when it is removed: this addon's owner references come
+	// off and they are labelled zaentrum.io/keep=true.
+	AnnotationKeepValues = "zaentrum.io/keep-values"
+
 	// MaxNameLength bounds an addon name, which is also its release name.
 	MaxNameLength = 40
 )
@@ -72,6 +80,14 @@ func GeneratedSecretName(addon string) string {
 // (the portal writes <prefix>values-…, the operator <prefix>generated).
 func ValuesObjectPrefix(addon string) string {
 	return ReservedNamePrefix + addon + "-"
+}
+
+// IsValuesSecretName reports whether name is one of an addon's values Secrets:
+// zaentrum-addon-<addon>-values, or one the portal created from the
+// generateName zaentrum-addon-<addon>-values-. Always pair it with the
+// zaentrum.io/addon label: another addon's name can extend this prefix.
+func IsValuesSecretName(addon, name string) bool {
+	return strings.HasPrefix(name, ReservedNamePrefix+addon+"-values")
 }
 
 // OwnsValuesObject reports whether a Secret/ConfigMap named name with labels
