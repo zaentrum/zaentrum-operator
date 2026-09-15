@@ -179,10 +179,12 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 	if rendered != nil {
 		plan.Objects, plan.Workloads = addon.Summarize(rendered.Objects)
 		plan.Violations = append(plan.Violations, addon.Violations(rendered.Objects, addon.GuardInput{
-			Namespace:  a.Namespace,
-			MediaClaim: platformString(platform, "media", "claimName"),
-			Primary:    chrt.Metadata.Annotations[addon.ChartAnnotationPrimary],
-			Reserved:   reserved,
+			Namespace:       a.Namespace,
+			MediaClaim:      platformString(platform, "media", "claimName"),
+			Primary:         chrt.Metadata.Annotations[addon.ChartAnnotationPrimary],
+			Reserved:        reserved,
+			EventsTLSSecret: platformString(platform, "events", "tlsSecret"),
+			PullSecrets:     platformStrings(platform, "imagePullSecrets"),
 		})...)
 		collisions, err := addon.Collisions(rendered.Objects, a.UID, r.ownerLookup(ctx, a.Namespace))
 		if err != nil {
@@ -362,6 +364,19 @@ func platformString(platform map[string]interface{}, keys ...string) string {
 	return s
 }
 
+// platformStrings reads a string list from the reserved platform values.
+func platformStrings(platform map[string]interface{}, keys ...string) []string {
+	v, _ := addon.GetPath(platform, keys)
+	list, _ := v.([]interface{})
+	out := make([]string, 0, len(list))
+	for _, e := range list {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // findPlatform returns the one Zaentrum in the namespace, or why there is not
 // exactly one.
 func (r *ZaentrumAddonReconciler) findPlatform(ctx context.Context, namespace string) (*zaentrumv1alpha1.Zaentrum, string, error) {
@@ -424,13 +439,29 @@ func liveObjects(objs []*unstructured.Unstructured) []addon.LiveObject {
 	return out
 }
 
-// valuesSources reads the valuesFrom objects, each once, and returns them with
-// the sources built from them.
+// valuesReadDenied is the reason a valuesFrom object outside the addon's own
+// values namespace is refused.
+const valuesReadDenied = "only the addon's own zaentrum-addon-<name>-* Secrets/ConfigMaps labelled zaentrum.io/addon=<name> may be referenced"
+
+// valuesSources reads the valuesFrom objects, each once, and returns the sources
+// plus the objects it actually adopted. A ref that names anything but the
+// addon's own values objects (name prefix + label) is refused WITHOUT reading it
+// — the operator is a cluster-wide secret reader, and this stops an addon from
+// making it pipe a platform secret into chart values (confused deputy).
 func (r *ZaentrumAddonReconciler) valuesSources(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon) ([]addon.ValuesSource, []client.Object, error) {
 	read := map[string]client.Object{}
+	rejected := map[string]bool{}
 	var objects []client.Object
 	var sources []addon.ValuesSource
 	for _, ref := range a.Spec.ValuesFrom {
+		src := addon.ValuesSource{Ref: ref}
+		// The name prefix is checked before any read, so a foreign object is
+		// never fetched.
+		if !strings.HasPrefix(ref.Name, addon.ValuesObjectPrefix(a.Name)) {
+			src.Reject = valuesReadDenied
+			sources = append(sources, src)
+			continue
+		}
 		key := ref.Kind + "/" + ref.Name
 		obj, done := read[key]
 		if !done {
@@ -447,13 +478,21 @@ func (r *ZaentrumAddonReconciler) valuesSources(ctx context.Context, a *zaentrum
 					obj = nil
 				case err != nil:
 					return nil, nil, fmt.Errorf("read valuesFrom %s: %w", key, err)
+				case !addon.OwnsValuesObject(a.Name, obj.GetName(), obj.GetLabels()):
+					// Right name, wrong (or missing) label: still not the addon's.
+					rejected[key] = true
+					obj = nil
 				default:
 					objects = append(objects, obj)
 				}
 			}
 			read[key] = obj
 		}
-		src := addon.ValuesSource{Ref: ref}
+		if rejected[key] {
+			src.Reject = valuesReadDenied
+			sources = append(sources, src)
+			continue
+		}
 		switch o := obj.(type) {
 		case *corev1.Secret:
 			src.Found, src.Data = true, o.Data
@@ -533,7 +572,10 @@ func (r *ZaentrumAddonReconciler) generatedValues(ctx context.Context, a *zaentr
 func (r *ZaentrumAddonReconciler) adoptValues(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon, objects []client.Object) error {
 	for _, obj := range objects {
 		labels := obj.GetLabels()
-		if labels[addon.LabelAddon] != a.Name {
+		// Never take ownership of anything but the addon's own values objects,
+		// so a foreign object referenced in valuesFrom can never be
+		// garbage-collected with the addon.
+		if !addon.OwnsValuesObject(a.Name, obj.GetName(), labels) {
 			continue
 		}
 		keep := labels[addon.LabelKeep] == "true"
