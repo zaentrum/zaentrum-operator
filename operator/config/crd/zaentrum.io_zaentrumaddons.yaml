@@ -84,14 +84,6 @@ spec:
                 required:
                 - ref
                 type: object
-              inputsRevision:
-                description: |-
-                  InputsRevision changes whenever the secret inputs this addon reads are
-                  written, so the plan is recomputed; the portal sets a random token on
-                  every secret write. It carries no meaning to the operator beyond bumping
-                  metadata.generation, so observedGeneration tells clients the plan is fresh.
-                maxLength: 64
-                type: string
               suspend:
                 description: |-
                   Suspend makes the addon plan-only: the chart is fetched, rendered and

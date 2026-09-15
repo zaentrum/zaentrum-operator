@@ -92,14 +92,6 @@ type ZaentrumAddonSpec struct {
 	// validated and status.plan is reported, but nothing is applied or pruned.
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
-
-	// InputsRevision changes whenever the secret inputs this addon reads are
-	// written, so the plan is recomputed; the portal sets a random token on
-	// every secret write. It carries no meaning to the operator beyond bumping
-	// metadata.generation, so observedGeneration tells clients the plan is fresh.
-	// +kubebuilder:validation:MaxLength=64
-	// +optional
-	InputsRevision string `json:"inputsRevision,omitempty"`
 }
 
 // AddonChartInfo describes a fetched chart.
