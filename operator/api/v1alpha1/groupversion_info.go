@@ -21,5 +21,5 @@ var (
 )
 
 func init() {
-	SchemeBuilder.Register(&Zaentrum{}, &ZaentrumList{})
+	SchemeBuilder.Register(&Zaentrum{}, &ZaentrumList{}, &ZaentrumAddon{}, &ZaentrumAddonList{})
 }

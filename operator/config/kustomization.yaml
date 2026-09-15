@@ -19,6 +19,7 @@ kind: Kustomization
 
 resources:
   - crd/zaentrum.io_zaentrums.yaml
+  - crd/zaentrum.io_zaentrumaddons.yaml
   - rbac/service_account.yaml
   - rbac/role.yaml
   - rbac/role_binding.yaml
