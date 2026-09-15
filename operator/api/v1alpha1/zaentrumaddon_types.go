@@ -5,10 +5,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Addon lifecycle phases reported in ZaentrumAddonStatus.Phase.
+// Addon lifecycle phases reported in ZaentrumAddonStatus.Phase. An empty phase
+// (no status yet) means pending — not reconciled; the portal and zae render it
+// as such, so the operator never writes a "Pending" string of its own.
 const (
-	// AddonPending: not reconciled yet.
-	AddonPending = "Pending"
 	// AddonPlanned: suspended (plan only) and the plan is installable.
 	AddonPlanned = "Planned"
 	// AddonPlanFailed: suspended and the chart cannot be installed as planned.
@@ -92,6 +92,14 @@ type ZaentrumAddonSpec struct {
 	// validated and status.plan is reported, but nothing is applied or pruned.
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`
+
+	// InputsRevision changes whenever the secret inputs this addon reads are
+	// written, so the plan is recomputed; the portal sets a random token on
+	// every secret write. It carries no meaning to the operator beyond bumping
+	// metadata.generation, so observedGeneration tells clients the plan is fresh.
+	// +kubebuilder:validation:MaxLength=64
+	// +optional
+	InputsRevision string `json:"inputsRevision,omitempty"`
 }
 
 // AddonChartInfo describes a fetched chart.
@@ -188,7 +196,8 @@ type AddonComponentStatus struct {
 
 // ZaentrumAddonStatus reports the observed state of an addon.
 type ZaentrumAddonStatus struct {
-	// Phase is Pending, Planned, PlanFailed, Installing, Ready, Degraded or Failed.
+	// Phase is Planned, PlanFailed, Installing, Ready, Degraded or Failed. Empty
+	// means pending (not reconciled yet).
 	// +optional
 	Phase string `json:"phase,omitempty"`
 

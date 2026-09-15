@@ -127,3 +127,17 @@ func TestAddonInstallDefaultsAutomountFalse(t *testing.T) {
 	require.NotNil(t, dep.Spec.Template.Spec.AutomountServiceAccountToken)
 	assert.False(t, *dep.Spec.Template.Spec.AutomountServiceAccountToken)
 }
+
+// inputsRevision needs no reconciler handling beyond being part of the spec: a
+// change bumps metadata.generation, and the plan is recomputed so
+// observedGeneration reports it fresh. Here it simply rides through a plan.
+func TestAddonInputsRevision(t *testing.T) {
+	a := testAddon(true)
+	a.Generation = 3
+	a.Spec.InputsRevision = "rev-abc123"
+	r, _ := newAddonReconciler(t, exampleCharts(t), testPlatform(), a, testValuesSecret())
+	_, got := reconcileExample(t, r)
+	assert.Equal(t, zaentrumv1alpha1.AddonPlanned, got.Status.Phase, got.Status.Message)
+	assert.EqualValues(t, 3, got.Status.ObservedGeneration, "the plan is for the current generation")
+	assert.Equal(t, "rev-abc123", got.Spec.InputsRevision, "the field round-trips")
+}

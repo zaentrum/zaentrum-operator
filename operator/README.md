@@ -69,6 +69,43 @@ realm import `ConfigMap`, and the CoreDNS-friendly
 stored and surfaced into `status.availableUpdate`; the tag-discovery + image
 bump logic is marked `TODO(S2)` in the reconciler.
 
+## Addons (`ZaentrumAddon`)
+
+A second, isolated reconciler installs a standard Helm chart next to the
+platform, one namespaced `ZaentrumAddon` per addon (`internal/addon`,
+`internal/controller/zaentrumaddon_controller.go`). The chart is fetched,
+rendered in memory, checked against guardrails and applied with server-side
+apply as field manager `zaentrum-addon`; an addon error never touches the
+platform phase.
+
+### Trust boundary
+
+An addon chart is **untrusted input**. The operator, not the chart, decides what
+may run:
+
+- Only a small set of namespaced kinds; pods run non-root, no host namespaces,
+  no privilege escalation, no control-plane placement, no escape-hatch security
+  context, and no ServiceAccount token unless the chart opts in.
+- A rendered object may only reference the platform Secrets/ConfigMaps the chart
+  itself renders, plus the ones the platform hands the addon in the reserved
+  `zaentrum` values (events TLS secret, image pull secrets). Secret `type`
+  `kubernetes.io/service-account-token` and the `service-account.name/uid`
+  annotations are refused, so a chart cannot mint a platform SA's token.
+- `valuesFrom` may read only the addon's **own** values objects
+  (`zaentrum-addon-<name>-*` labelled `zaentrum.io/addon=<name>`), so the
+  operator's cluster-wide read access cannot be turned into a confused deputy.
+- Render errors report only a location, never the chart-controlled message body,
+  so a secret input cannot be echoed back through `status`.
+- Chart fetch (https + OCI, redirects included) refuses loopback, link-local,
+  the cloud-metadata addresses and the in-cluster API server (SSRF), checked at
+  the dialer so DNS rebinding cannot bypass it.
+
+The chart-rendered `portal-api` Role is granted `secrets` **create/patch/delete
+only** (never get/list/watch): the settings wizard writes an addon's secret
+inputs but never reads a secret value back. This is not a new trust level —
+`portal-api` already patches Deployments — so it is documented here rather than
+removed.
+
 ## Build / test
 
 ```sh
