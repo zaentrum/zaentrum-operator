@@ -1,0 +1,11 @@
+apiVersion: v2
+name: example
+description: A neutral example addon with one worker component.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+annotations:
+  zaentrum.io/addon: "true"
+  zaentrum.io/primary: worker
+  zaentrum.io/title: Example
+  zaentrum.io/description: The example addon the operator tests install.

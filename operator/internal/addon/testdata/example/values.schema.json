@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["auth"],
+  "properties": {
+    "image": {
+      "type": "string",
+      "title": "Worker image"
+    },
+    "replicas": {
+      "type": "integer",
+      "title": "Replicas",
+      "minimum": 1,
+      "default": 1
+    },
+    "greeting": {
+      "type": "string",
+      "title": "Greeting",
+      "enum": ["hello", "hi"],
+      "default": "hello"
+    },
+    "auth": {
+      "type": "object",
+      "title": "Authentication",
+      "required": ["token", "signingKey"],
+      "properties": {
+        "token": {
+          "type": "string",
+          "title": "API token",
+          "description": "Secret input: stored only in the values Secret.",
+          "writeOnly": true,
+          "minLength": 1
+        },
+        "signingKey": {
+          "type": "string",
+          "title": "Signing key",
+          "x-zaentrum-generate": "random-base64-32",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
