@@ -131,6 +131,6 @@ func TestPortalAPIRoleManagesAddons(t *testing.T) {
 	require.NotNil(t, portal)
 	assert.Equal(t, []string{"create", "delete", "get", "list", "patch", "update", "watch"},
 		verbsFor(*portal, "zaentrum.io", "zaentrumaddons"))
-	assert.Equal(t, []string{"create", "delete", "patch"}, verbsFor(*portal, "", "secrets"),
-		"no get/list/watch on secrets")
+	assert.Equal(t, []string{"create"}, verbsFor(*portal, "", "secrets"),
+		"create only: no get/list/watch, and no patch/delete")
 }

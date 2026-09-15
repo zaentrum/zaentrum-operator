@@ -183,11 +183,12 @@ rules:
   - apiGroups: ["zaentrum.io"]
     resources: ["zaentrumaddons"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # An addon's secret inputs: portal-api writes the values Secret but never
-  # reads a secret value back — deliberately no get/list/watch.
+  # An addon's secret inputs: each write creates a new immutable values Secret
+  # (and repoints the addon at it). Create only — portal-api never reads,
+  # patches or deletes a Secret; the operator collects the ones left behind.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "patch", "delete"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

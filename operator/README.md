@@ -94,17 +94,29 @@ may run:
 - `valuesFrom` may read only the addon's **own** values objects
   (`zaentrum-addon-<name>-*` labelled `zaentrum.io/addon=<name>`), so the
   operator's cluster-wide read access cannot be turned into a confused deputy.
+  A chart may render nothing named `zaentrum-addon-*`, so it cannot squat any
+  addon's values or generated Secret names.
 - Render errors report only a location, never the chart-controlled message body,
   so a secret input cannot be echoed back through `status`.
 - Chart fetch (https + OCI, redirects included) refuses loopback, link-local,
   the cloud-metadata addresses and the in-cluster API server (SSRF), checked at
   the dialer so DNS rebinding cannot bypass it.
 
-The chart-rendered `portal-api` Role is granted `secrets` **create/patch/delete
-only** (never get/list/watch): the settings wizard writes an addon's secret
-inputs but never reads a secret value back. This is not a new trust level —
-`portal-api` already patches Deployments — so it is documented here rather than
-removed.
+The chart-rendered `portal-api` Role is granted `secrets` **create only**. Each
+secret write creates a new immutable Secret (`generateName`
+`zaentrum-addon-<addon>-values-`, labelled `zaentrum.io/addon=<addon>`) and
+repoints the addon's `valuesFrom` at it; `portal-api` never reads, patches or
+deletes a Secret. The operator collects values Secrets nothing references any
+more (after a 10-minute grace for the create-then-update) and sweeps those of
+addons that no longer exist (after an hour). `portal-api` still holds
+`deployments` patch, so the namespace remains the trust boundary.
+
+Removing an addon with the annotation `zaentrum.io/keep-values: "true"` keeps its
+values and generated Secrets (the operator's `zaentrum.io/addon-values`
+finalizer strips their owner references and labels them `zaentrum.io/keep=true`).
+Keep relies on the default (background) deletion propagation. If the operator is
+no longer running, that finalizer has to be removed by hand for a removal to
+finish.
 
 ## Build / test
 
