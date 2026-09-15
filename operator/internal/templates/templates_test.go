@@ -81,7 +81,7 @@ func TestRenderSelfHost(t *testing.T) {
 // demoCR mirrors the demo profile (values-demo.yaml).
 func demoCR(ns string) *zaentrumv1alpha1.Zaentrum {
 	z := base(ns)
-	z.Spec.Hostname = "zaentrum.demo.nalet.cloud"  // neutrality-guard:allow
+	z.Spec.Hostname = "zaentrum.demo.nalet.cloud" // neutrality-guard:allow
 	z.Spec.Identity.IssuerScheme = "https"
 	z.Spec.Identity.LoginTheme = "zaentrum"
 	z.Spec.Features.Pipeline = true
@@ -115,12 +115,12 @@ func TestRenderDemoProfile(t *testing.T) {
 	assert.True(t, hasHA, "chino-api carries split-horizon hostAliases")
 	blob := fmt.Sprintf("%v", dep.Object)
 	assert.Contains(t, blob,
-		"https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum", "https issuer in env")  // neutrality-guard:allow
+		"https://zaentrum.demo.nalet.cloud/auth/realms/zaentrum", "https issuer in env") // neutrality-guard:allow
 	// The extension seam is neutral core: chino-api points at portal-api, but the
 	// rendered core carries NO acquisition/addon vocabulary.
 	assert.Contains(t, blob, "PORTAL_BASE_URL", "chino-api wired to the portal registry")
 	all := fmt.Sprintf("%v", objs)
-	for _, forbidden := range []string{"acquire", "download-gateway", "qbittorrent", "wanted"} {  // neutrality-guard:allow
+	for _, forbidden := range []string{"acquire", "download-gateway", "qbittorrent", "wanted"} { // neutrality-guard:allow
 		assert.NotContains(t, strings.ToLower(all), forbidden,
 			"core render must not mention acquisition (%s)", forbidden)
 	}
