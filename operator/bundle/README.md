@@ -27,7 +27,8 @@ operator/bundle/
 ├── bundle.Dockerfile     # builds the registry+v1 bundle image (scratch + labels)
 ├── manifests/            # the installable payload
 │   ├── zaentrum-operator.clusterserviceversion.yaml   # CSV (install spec + RBAC)
-│   └── zaentrum.io_zaentrums.yaml                         # owned Zaentrum CRD
+│   ├── zaentrum.io_zaentrums.yaml                         # owned Zaentrum CRD
+│   └── zaentrum.io_zaentrumaddons.yaml                    # owned ZaentrumAddon CRD
 ├── metadata/
 │   └── annotations.yaml  # package=zaentrum-operator, channel=stable
 └── README.md             # this file
@@ -39,8 +40,8 @@ The CSV's install spec is derived directly from the operator's own manifests:
 - the **clusterPermissions** are the rules from `operator/config/rbac/role.yaml`
   (plus leader-election leases/events), bound to the `serviceAccountName` from
   `operator/config/rbac/service_account.yaml`,
-- the owned **CRD** (`zaentrums.zaentrum.io`) is copied from
-  `operator/config/crd/zaentrum.io_zaentrums.yaml`.
+- the owned **CRDs** (`zaentrums.zaentrum.io`, `zaentrumaddons.zaentrum.io`) are
+  copied from `operator/config/crd/`.
 
 This is distinct from the operator **controller** image
 (`ghcr.io/zaentrum/operator`), which is built from `operator/Dockerfile` by

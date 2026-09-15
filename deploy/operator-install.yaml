@@ -11,6 +11,387 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
+  name: zaentrumaddons.zaentrum.io
+spec:
+  group: zaentrum.io
+  names:
+    kind: ZaentrumAddon
+    listKind: ZaentrumAddonList
+    plural: zaentrumaddons
+    shortNames:
+    - zaddon
+    singular: zaentrumaddon
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.chart.ref
+      name: Chart
+      type: string
+    - jsonPath: .spec.chart.version
+      name: Version
+      type: string
+    - jsonPath: .spec.suspend
+      name: Suspended
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ZaentrumAddon is the Schema for the zaentrumaddons API: one Helm chart the
+          operator installs next to the platform, in the platform's namespace.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ZaentrumAddonSpec defines the desired state of an addon: a Helm chart the
+              operator renders and applies next to the platform in the same namespace.
+            properties:
+              chart:
+                description: Chart is the Helm chart to install.
+                properties:
+                  digest:
+                    description: |-
+                      Digest pins the exact chart archive; a fetched archive that does not
+                      match is refused.
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  ref:
+                    description: |-
+                      Ref is an OCI chart reference (oci://registry/path/chart) or a direct
+                      https link to a chart archive (https://host/path/chart-1.2.0.tgz).
+                    pattern: ^(oci|https)://.+
+                    type: string
+                  version:
+                    description: |-
+                      Version is the chart version — the tag of an oci ref, where it is
+                      required. Ignored for direct https archives.
+                    type: string
+                required:
+                - ref
+                type: object
+              suspend:
+                description: |-
+                  Suspend makes the addon plan-only: the chart is fetched, rendered and
+                  validated and status.plan is reported, but nothing is applied or pruned.
+                type: boolean
+              values:
+                description: |-
+                  Values are non-secret chart values. Precedence: chart defaults <
+                  generated values < values < valuesFrom (in order) < the reserved
+                  zaentrum block the operator sets.
+                x-kubernetes-preserve-unknown-fields: true
+              valuesFrom:
+                description: ValuesFrom merges values from Secrets/ConfigMaps, applied
+                  in order.
+                items:
+                  description: |-
+                    AddonValuesReference merges chart values from a Secret or ConfigMap in the
+                    addon's namespace (HelmRelease valuesFrom semantics).
+                  properties:
+                    kind:
+                      description: Kind of the values object.
+                      enum:
+                      - Secret
+                      - ConfigMap
+                      type: string
+                    name:
+                      description: Name of the values object.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    optional:
+                      description: Optional tolerates a missing object or key.
+                      type: boolean
+                    targetPath:
+                      description: |-
+                        TargetPath sets this dotted values path (e.g. database.url) to the key's
+                        raw string value instead of merging a document.
+                      maxLength: 250
+                      type: string
+                    valuesKey:
+                      description: |-
+                        ValuesKey is the data key to read. Default "values.yaml": a whole
+                        YAML/JSON values document merged over the values before it.
+                      maxLength: 253
+                      pattern: ^[\-._a-zA-Z0-9]+$
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+            required:
+            - chart
+            type: object
+          status:
+            description: ZaentrumAddonStatus reports the observed state of an addon.
+            properties:
+              components:
+                description: Components reports the applied Deployments' live readiness.
+                items:
+                  description: AddonComponentStatus reports the live readiness of
+                    one applied workload.
+                  properties:
+                    desired:
+                      description: Desired is the desired replica count.
+                      format: int32
+                      type: integer
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    ready:
+                      description: Ready counts the ready replicas of the current
+                        rollout.
+                      format: int32
+                      type: integer
+                    reason:
+                      description: Reason says why the component is not ready (""
+                        when it is).
+                      type: string
+                  required:
+                  - desired
+                  - kind
+                  - name
+                  - ready
+                  type: object
+                type: array
+              conditions:
+                description: Conditions are Ready and Planned.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastAppliedChart:
+                description: LastAppliedChart is the chart currently applied (digest
+                  of its archive).
+                properties:
+                  digest:
+                    description: |-
+                      Digest pins the exact chart archive; a fetched archive that does not
+                      match is refused.
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  ref:
+                    description: |-
+                      Ref is an OCI chart reference (oci://registry/path/chart) or a direct
+                      https link to a chart archive (https://host/path/chart-1.2.0.tgz).
+                    pattern: ^(oci|https)://.+
+                    type: string
+                  version:
+                    description: |-
+                      Version is the chart version — the tag of an oci ref, where it is
+                      required. Ignored for direct https archives.
+                    type: string
+                required:
+                - ref
+                type: object
+              message:
+                description: Message is one human-readable line about the phase.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation the plan
+                  was made for.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is Pending, Planned, PlanFailed, Installing, Ready,
+                  Degraded or Failed.
+                type: string
+              plan:
+                description: Plan is refreshed on every reconcile, also while suspended.
+                properties:
+                  changes:
+                    description: Changes compares the plan with what is applied.
+                    properties:
+                      added:
+                        description: Added lists objects the plan would create ("Kind/name").
+                        items:
+                          type: string
+                        type: array
+                      images:
+                        description: 'Images lists container image changes ("Deployment/x:
+                          old → new").'
+                        items:
+                          type: string
+                        type: array
+                      removed:
+                        description: Removed lists applied objects the plan would
+                          prune ("Kind/name").
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  chart:
+                    description: Chart describes the fetched chart.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations are the Chart.yaml annotations (zaentrum.io/primary,
+                          …).
+                        type: object
+                      appVersion:
+                        type: string
+                      description:
+                        type: string
+                      digest:
+                        description: Digest is the sha256 of the chart archive.
+                        type: string
+                      name:
+                        type: string
+                      version:
+                        type: string
+                    type: object
+                  objects:
+                    description: Objects lists every rendered object.
+                    items:
+                      description: AddonObject names one rendered object.
+                      properties:
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                    type: array
+                  valuesErrors:
+                    description: ValuesErrors are schema and render errors, e.g. a
+                      missing required input.
+                    items:
+                      type: string
+                    type: array
+                  valuesSchema:
+                    description: ValuesSchema is the chart's raw values.schema.json
+                      ("" if none).
+                    type: string
+                  violations:
+                    description: Violations are guardrail refusals; any violation
+                      blocks the install.
+                    items:
+                      type: string
+                    type: array
+                  workloads:
+                    description: Workloads summarises the rendered Deployments and
+                      Jobs.
+                    items:
+                      description: AddonWorkload summarises a rendered workload for
+                        review before install.
+                      properties:
+                        images:
+                          description: Images are the container and init container
+                            images.
+                          items:
+                            type: string
+                          type: array
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        ports:
+                          description: Ports are the container ports.
+                          items:
+                            format: int32
+                            type: integer
+                          type: array
+                      required:
+                      - kind
+                      - name
+                      type: object
+                    type: array
+                required:
+                - chart
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
   name: zaentrums.zaentrum.io
 spec:
   group: zaentrum.io
@@ -488,6 +869,32 @@ rules:
   - zaentrum.io
   resources:
   - zaentrums/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - zaentrum.io
+  resources:
+  - zaentrumaddons
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - zaentrum.io
+  resources:
+  - zaentrumaddons/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - zaentrum.io
+  resources:
+  - zaentrumaddons/finalizers
   verbs:
   - update
 - apiGroups:

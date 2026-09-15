@@ -139,6 +139,42 @@ spec:
             description: A newer version available on the configured channel.
             x-descriptors:
               - urn:alm:descriptor:org.w3:link
+      # group/version/kind match operator/config/crd/zaentrum.io_zaentrumaddons.yaml.
+      - name: zaentrumaddons.zaentrum.io
+        kind: ZaentrumAddon
+        version: v1alpha1
+        displayName: Zaentrum Addon
+        description: >-
+          One addon: a Helm chart the operator renders, checks against the addon
+          guardrails and installs next to the platform, in the platform's
+          namespace. Suspended, it only reports the plan.
+        specDescriptors:
+          - path: chart.ref
+            displayName: Chart
+            description: OCI chart reference or https link to a chart archive.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
+          - path: chart.version
+            displayName: Chart Version
+            description: Chart version (the tag of an OCI reference).
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
+          - path: suspend
+            displayName: Suspend
+            description: Plan only; apply nothing.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+        statusDescriptors:
+          - path: phase
+            displayName: Phase
+            description: Addon lifecycle phase.
+            x-descriptors:
+              - urn:alm:descriptor:io.kubernetes.phase
+          - path: message
+            displayName: Message
+            description: One line about the phase.
+            x-descriptors:
+              - urn:alm:descriptor:text
   # ── Install strategy ───────────────────────────────────────────────────────
   # Deployment copied from operator/config/manager/manager.yaml.
   # clusterPermissions copied from operator/config/rbac/role.yaml, bound to the
@@ -158,6 +194,18 @@ spec:
               verbs: ["get", "update", "patch"]
             - apiGroups: ["zaentrum.io"]
               resources: ["zaentrums/finalizers"]
+              verbs: ["update"]
+            # ZaentrumAddon — addon charts installed next to the platform. The
+            # full verb set is also granted to portal-api, and a grantor must
+            # hold what it grants.
+            - apiGroups: ["zaentrum.io"]
+              resources: ["zaentrumaddons"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            - apiGroups: ["zaentrum.io"]
+              resources: ["zaentrumaddons/status"]
+              verbs: ["get", "update", "patch"]
+            - apiGroups: ["zaentrum.io"]
+              resources: ["zaentrumaddons/finalizers"]
               verbs: ["update"]
             # Namespace (cluster-scoped) — created/owned by the operator.
             - apiGroups: [""]
