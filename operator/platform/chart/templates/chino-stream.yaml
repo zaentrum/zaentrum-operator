@@ -130,7 +130,7 @@ spec:
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
-          claimName: media
+          claimName: {{ include "z.mediaClaimName" . }}
           readOnly: true
       - name: hls-cache
         emptyDir:

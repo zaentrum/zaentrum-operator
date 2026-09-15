@@ -5,7 +5,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: media
+  name: {{ include "z.mediaClaimName" . }}
   labels: { app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
 spec:
   accessModes: [ReadWriteMany]

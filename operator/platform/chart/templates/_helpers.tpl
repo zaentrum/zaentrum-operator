@@ -69,13 +69,19 @@ imagePullSecrets:
 {{/* z.topicPrefix — per-tenant Kafka topic namespace. */}}
 {{- define "z.topicPrefix" -}}{{ .Values.eventStreaming.topicPrefix | default "stube." }}{{- end -}}
 
+{{/* z.kafkaCertSecret — the secret holding the shared cluster's mTLS material
+     (user.crt/user.key/ca.crt), or empty: the bundled broker is plaintext. */}}
+{{- define "z.kafkaCertSecret" -}}
+{{- if eq .Values.eventStreaming.mode "external" -}}{{ .Values.eventStreaming.certSecret }}{{- end -}}
+{{- end -}}
+
 {{/* z.kafkaEnv — the common Kafka env block (brokers + prefix + cert dir). */}}
 {{- define "z.kafkaEnv" -}}
 - name: KAFKA_BROKERS
   value: {{ include "z.kafkaBrokers" . }}
 - name: KAFKA_TOPIC_PREFIX
   value: {{ include "z.topicPrefix" . | quote }}
-{{- if and (eq .Values.eventStreaming.mode "external") .Values.eventStreaming.certSecret }}
+{{- if include "z.kafkaCertSecret" . }}
 - name: KAFKA_CERT_DIR
   value: /etc/kafka-cert
 {{- end }}
@@ -85,16 +91,20 @@ imagePullSecrets:
      Emit bare list items (no leading newline); wrap call sites in `with` so
      bundled mode renders nothing (not even whitespace). */}}
 {{- define "z.kafkaCertMount" -}}
-{{- if and (eq .Values.eventStreaming.mode "external") .Values.eventStreaming.certSecret -}}
+{{- if include "z.kafkaCertSecret" . -}}
 - { name: kafka-cert, mountPath: /etc/kafka-cert, readOnly: true }
 {{- end -}}
 {{- end -}}
 {{- define "z.kafkaCertVolume" -}}
-{{- if and (eq .Values.eventStreaming.mode "external") .Values.eventStreaming.certSecret -}}
+{{- with include "z.kafkaCertSecret" . -}}
 - name: kafka-cert
-  secret: { secretName: {{ .Values.eventStreaming.certSecret | quote }} }
+  secret: { secretName: {{ . | quote }} }
 {{- end -}}
 {{- end -}}
+
+{{/* z.mediaClaimName — the PVC holding the media library; every media consumer
+     mounts it (addon charts read it as .Values.zaentrum.media.claimName). */}}
+{{- define "z.mediaClaimName" -}}media{{- end -}}
 
 {{/* z.workerOIDCExternalEnv — pipeline-worker client-credentials against an
      EXTERNAL realm: token endpoint derived from the issuer; client id+secret

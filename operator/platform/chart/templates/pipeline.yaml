@@ -123,7 +123,7 @@ spec:
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
-          claimName: media
+          claimName: {{ include "z.mediaClaimName" . }}
 {{- with include "z.kafkaCertVolume" . }}
 {{ . | indent 6 }}
 {{- end }}
@@ -253,7 +253,7 @@ spec:
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
-          claimName: media
+          claimName: {{ include "z.mediaClaimName" . }}
 {{- with include "z.kafkaCertVolume" . }}
 {{ . | indent 6 }}
 {{- end }}
@@ -400,7 +400,7 @@ spec:
       volumes:
       - name: katalog-data
         persistentVolumeClaim:
-          claimName: media
+          claimName: {{ include "z.mediaClaimName" . }}
 {{- with include "z.kafkaCertVolume" . }}
 {{ . | indent 6 }}
 {{- end }}

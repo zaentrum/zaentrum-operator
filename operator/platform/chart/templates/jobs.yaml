@@ -47,7 +47,7 @@ spec:
             - { name: katalog-data, mountPath: /var/lib/katalog }   # whole export, RW for seeding
       volumes:
         - name: katalog-data
-          persistentVolumeClaim: { claimName: media }
+          persistentVolumeClaim: { claimName: {{ include "z.mediaClaimName" . }} }
 ---
 # Post-deploy self-populate. Waits for katalog-manager-api readiness (its
 # deploy-schema initContainer has applied the CAP schema by then), mints a
@@ -117,7 +117,7 @@ spec:
             - { name: katalog-data, mountPath: /var/lib/katalog, readOnly: true }
       volumes:
         - name: katalog-data
-          persistentVolumeClaim: { claimName: media }
+          persistentVolumeClaim: { claimName: {{ include "z.mediaClaimName" . }} }
 ---
 # Post-scan enqueue Job (demo self-drive). Waits for the seed content to be present and
 # items to land, then seeds `pending` ItemProcessingSteps so the HTTP-poll workers
@@ -174,5 +174,5 @@ spec:
         - name: enqueue-sql
           configMap: { name: katalog-enqueue }
         - name: katalog-data
-          persistentVolumeClaim: { claimName: media }
+          persistentVolumeClaim: { claimName: {{ include "z.mediaClaimName" . }} }
 {{- end }}
