@@ -230,3 +230,28 @@ func joinViolations(v []string) string {
 	}
 	return out
 }
+
+// A chart may not render anything under zaentrum-addon-: not its own generated
+// or values names, and not another addon's — squatting those would feed that
+// addon values. A reserved name outside the prefix is still refused.
+func TestGuardReservedNamePrefix(t *testing.T) {
+	for _, m := range []string{
+		"apiVersion: v1\nkind: Secret\nmetadata: {name: zaentrum-addon-other-values-x7k2p}\ntype: Opaque\n",
+		"apiVersion: v1\nkind: Secret\nmetadata: {name: zaentrum-addon-other-generated}\n",
+		"apiVersion: v1\nkind: ConfigMap\nmetadata: {name: zaentrum-addon-example-values}\n",
+		"apiVersion: v1\nkind: Service\nmetadata: {name: zaentrum-addon-anything}\nspec: {ports: [{port: 80}]}\n",
+	} {
+		objs := objects(t, m)
+		want := Key(objs[0]) + ": name prefix zaentrum-addon- is reserved for addon values"
+		assert.Equal(t, []string{want}, guardPlatform(t, m), "exactly one violation, no duplicate reserved message")
+	}
+
+	// A reserved key without the prefix (a valuesFrom object named otherwise)
+	// keeps its own message.
+	v := Violations(objects(t, "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: legacy-values}\n"),
+		GuardInput{Namespace: testNamespace, Reserved: map[string]bool{"ConfigMap/legacy-values": true}})
+	assert.Equal(t, []string{"ConfigMap/legacy-values: name reserved for the addon's values"}, v)
+
+	// Names that merely contain the words are fine.
+	assert.Empty(t, guardPlatform(t, "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: worker-zaentrum-addon-notes}\n"))
+}

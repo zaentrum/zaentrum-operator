@@ -175,7 +175,10 @@ func Violations(objs []*unstructured.Unstructured, in GuardInput) []string {
 		if ns := o.GetNamespace(); ns != "" && ns != in.Namespace {
 			out = append(out, fmt.Sprintf("%s: namespace %s not allowed (addons install into %s)", id, ns, in.Namespace))
 		}
-		if in.Reserved[id] {
+		switch {
+		case strings.HasPrefix(o.GetName(), ReservedNamePrefix):
+			out = append(out, id+": name prefix "+ReservedNamePrefix+" is reserved for addon values")
+		case in.Reserved[id]:
 			out = append(out, id+": name reserved for the addon's values")
 		}
 		out = append(out, metadataViolations(o, id)...)

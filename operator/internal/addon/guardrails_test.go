@@ -52,7 +52,7 @@ func TestGuardrailRefusals(t *testing.T) {
 		"other namespace": {"apiVersion: v1\nkind: ConfigMap\nmetadata: {name: cfg, namespace: kube-system}\n",
 			"ConfigMap/cfg: namespace kube-system not allowed (addons install into zaentrum-beta)"},
 		"reserved name": {"apiVersion: v1\nkind: Secret\nmetadata: {name: zaentrum-addon-example-generated}\n",
-			"Secret/zaentrum-addon-example-generated: name reserved for the addon's values"},
+			"Secret/zaentrum-addon-example-generated: name prefix zaentrum-addon- is reserved for addon values"},
 		"duplicate": {"apiVersion: v1\nkind: ConfigMap\nmetadata: {name: cfg}\n---\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: cfg}\n",
 			"ConfigMap/cfg: rendered more than once"},
 		"no name": {"apiVersion: v1\nkind: ConfigMap\nmetadata: {}\n",

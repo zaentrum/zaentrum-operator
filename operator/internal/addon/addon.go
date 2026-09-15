@@ -52,6 +52,11 @@ const (
 	// PlatformKey is the reserved top-level values key the operator sets.
 	PlatformKey = "zaentrum"
 
+	// ReservedNamePrefix starts the name of every addon's values and generated
+	// objects. A chart may render nothing under it — not only its own names:
+	// squatting another addon's values Secret name would feed that addon.
+	ReservedNamePrefix = "zaentrum-addon-"
+
 	// MaxNameLength bounds an addon name, which is also its release name.
 	MaxNameLength = 40
 )
@@ -60,13 +65,13 @@ var digestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
 // GeneratedSecretName is the Secret holding an addon's generated values.
 func GeneratedSecretName(addon string) string {
-	return "zaentrum-addon-" + addon + "-generated"
+	return ReservedNamePrefix + addon + "-generated"
 }
 
 // ValuesObjectPrefix is the name prefix an addon's own values objects share
-// (the portal writes <prefix>values, the operator <prefix>generated).
+// (the portal writes <prefix>values-…, the operator <prefix>generated).
 func ValuesObjectPrefix(addon string) string {
-	return "zaentrum-addon-" + addon + "-"
+	return ReservedNamePrefix + addon + "-"
 }
 
 // OwnsValuesObject reports whether a Secret/ConfigMap named name with labels
