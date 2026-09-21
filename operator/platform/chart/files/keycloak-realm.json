@@ -424,6 +424,34 @@
         "roles"
       ],
       "optionalClientScopes": []
+    },
+    {
+      "clientId": "zae",
+      "name": "zae CLI",
+      "description": "The command-line client. 'zae login' uses the device grant: the terminal shows a code, a browser approves it. Public client, no secret, no password grant. Its tokens carry realm roles, so an administrator's role reaches the API.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ]
     }
   ],
   "users": [
