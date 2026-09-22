@@ -12,6 +12,10 @@ kubeconfig
 !.env.example
 secrets/
 **/secret*.yaml
+# …except the chart's own template: it renders the dev-default secrets a
+# self-host install needs, holds placeholders only, and without it a release
+# built from a clean checkout ships a chart that cannot start the platform.
+!operator/platform/chart/templates/secrets.yaml
 **/*secret*.local.*
 *.tfstate
 *.tfstate.*
