@@ -787,6 +787,51 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              controller:
+                description: |-
+                  Controller reports the operator's own controller — what it runs, how it
+                  was installed and whether something newer is out. Reported, never acted
+                  on. Absent until a controller that knows how to read itself reconciles
+                  the CR.
+                properties:
+                  availableUpdate:
+                    description: |-
+                      AvailableUpdate is a newer controller version discovered on the CR's
+                      channel. Empty when there is none, when spec.version pins a tag (the CR
+                      has opted out of channel tracking entirely), or when discovery failed.
+                    type: string
+                  image:
+                    description: |-
+                      Image is the image the controller pod actually runs, exactly as written
+                      (a tag, a digest, or both). Empty when the pod could not be read.
+                    type: string
+                  observedAt:
+                    description: |-
+                      ObservedAt is when this reading last CHANGED — not when it was last
+                      taken. The reading is retaken every pass; the timestamp moves only when
+                      something about it does (see internal/controller/self.go for why).
+                    format: date-time
+                    type: string
+                  source:
+                    description: Source is how this controller was installed.
+                    enum:
+                    - olm
+                    - manifest
+                    - appliance
+                    - unknown
+                    type: string
+                  version:
+                    description: |-
+                      Version is the image's tag when it has one, else its short (12 hex
+                      character) digest, else "unknown".
+                    type: string
+                required:
+                - availableUpdate
+                - image
+                - observedAt
+                - source
+                - version
+                type: object
               currentVersion:
                 description: CurrentVersion mirrors the version most recently applied
                   to the cluster.
@@ -881,6 +926,14 @@ rules:
   # CREATE — a fresh namespace fails without these even though the demo (whose
   # Role pre-existed with identical rules) reconciles fine. The addon
   # controller also lists pods, to say why an addon component is not ready.
+  #
+  # pods/get and (above) deployments/get are ALSO how the operator reports its
+  # own controller in status.controller: it reads the pod named by the downward
+  # API and, for an OLM install, the Deployment that a ClusterServiceVersion
+  # owns. That needs nothing this role did not already hold — deliberately: a
+  # report about the operator is not worth widening the operator's reach, which
+  # is also why the Deployment name is derived from the pod's ReplicaSet owner
+  # instead of adding a replicasets rule to read it.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
@@ -986,6 +1039,27 @@ spec:
           ports:
             - name: metrics
               containerPort: 8080
+          # The operator reports its OWN controller in status.controller. It
+          # learns what it runs by reading the pod it is in — never from a
+          # version stamped into the binary at build time, which is a claim
+          # about the past and goes stale the moment someone repoints the tag.
+          # The appliance render adds ZAENTRUM_INSTALL_SOURCE=appliance here
+          # (deploy/allinone/build.sh); a plain apply of these manifests is
+          # derived as "manifest", and an OLM install as "olm", from the
+          # ClusterServiceVersion that owns the Deployment.
+          env:
+            # Stamped by deploy/allinone/build.sh: this controller
+            # ships inside the all-in-one image.
+            - name: ZAENTRUM_INSTALL_SOURCE
+              value: appliance
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

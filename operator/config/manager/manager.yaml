@@ -40,6 +40,23 @@ spec:
           ports:
             - name: metrics
               containerPort: 8080
+          # The operator reports its OWN controller in status.controller. It
+          # learns what it runs by reading the pod it is in — never from a
+          # version stamped into the binary at build time, which is a claim
+          # about the past and goes stale the moment someone repoints the tag.
+          # The appliance render adds ZAENTRUM_INSTALL_SOURCE=appliance here
+          # (deploy/allinone/build.sh); a plain apply of these manifests is
+          # derived as "manifest", and an OLM install as "olm", from the
+          # ClusterServiceVersion that owns the Deployment.
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

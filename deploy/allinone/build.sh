@@ -25,10 +25,40 @@ IMAGE="${IMAGE:-ghcr.io/zaentrum/appliance:latest}"
 # deploy/base stays the operator's template source AND the kustomize path for
 # non-appliance / external-cluster installs.
 OP="$ROOT/operator/config"
+
+# The appliance is the ONE install the cluster cannot be asked about: it bakes
+# the same manifests a cluster-admin would apply by hand, so nothing in the API
+# tells the two apart (an OLM install, by contrast, is derivable from the
+# ClusterServiceVersion that owns the Deployment). So the appliance declares
+# itself here, and the operator reports it in status.controller.source.
+#
+# Applied only to the manager Deployment — the CRDs and RBAC are copied
+# verbatim — so no other `env:` in the bundle can be hit by accident.
+stamp_appliance() {
+  awk '
+    /^          env:$/ && !done {
+      print
+      print "            # Stamped by deploy/allinone/build.sh: this controller"
+      print "            # ships inside the all-in-one image."
+      print "            - name: ZAENTRUM_INSTALL_SOURCE"
+      print "              value: appliance"
+      done = 1
+      next
+    }
+    { print }
+    END { if (!done) { print "build.sh: no env: block in the manager Deployment to stamp" > "/dev/stderr"; exit 1 } }
+  ' "$1"
+}
+
 render() {
   mkdir -p "$OUT"; rm -f "$OUT"/*.yaml
   printf 'apiVersion: v1\nkind: Namespace\nmetadata:\n  name: zaentrum\n' > "$OUT/00-namespace.yaml"
-  { for f in "$OP"/crd/*.yaml "$OP"/rbac/*.yaml "$OP"/manager/*.yaml; do echo "---"; cat "$f"; done; } > "$OUT/10-operator.yaml"
+  {
+    for f in "$OP"/crd/*.yaml "$OP"/rbac/*.yaml; do echo "---"; cat "$f"; done
+    for f in "$OP"/manager/*.yaml; do echo "---"; stamp_appliance "$f"; done
+  } > "$OUT/10-operator.yaml"
+  grep -q 'ZAENTRUM_INSTALL_SOURCE' "$OUT/10-operator.yaml" ||
+    { echo "build.sh: appliance install source not stamped — refusing to ship an appliance that reports itself as a manifest apply"; exit 1; }
   cp "$OP/samples/zaentrum_v1alpha1_zaentrum.yaml" "$OUT/20-zaentrum.yaml"
   echo ">> baked operator install + Zaentrum CR ($(grep -c '^kind:' "$OUT/10-operator.yaml") operator objects)"
 }

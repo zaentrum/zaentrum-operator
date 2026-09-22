@@ -74,6 +74,14 @@ rules:
   # CREATE — a fresh namespace fails without these even though the demo (whose
   # Role pre-existed with identical rules) reconciles fine. The addon
   # controller also lists pods, to say why an addon component is not ready.
+  #
+  # pods/get and (above) deployments/get are ALSO how the operator reports its
+  # own controller in status.controller: it reads the pod named by the downward
+  # API and, for an OLM install, the Deployment that a ClusterServiceVersion
+  # owns. That needs nothing this role did not already hold — deliberately: a
+  # report about the operator is not worth widening the operator's reach, which
+  # is also why the Deployment name is derived from the pod's ReplicaSet owner
+  # instead of adding a replicasets rule to read it.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]

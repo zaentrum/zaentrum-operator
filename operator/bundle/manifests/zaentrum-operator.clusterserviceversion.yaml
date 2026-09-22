@@ -139,6 +139,24 @@ spec:
             description: A newer version available on the configured channel.
             x-descriptors:
               - urn:alm:descriptor:org.w3:link
+          # The operator's OWN controller. Reported here so OperatorHub shows
+          # what the control plane runs; upgrading it stays OLM's job, never
+          # the operator's.
+          - path: controller.version
+            displayName: Controller Version
+            description: Tag (or short digest) of the operator image this controller runs.
+            x-descriptors:
+              - urn:alm:descriptor:text
+          - path: controller.source
+            displayName: Controller Install Source
+            description: How this controller was installed (olm, manifest, appliance).
+            x-descriptors:
+              - urn:alm:descriptor:text
+          - path: controller.availableUpdate
+            displayName: Controller Update Available
+            description: A newer operator version on the channel; upgrade it through OLM.
+            x-descriptors:
+              - urn:alm:descriptor:text
       # group/version/kind match operator/config/crd/zaentrum.io_zaentrumaddons.yaml.
       - name: zaentrumaddons.zaentrum.io
         kind: ZaentrumAddon
@@ -245,9 +263,11 @@ spec:
             - apiGroups: ["rbac.authorization.k8s.io"]
               resources: ["roles", "rolebindings"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-            # Held only so the operator may GRANT them to the portal-api Role
+            # Held so the operator may GRANT them to the portal-api Role
             # (operator console); the escalation check requires the grantor to
-            # hold what it grants.
+            # hold what it grants. pods/get and deployments/get are also what
+            # the operator reads to report its OWN controller in
+            # status.controller — no rule was added for that.
             - apiGroups: [""]
               resources: ["pods"]
               verbs: ["get", "list"]
@@ -295,6 +315,20 @@ spec:
                     ports:
                       - name: metrics
                         containerPort: 8080
+                    # Downward API: the operator reads its own pod to report
+                    # what this controller runs in status.controller. On an OLM
+                    # install the source is derived, not declared — this
+                    # ClusterServiceVersion owns the Deployment below, and that
+                    # ownership is what makes status.controller.source "olm".
+                    env:
+                      - name: POD_NAME
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.name
+                      - name: POD_NAMESPACE
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: metadata.namespace
                     securityContext:
                       allowPrivilegeEscalation: false
                       readOnlyRootFilesystem: true
