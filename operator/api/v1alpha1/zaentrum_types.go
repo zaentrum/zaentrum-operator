@@ -324,6 +324,60 @@ type ZaentrumSpec struct {
 	Replicas map[string]int32 `json:"replicas,omitempty"`
 }
 
+// InstallSource says how the operator's OWN controller was installed. It is
+// derived from the cluster, never configured by a field on the CR — an
+// installer that lies about itself is worse than one that says "unknown".
+// +kubebuilder:validation:Enum=olm;manifest;appliance;unknown
+type InstallSource string
+
+const (
+	// InstallSourceOLM means the controller's Deployment (or its pod) is owned
+	// by a ClusterServiceVersion: OLM/OperatorHub owns its lifecycle.
+	InstallSourceOLM InstallSource = "olm"
+	// InstallSourceManifest means a plain apply of deploy/operator-install.yaml
+	// or `kubectl apply -k operator/config` — a cluster-admin or a GitOps job.
+	InstallSourceManifest InstallSource = "manifest"
+	// InstallSourceAppliance means the controller was baked into the all-in-one
+	// image, which is the one case the cluster cannot be asked about: it looks
+	// exactly like a manifest apply, so that image stamps
+	// ZAENTRUM_INSTALL_SOURCE=appliance onto the manager container.
+	InstallSourceAppliance InstallSource = "appliance"
+	// InstallSourceUnknown means the controller could not read its own pod.
+	InstallSourceUnknown InstallSource = "unknown"
+)
+
+// ControllerStatus reports the operator's OWN control plane: the image the
+// controller pod runs, how it was installed, and whether the channel carries
+// something newer.
+//
+// It is a reading, not a lever. status.currentVersion and spec.version are the
+// PLATFORM; this is the operator itself, and the operator must never upgrade
+// it — replacing a control plane is a cluster-admin / OLM / GitOps job. What
+// the product owes its operator is the fact, so "which operator am I running,
+// and is it current?" stops being a question only kubectl can answer.
+type ControllerStatus struct {
+	// Image is the image the controller pod actually runs, exactly as written
+	// (a tag, a digest, or both). Empty when the pod could not be read.
+	Image string `json:"image"`
+
+	// Version is the image's tag when it has one, else its short (12 hex
+	// character) digest, else "unknown".
+	Version string `json:"version"`
+
+	// Source is how this controller was installed.
+	Source InstallSource `json:"source"`
+
+	// AvailableUpdate is a newer controller version discovered on the CR's
+	// channel. Empty when there is none, when spec.version pins a tag (the CR
+	// has opted out of channel tracking entirely), or when discovery failed.
+	AvailableUpdate string `json:"availableUpdate"`
+
+	// ObservedAt is when this reading last CHANGED — not when it was last
+	// taken. The reading is retaken every pass; the timestamp moves only when
+	// something about it does (see internal/controller/self.go for why).
+	ObservedAt metav1.Time `json:"observedAt"`
+}
+
 // ComponentStatus reports the readiness of one managed Deployment.
 type ComponentStatus struct {
 	// Name is the Deployment name.
@@ -362,6 +416,13 @@ type ZaentrumStatus struct {
 	// Components reports per-Deployment readiness.
 	// +optional
 	Components []ComponentStatus `json:"components,omitempty"`
+
+	// Controller reports the operator's own controller — what it runs, how it
+	// was installed and whether something newer is out. Reported, never acted
+	// on. Absent until a controller that knows how to read itself reconciles
+	// the CR.
+	// +optional
+	Controller *ControllerStatus `json:"controller,omitempty"`
 }
 
 // +kubebuilder:object:root=true
