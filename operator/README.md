@@ -69,6 +69,57 @@ realm import `ConfigMap`, and the CoreDNS-friendly
 stored and surfaced into `status.availableUpdate`; the tag-discovery + image
 bump logic is marked `TODO(S2)` in the reconciler.
 
+### The controller reports itself (`status.controller`)
+
+Everything above is the **platform**. `status.controller` is the **operator**:
+
+```yaml
+status:
+  controller:
+    image:           ghcr.io/zaentrum/operator:sha-a3d32ba…   # as the pod spec writes it
+    version:         sha-a3d32ba…      # the tag, else a 12-char short digest, else "unknown"
+    source:          manifest          # olm | manifest | appliance | unknown
+    availableUpdate: ""                # a newer version on the channel; "" when none/unknown
+    observedAt:      2026-09-22T08:14:03Z
+```
+
+Reported, never acted on. Replacing a control plane is a cluster-admin / OLM /
+GitOps job, and an operator that can upgrade itself mid-reconcile is a failure
+mode, not a feature — Flux, Argo CD, cert-manager and every OLM-managed
+operator draw the line in the same place. What the product owes its operator is
+the *fact*, so "which operator is this cluster running, and is it current?"
+stops being a question only `kubectl` can answer.
+
+- **image / version** come from the pod the controller runs in, found through
+  `POD_NAME` / `POD_NAMESPACE` (downward API, injected by every install
+  bundle). Never a constant stamped in at build time: that is a claim about the
+  past, and it goes stale the moment someone repoints a tag.
+- **source** is derived, not configured. A `ClusterServiceVersion` owning the
+  controller's Deployment (or pod) means `olm`. Otherwise
+  `ZAENTRUM_INSTALL_SOURCE`, which only the all-in-one image sets — it bakes
+  the same manifests a cluster-admin would apply, so nothing in the API tells
+  the two apart. Otherwise `manifest`. `unknown` when the pod is unreadable.
+  OLM outranks the env: it owns the upgrade path of what it installed.
+- **availableUpdate** reuses the same channel document the platform reads
+  (`internal/updates`), against the controller's own repository. Where the
+  registry answers, the comparison is by **digest** through the shared cache in
+  `internal/digest` — an operator pinned to `:sha-<commit>` that *is* the
+  channel's current image must not be told to update forever, and a
+  digest-pinned one has no tag to compare at all. Discovery failure costs the
+  field, never the reconcile.
+- **observedAt** marks when the reading last *changed*. A timestamp that moved
+  every pass would make every status write a real change, and the CR watch
+  would turn each one straight back into another reconcile.
+
+A pinned `spec.version` opts the CR out of channel tracking for the platform
+*and* the controller: an air-gapped pinned install makes no outbound call, so
+`availableUpdate` stays `""`.
+
+RBAC is unchanged — `pods/get` and `deployments/get` were already in the
+ClusterRole (held so the operator may grant them to `portal-api`). The
+Deployment's name is derived from the pod's ReplicaSet owner rather than read,
+so this report does not add a `replicasets` rule.
+
 ## Addons (`ZaentrumAddon`)
 
 A second, isolated reconciler installs a standard Helm chart next to the
