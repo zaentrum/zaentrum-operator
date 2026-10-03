@@ -33,6 +33,7 @@ type realmEnv struct {
 	platform []*unstructured.Unstructured
 	hooks    []*unstructured.Unstructured
 	clock    time.Time
+	hold     string
 }
 
 func newRealmEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum) *realmEnv {
@@ -73,7 +74,7 @@ func (e *realmEnv) keycloak(available int32) {
 func (e *realmEnv) pass() bool {
 	e.t.Helper()
 	e.clock = e.clock.Add(10 * time.Second)
-	return e.r.configureRealm(context.Background(), e.z, e.platform, e.hooks)
+	return e.r.configureRealm(context.Background(), e.z, e.platform, e.hooks, e.hold)
 }
 
 func (e *realmEnv) runs() []batchv1.Job {
@@ -323,4 +324,20 @@ func TestRealmWaitsForAVerificationRun(t *testing.T) {
 	e.z.Status.Verification.Result = zaentrumv1alpha1.VerificationPassed
 	require.True(t, e.pass())
 	assert.Len(t, e.runs(), 1, "once the check has ended")
+}
+
+// A run does not start while something else holds the realm still — the
+// database being copied, whose copy would miss what the run wrote.
+func TestRealmWaitsWhileHeld(t *testing.T) {
+	e := newRealmEnv(t, verifyCR())
+	e.keycloak(1)
+	e.hold = "the bundled Postgres is being copied onto its claim"
+	require.True(t, e.pass())
+	assert.Empty(t, e.runs())
+	assert.Equal(t, "Waiting", e.cond().Reason)
+	assert.Contains(t, e.cond().Message, "being copied")
+
+	e.hold = ""
+	require.True(t, e.pass())
+	assert.Len(t, e.runs(), 1)
 }

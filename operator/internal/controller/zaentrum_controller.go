@@ -125,12 +125,21 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		logger.Info("render deferred", "reason", err.Error())
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
+	// Where the bundled Postgres keeps its data is read from the running one
+	// before anything is rendered, so that no render moves it by itself: a
+	// Postgres started on a new volume starts empty (database.go).
+	db, err := r.planDatabase(ctx, &z)
+	if err != nil {
+		r.setApplied(&z, metav1.ConditionFalse, "DatabaseUnknown", err.Error())
+		z.Status.Phase = "Error"
+		_ = r.patchStatus(ctx, &z)
+		return ctrl.Result{}, err
+	}
 	vals := templates.NewValues(&z)
 	vals.OpenShift = openShift
 	vals.Version = decision.RenderTag
-	// Every install keeps the bundled Postgres where it has always been until
-	// the operator decides from the running Postgres where its data is.
-	vals.PostgresVolume = "emptyDir"
+	vals.PostgresVolume = db.volume
+	vals.PostgresMigrate = db.migrate
 	rendered, err := templates.Render(vals)
 	if err != nil {
 		r.setApplied(&z, metav1.ConditionFalse, "RenderFailed", err.Error())
@@ -176,6 +185,14 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	r.setApplied(&z, metav1.ConditionTrue, "Applied",
 		fmt.Sprintf("applied %d objects via server-side apply", len(objs)))
 
+	// A copy of the bundled Postgres onto its claim, which was just applied.
+	if db.start {
+		if err := r.startMigration(ctx, &z, tests); err != nil {
+			setCondition(&z, condTypeDatabasePersistent, metav1.ConditionFalse, "MigrationFailed",
+				clip("could not start the copy of the bundled Postgres: "+err.Error(), maxVerifyMessage))
+		}
+	}
+
 	// Refresh component readiness from the live Deployments and roll status up.
 	allReady, err := r.refreshComponents(ctx, &z, objs)
 	if err != nil {
@@ -216,21 +233,27 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// The bundled realm holds what the chart decides about it — the sign-in
 	// redirects — however old the realm is; see realm.go. It writes only the
 	// RealmConfigured condition.
-	configuring := r.configureRealm(ctx, &z, objs, tests)
+	hold := ""
+	if db.copying {
+		hold = "the bundled Postgres is being copied onto its claim"
+	}
+	configuring := r.configureRealm(ctx, &z, objs, tests, hold)
 
 	// The platform's self-test, after every update that leaves it Ready and on
 	// request. It reads the readiness just computed and writes only
 	// status.verification and the Verified condition; see verify.go. A run
 	// waits for a realm run in flight, as a realm run waits for it: the realm
 	// Job may end the master token the check's account preparation holds.
-	verifying := r.verify(ctx, &z, vals.Version, objs, tests, allReady && !configuring)
+	// Nor does it start while the database is being copied: what it wrote
+	// would not be carried across, and the Postgres is about to restart.
+	verifying := r.verify(ctx, &z, vals.Version, objs, tests, allReady && !configuring && !db.copying)
 
 	if err := r.patchStatus(ctx, &z); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
-	if verifying || configuring {
+	if verifying || configuring || db.copying {
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil

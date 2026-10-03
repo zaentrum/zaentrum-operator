@@ -66,10 +66,11 @@ const (
 
 // configureRealm takes this pass's step of keeping the bundled realm in step
 // and writes the RealmConfigured condition. platform and hooks are the pass's
-// render, split and pinned. It reports whether to come back soon: a run is in
-// flight.
+// render, split and pinned; hold, when not empty, says why no run may start
+// this pass. It reports whether to come back soon: a run is in flight, or
+// waits.
 func (r *ZaentrumReconciler) configureRealm(ctx context.Context, z *zaentrumv1alpha1.Zaentrum,
-	platform, hooks []*unstructured.Unstructured) bool {
+	platform, hooks []*unstructured.Unstructured, hold string) bool {
 	hook := templates.RealmJob(hooks)
 	if hook == nil {
 		// External identity: the chart renders no realm Job, as there is no
@@ -106,7 +107,7 @@ func (r *ZaentrumReconciler) configureRealm(ctx context.Context, z *zaentrumv1al
 				clip(r.realmReport(ctx, latest, "the realm's clients are in step"), maxVerifyMessage))
 			return false
 		default:
-			ended := finishedAt(latest, failed)
+			ended := finishedAt(latest)
 			if retry := ended.Add(realmRetryAfter); r.now().Time.Before(retry) {
 				setCondition(z, condTypeRealmConfigured, metav1.ConditionFalse, "Failed",
 					clip(fmt.Sprintf("%s failed: %s; it runs again after %s", latest.Name,
@@ -120,6 +121,11 @@ func (r *ZaentrumReconciler) configureRealm(ctx context.Context, z *zaentrumv1al
 		setCondition(z, condTypeRealmConfigured, metav1.ConditionUnknown, "WaitingForKeycloak",
 			"the realm's clients are brought in step once Keycloak is available: "+why)
 		return false
+	}
+	if hold != "" {
+		setCondition(z, condTypeRealmConfigured, metav1.ConditionUnknown, "Waiting",
+			"the realm's clients are brought in step once this is over: "+hold)
+		return true
 	}
 	if v := z.Status.Verification; v != nil && v.Result == zaentrumv1alpha1.VerificationRunning {
 		// A run can move where the master realm signs in, which ends every
@@ -224,10 +230,14 @@ func (r *ZaentrumReconciler) realmReport(ctx context.Context, job *batchv1.Job, 
 	return fallback
 }
 
-// finishedAt is when a finished Job ended: its terminal condition's time.
-func finishedAt(job *batchv1.Job, cond *batchv1.JobCondition) time.Time {
-	if cond != nil && !cond.LastTransitionTime.IsZero() {
-		return cond.LastTransitionTime.Time
+// finishedAt is when a finished Job ended: the time of its terminal
+// condition, Complete or Failed, else its completion time.
+func finishedAt(job *batchv1.Job) time.Time {
+	for _, c := range job.Status.Conditions {
+		if c.Status == corev1.ConditionTrue && (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) &&
+			!c.LastTransitionTime.IsZero() {
+			return c.LastTransitionTime.Time
+		}
 	}
 	if job.Status.CompletionTime != nil {
 		return job.Status.CompletionTime.Time
