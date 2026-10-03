@@ -996,7 +996,8 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 	assert.Nil(t, get().Status.Verification, "Progressing: no run yet")
 	var jobs batchv1.JobList
 	require.NoError(t, c.List(ctx, &jobs, client.InNamespace(verifyNS)))
-	assert.Empty(t, jobs.Items)
+	assert.Empty(t, jobs.Items, "neither a check nor a realm run before Keycloak is available")
+	runs := client.MatchingLabels{labelVerification: verificationRun}
 
 	// Every Deployment becomes available.
 	var deps appsv1.DeploymentList
@@ -1020,9 +1021,12 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 	assert.Equal(t, "Ready", got.Status.Phase)
 	require.NotNil(t, got.Status.Verification)
 	assert.Equal(t, zaentrumv1alpha1.VerificationRunning, got.Status.Verification.Result)
-	require.NoError(t, c.List(ctx, &jobs, client.InNamespace(verifyNS)))
+	require.NoError(t, c.List(ctx, &jobs, client.InNamespace(verifyNS), runs))
 	require.Len(t, jobs.Items, 1)
 	job := jobs.Items[0]
+	var realm batchv1.JobList
+	require.NoError(t, c.List(ctx, &realm, client.InNamespace(verifyNS), client.MatchingLabels{labelRealm: realmRun}))
+	assert.Len(t, realm.Items, 1, "the realm's clients are brought in step beside the check")
 
 	// The run fails a check. The platform stays Ready.
 	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"}}
@@ -1040,7 +1044,7 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 
 	res, err = r.Reconcile(ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, requeueAfter, res.RequeueAfter)
+	assert.Equal(t, verifyRequeueAfter, res.RequeueAfter, "the realm run is still in flight")
 	got = get()
 	assert.Equal(t, "Ready", got.Status.Phase)
 	ready := meta.FindStatusCondition(got.Status.Conditions, condTypeReady)
@@ -1054,8 +1058,7 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 
 	res, err = r.Reconcile(ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, requeueAfter, res.RequeueAfter)
-	require.NoError(t, c.List(ctx, &jobs, client.InNamespace(verifyNS)))
+	require.NoError(t, c.List(ctx, &jobs, client.InNamespace(verifyNS), runs))
 	assert.Len(t, jobs.Items, 1, "a failed fingerprint is not run again")
 }
 

@@ -210,6 +210,11 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		r.setReady(&z, metav1.ConditionFalse, "ComponentsNotReady", "waiting for components to become ready")
 	}
 
+	// The bundled realm holds what the chart decides about it — the sign-in
+	// redirects — however old the realm is; see realm.go. It writes only the
+	// RealmConfigured condition.
+	configuring := r.configureRealm(ctx, &z, objs, tests)
+
 	// The platform's self-test, after every update that leaves it Ready and on
 	// request. It reads the readiness just computed and writes only
 	// status.verification and the Verified condition; see verify.go.
@@ -220,7 +225,7 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
-	if verifying {
+	if verifying || configuring {
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
