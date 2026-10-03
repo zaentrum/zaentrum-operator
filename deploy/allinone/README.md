@@ -65,8 +65,8 @@ The container starts k3s, which applies the rendered `deploy/base` bundle:
 Inspect it like any cluster:
 
 ```bash
-docker exec -it zaentrum k3s kubectl -n zaentrum get pods
-docker exec -it zaentrum k3s kubectl -n zaentrum logs deploy/katalog-manager-api
+docker exec -it zaentrum kubectl -n zaentrum get pods
+docker exec -it zaentrum kubectl -n zaentrum logs deploy/katalog-manager-api
 ```
 
 ## Where the images come from

@@ -126,7 +126,7 @@ jobs:
 
       - name: Wait for the platform to be Ready
         run: |
-          k() { docker exec zaentrum k3s kubectl "$@"; }
+          k() { docker exec zaentrum kubectl "$@"; }
           for i in $(seq 1 150); do
             phase=$(k -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.phase}' 2>/dev/null || true)
             [ "$phase" = Ready ] && { echo "Ready after $((i * 10))s"; exit 0; }
@@ -138,7 +138,7 @@ jobs:
 
       - name: Wait for the platform's verification of itself
         run: |
-          k() { docker exec zaentrum k3s kubectl "$@"; }
+          k() { docker exec zaentrum kubectl "$@"; }
           for i in $(seq 1 90); do
             result=$(k -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.verification.result}' 2>/dev/null || true)
             case "$result" in Passed|Failed|Error|Skipped) break ;; esac
@@ -159,7 +159,7 @@ jobs:
       - name: What the cluster looked like
         if: always()
         run: |
-          k() { docker exec zaentrum k3s kubectl "$@"; }
+          k() { docker exec zaentrum kubectl "$@"; }
           k get pods -A -o wide || true
           k -n zaentrum get zaentrum zaentrum -o yaml | sed -n '/^status:/,$p' || true
           k -n zaentrum get events --sort-by=.lastTimestamp | tail -40 || true

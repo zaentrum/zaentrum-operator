@@ -91,16 +91,16 @@ export KUBECONFIG
 # while the cluster is perfectly usable, so we don't gate on it.
 (
   i=0
-  until k3s kubectl get ns zaentrum >/dev/null 2>&1; do
+  until kubectl get ns zaentrum >/dev/null 2>&1; do
     i=$((i+1)); [ "$i" -gt 150 ] && { echo ">> still waiting for the API server / zaentrum namespace…"; i=0; }
     sleep 2
   done
-  if k3s kubectl -n zaentrum rollout status deploy/chino-web --timeout=600s >/dev/null 2>&1; then
+  if kubectl -n zaentrum rollout status deploy/chino-web --timeout=600s >/dev/null 2>&1; then
     echo ">> Zaentrum is up — open http://zaentrum.localhost"
   else
     echo ">> Zaentrum is starting — pods may still be pulling images; open http://zaentrum.localhost shortly"
   fi
-  echo ">> inspect: docker exec -it zaentrum k3s kubectl -n zaentrum get pods"
+  echo ">> inspect: docker exec -it zaentrum kubectl -n zaentrum get pods"
 ) &
 
 # Hand the foreground back to k3s so the container lives as long as k3s does.
