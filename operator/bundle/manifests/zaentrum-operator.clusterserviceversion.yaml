@@ -61,7 +61,9 @@ spec:
     Set the public hostname, choose bundled or external OIDC, size your media
     storage, toggle GPU/Kafka, and pick a manual or automatic update mode — the
     operator drives the rest and reports progress on the CR status (`phase`,
-    `currentVersion`, `availableUpdate`, and per-component readiness).
+    `currentVersion`, `availableUpdate`, and per-component readiness). After
+    every update it checks the platform outside-in, with a real sign-in, and
+    reports the verdict in `verification`.
 
     The bundle is content-neutral: it ships only the platform. It never fetches
     content and has no downloaders or indexer integrations. # neutrality-guard:allow
@@ -123,6 +125,11 @@ spec:
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:select:manual
               - urn:alm:descriptor:com.tectonic.ui:select:auto
+          - path: verification.enabled
+            displayName: Verification
+            description: Check the platform outside-in after every update and on request.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
         statusDescriptors:
           - path: phase
             displayName: Phase
@@ -155,6 +162,18 @@ spec:
           - path: controller.availableUpdate
             displayName: Controller Update Available
             description: A newer operator version on the channel; upgrade it through OLM.
+            x-descriptors:
+              - urn:alm:descriptor:text
+          # The platform's self-test after each update. A reading beside the
+          # phase, never a gate on it.
+          - path: verification.result
+            displayName: Verification
+            description: The latest self-test - Passed, Failed, Running, Skipped or Error.
+            x-descriptors:
+              - urn:alm:descriptor:text
+          - path: verification.message
+            displayName: Verification Message
+            description: One line about the latest self-test.
             x-descriptors:
               - urn:alm:descriptor:text
       # group/version/kind match operator/config/crd/zaentrum.io_zaentrumaddons.yaml.
