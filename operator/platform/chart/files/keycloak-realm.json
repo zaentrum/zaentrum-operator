@@ -224,12 +224,8 @@
       "bearerOnly": false,
       "frontchannelLogout": true,
       "rootUrl": "${authBaseUrl}",
-      "redirectUris": [
-        "*"
-      ],
-      "webOrigins": [
-        "*"
-      ],
+      "redirectUris": [],
+      "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "+"
@@ -273,12 +269,8 @@
       "bearerOnly": false,
       "frontchannelLogout": true,
       "rootUrl": "${authBaseUrl}",
-      "redirectUris": [
-        "*"
-      ],
-      "webOrigins": [
-        "*"
-      ],
+      "redirectUris": [],
+      "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "true",
@@ -366,9 +358,7 @@
       "serviceAccountsEnabled": false,
       "bearerOnly": false,
       "frontchannelLogout": true,
-      "redirectUris": [
-        "*"
-      ],
+      "redirectUris": [],
       "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
@@ -436,10 +426,7 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
-      "redirectUris": [
-        "http://127.0.0.1/*",
-        "http://localhost/*"
-      ],
+      "redirectUris": [],
       "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",

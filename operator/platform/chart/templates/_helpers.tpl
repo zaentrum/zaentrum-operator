@@ -40,6 +40,68 @@ Use: {{ include "z.secretValue" (dict "root" . "secret" "zaentrum-db" "key" "pas
 {{- if $have -}}{{ $have }}{{- else if .value -}}{{ .value }}{{- else -}}{{ randAlphaNum (.length | default 32) }}{{- end -}}
 {{- end -}}
 
+{{/* z.katalogBase / z.katalogManageBase — where the two katalog consoles are
+     mounted (their BASE_PATH), which is also where they sign in from. */}}
+{{- define "z.katalogBase" -}}/katalog/{{- end -}}
+{{- define "z.katalogManageBase" -}}/katalog-manage/{{- end -}}
+
+{{/*
+z.mainOrigins — every origin the platform's own host answers on, as a JSON
+list: the public URL, and plain http beside it where OpenShift Routes serve the
+host (they allow http: insecureEdgeTerminationPolicy Allow, routes.yaml).
+*/}}
+{{- define "z.mainOrigins" -}}
+{{- $origins := list (include "z.publicURL" .) -}}
+{{- $http := printf "http://%s" .Values.global.hostname -}}
+{{- if and .Values.routing.provisionRoutes (not (has $http $origins)) -}}
+{{- $origins = append $origins $http -}}
+{{- end -}}
+{{- toJson $origins -}}
+{{- end -}}
+
+{{/*
+z.realmClients — what the bundled realm's clients allow a sign-in to return to,
+as JSON: for each client, its redirect URIs, web origins and post-logout
+redirect URIs, exactly those of the platform's own origins and paths, and
+nothing else. The realm import (keycloak-realm.yaml) writes them into a new
+realm; the realm Job (realm.yaml) writes them into one that exists.
+
+  zaentrum-web  the portal at /portal/ and the katalog consoles, which sign in
+                as the portal client; each returns to <origin><base>auth/callback
+                and, signed out, to <origin><base>
+  chino-web     returns to the site root's /auth/callback (it builds it so,
+                whatever its base, and the verification signs in the same
+                way), on the main host and on the chino host of subdomains
+                routing; signed out, to the bare origin
+  chino-mobile  the published phone and tablet apps' custom scheme
+  chino-tv      the device grant: no redirect at all
+  zae           the command line's loopback redirects
+*/}}
+{{- define "z.realmClients" -}}
+{{- $main := include "z.mainOrigins" . | fromJsonArray -}}
+{{- $web := $main -}}
+{{- if and (eq .Values.routing.mode "subdomains") .Values.routing.hosts.chino -}}
+{{- $web = append $web (printf "https://%s" .Values.routing.hosts.chino) -}}
+{{- end -}}
+{{- $chinoBack := list -}}
+{{- range $web -}}{{- $chinoBack = append $chinoBack (printf "%s/auth/callback" .) -}}{{- end -}}
+{{- $portalBack := list -}}
+{{- $portalOut := list -}}
+{{- range $origin := $main -}}
+{{- range $base := list "/portal/" (include "z.katalogBase" $) (include "z.katalogManageBase" $) -}}
+{{- $portalBack = append $portalBack (printf "%s%sauth/callback" $origin $base) -}}
+{{- $portalOut = append $portalOut (printf "%s%s" $origin $base) -}}
+{{- end -}}
+{{- end -}}
+{{- dict
+    "zaentrum-web" (dict "redirectUris" $portalBack "webOrigins" $main "attributes" (dict "post.logout.redirect.uris" (join "##" $portalOut)))
+    "chino-web" (dict "redirectUris" $chinoBack "webOrigins" $web "attributes" (dict "post.logout.redirect.uris" (join "##" $web)))
+    "chino-mobile" (dict "redirectUris" (list "cloud.nalet.chino:/oauth/callback") "webOrigins" (list) "attributes" (dict "post.logout.redirect.uris" "+"))
+    "chino-tv" (dict "redirectUris" (list) "webOrigins" (list))
+    "zae" (dict "redirectUris" (list "http://127.0.0.1/*" "http://localhost/*") "webOrigins" (list))
+  | toJson -}}
+{{- end -}}
+
 {{/* z.partOf — the app.kubernetes.io/part-of label value. */}}
 {{- define "z.partOf" -}}{{ .Values.global.partOf }}{{- end -}}
 

@@ -22,8 +22,9 @@ spec:
   port: { targetPort: http }
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
 ---
-# chino product (launched from the portal tile). Its image is now built for Vite
-# base=/chino/, so it serves /chino/ + /chino/assets/ + /chino/auth/callback.
+# chino product (launched from the portal tile). Its image is built for Vite
+# base=/chino/, so it serves /chino/ + /chino/assets/; a sign-in returns to the
+# site root's /auth/callback (the auth-callback route below).
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:

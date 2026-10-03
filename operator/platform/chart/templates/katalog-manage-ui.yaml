@@ -39,7 +39,7 @@ spec:
         imagePullPolicy: Always
         env:
         - name: BASE_PATH
-          value: /katalog-manage/
+          value: {{ include "z.katalogManageBase" . }}
         ports:
         - name: http
           containerPort: 8080

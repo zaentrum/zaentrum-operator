@@ -9,6 +9,22 @@
 # zaentrum-keycloak / zaentrum-keycloak-admin Secrets) at import time, so
 # neither the confidential service-account secret nor the realm-admin password
 # lives in this manifest.
+#
+# The clients people sign in through allow exactly the platform's own redirect
+# URIs, web origins and post-logout redirect URIs (z.realmClients, derived from
+# global.hostname and the routing); files/keycloak-realm.json leaves them empty.
+# An import only ever makes a new realm, so the realm Job (realm.yaml) writes
+# the same values into one that already exists.
+{{- $realm := .Files.Get "files/keycloak-realm.json" | fromJson }}
+{{- $want := include "z.realmClients" . | fromJson }}
+{{- range $client := $realm.clients }}
+{{- with index $want $client.clientId }}
+{{- $_ := set $client "redirectUris" .redirectUris }}
+{{- $_ := set $client "webOrigins" .webOrigins }}
+{{- if not $client.attributes }}{{ $_ := set $client "attributes" dict }}{{ end }}
+{{- range $k, $v := .attributes }}{{ $_ := set $client.attributes $k $v }}{{ end }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,5 +32,5 @@ metadata:
   labels: { app: keycloak, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
 data:
   zaentrum-realm.json: |
-{{ .Files.Get "files/keycloak-realm.json" | nindent 4 }}
+{{ toPrettyJson $realm | indent 4 }}
 {{- end }}

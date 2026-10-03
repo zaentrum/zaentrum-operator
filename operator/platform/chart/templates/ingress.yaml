@@ -66,6 +66,16 @@ spec:
                 name: keycloak
                 port:
                   number: 80
+          # chino-web returns from a sign-in to the site root's /auth/callback
+          # (z.realmClients): more specific than /auth, so it reaches the SPA
+          # rather than Keycloak, as the Routes' auth-callback route does.
+          - path: /auth/callback
+            pathType: Prefix
+            backend:
+              service:
+                name: chino-web
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:
