@@ -44,7 +44,7 @@ func checkerTests(t *testing.T, version string) []*unstructured.Unstructured {
 	z.Spec.Version = version
 	objs, err := templates.Render(templates.NewValues(z))
 	require.NoError(t, err)
-	_, tests := templates.SplitTestHooks(objs)
+	_, tests := templates.SplitHooks(objs)
 	return tests
 }
 
@@ -206,7 +206,7 @@ func TestPinDigestsChecksWithLatestForATagZaeLacks(t *testing.T) {
 	z.Spec.Version = "v9.9.9"
 	objs, err := templates.Render(templates.NewValues(z))
 	require.NoError(t, err)
-	platform, tests := templates.SplitTestHooks(objs)
+	platform, tests := templates.SplitHooks(objs)
 	r := &ZaentrumReconciler{Client: fake.NewClientBuilder().WithScheme(selfScheme(t)).WithObjects(z).Build(),
 		PinDigests: true, Digest: rv}
 	r.pinDigests(context.Background(), z, append(platform[:len(platform):len(platform)], tests...))

@@ -136,9 +136,10 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, fmt.Errorf("render templates: %w", err)
 	}
 
-	// The chart's test hooks are not the platform. They are never applied with
-	// it; the verification Job among them is started on its own (verify.go).
-	objs, tests := templates.SplitTestHooks(rendered)
+	// The chart's hooks are not the platform. They are never applied with it;
+	// the operator starts the ones it knows on its own, as Jobs of their own —
+	// the verification Job among them (verify.go).
+	objs, tests := templates.SplitHooks(rendered)
 
 	z.Status.Phase = "Reconciling"
 
@@ -147,7 +148,7 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// harmless no-op flap-wise (that digest never moves), while a moving tag —
 	// "latest" OR a channel tag like "edge" — is exactly the case that needs it.
 	// Best-effort: an unresolvable image keeps its tag, so a registry hiccup
-	// degrades to today's behaviour instead of blocking the reconcile. The test
+	// degrades to today's behaviour instead of blocking the reconcile. The
 	// hooks are pinned in the same pass, so a run uses the images of its time.
 	r.pinDigests(ctx, &z, append(objs[:len(objs):len(objs)], tests...))
 

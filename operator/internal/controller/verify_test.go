@@ -72,7 +72,7 @@ func (e *verifyEnv) render() {
 	e.t.Helper()
 	objs, err := templates.Render(templates.NewValues(e.z))
 	require.NoError(e.t, err)
-	e.platform, e.tests = templates.SplitTestHooks(objs)
+	e.platform, e.tests = templates.SplitHooks(objs)
 }
 
 // pass takes one verification step, as one reconcile would.

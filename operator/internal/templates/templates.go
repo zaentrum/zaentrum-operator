@@ -288,8 +288,7 @@ const (
 )
 
 // IsTestHook reports whether a rendered object is a Helm test hook (`helm
-// test`). Test hooks are not part of the platform: the operator never applies
-// them with it. (The addon renderer drops them by the same rule.)
+// test`). (The addon renderer drops them by the same rule.)
 func IsTestHook(obj *unstructured.Unstructured) bool {
 	for _, hook := range strings.Split(obj.GetAnnotations()["helm.sh/hook"], ",") {
 		if strings.HasPrefix(strings.TrimSpace(hook), "test") {
@@ -299,28 +298,41 @@ func IsTestHook(obj *unstructured.Unstructured) bool {
 	return false
 }
 
-// SplitTestHooks separates the chart's test hooks from the platform objects,
-// keeping each list in render order.
-func SplitTestHooks(objs []*unstructured.Unstructured) (platform, tests []*unstructured.Unstructured) {
+// IsHook reports whether a rendered object is a Helm hook of any kind: a test,
+// or a Job Helm runs around an install or an upgrade. Hooks are not part of
+// the platform. The operator never applies them with it; it runs the ones it
+// knows itself, when their time has come, as Jobs of their own.
+func IsHook(obj *unstructured.Unstructured) bool {
+	return strings.TrimSpace(obj.GetAnnotations()["helm.sh/hook"]) != ""
+}
+
+// SplitHooks separates the chart's hooks from the platform objects, keeping
+// each list in render order.
+func SplitHooks(objs []*unstructured.Unstructured) (platform, hooks []*unstructured.Unstructured) {
 	for _, o := range objs {
-		if IsTestHook(o) {
-			tests = append(tests, o)
+		if IsHook(o) {
+			hooks = append(hooks, o)
 			continue
 		}
 		platform = append(platform, o)
 	}
-	return platform, tests
+	return platform, hooks
 }
 
-// VerifyJob returns the verification Job among the test hooks, or nil when the
-// render has none (verification disabled).
-func VerifyJob(tests []*unstructured.Unstructured) *unstructured.Unstructured {
-	for _, o := range tests {
-		if o.GetKind() == "Job" && o.GetName() == VerifyJobName {
+// hookJob returns the Job of that name among the hooks, or nil.
+func hookJob(hooks []*unstructured.Unstructured, name string) *unstructured.Unstructured {
+	for _, o := range hooks {
+		if o.GetKind() == "Job" && o.GetName() == name {
 			return o
 		}
 	}
 	return nil
+}
+
+// VerifyJob returns the verification Job among the hooks, or nil when the
+// render has none (verification disabled).
+func VerifyJob(hooks []*unstructured.Unstructured) *unstructured.Unstructured {
+	return hookJob(hooks, VerifyJobName)
 }
 
 // decode splits a multi-document YAML stream into unstructured objects,

@@ -30,7 +30,7 @@ func renderSplitOn(t *testing.T, z *zaentrumv1alpha1.Zaentrum, openShift bool) (
 	v.OpenShift = openShift
 	objs, err := Render(v)
 	require.NoError(t, err)
-	return SplitTestHooks(objs)
+	return SplitHooks(objs)
 }
 
 // verifyJob renders z and returns its verification Job, typed.
@@ -67,25 +67,46 @@ func secretRef(t *testing.T, env map[string]corev1.EnvVar, name, secret, key str
 		"%s: an absent Secret must not wedge the pod in CreateContainerConfigError until the deadline", name)
 }
 
-// The chart's checks are a test hook; the operator must never apply them with
-// the platform, and nothing else may be lost on the way.
-func TestSplitTestHooksTakesOnlyTheHooks(t *testing.T) {
+// The chart's checks are a test hook; the operator must never apply a hook
+// with the platform, and nothing else may be lost on the way.
+func TestSplitHooksTakesOnlyTheHooks(t *testing.T) {
 	all, err := Render(NewValues(base("zaentrum")))
 	require.NoError(t, err)
-	platform, tests := SplitTestHooks(all)
+	platform, tests := SplitHooks(all)
 
 	assert.Len(t, platform, len(all)-len(tests), "every object lands on exactly one side")
 	require.NotNil(t, VerifyJob(tests), "the verification Job is a test hook")
+	assert.True(t, IsTestHook(VerifyJob(tests)))
 	for _, o := range platform {
-		assert.False(t, IsTestHook(o), "%s/%s is a test hook among the applied objects", o.GetKind(), o.GetName())
+		assert.False(t, IsHook(o), "%s/%s is a hook among the applied objects", o.GetKind(), o.GetName())
 		assert.False(t, o.GetName() == VerifyJobName && (o.GetKind() == "Job" || o.GetKind() == "Secret"),
 			"%s/%s belongs to the checks, not the platform", o.GetKind(), o.GetName())
 	}
 	for _, o := range tests {
-		assert.True(t, IsTestHook(o))
+		assert.True(t, IsHook(o))
 	}
 	assert.NotNil(t, find(t, platform, "Deployment", "keycloak"), "the platform itself is untouched")
 	assert.Equal(t, count(all, "Deployment"), count(platform, "Deployment"))
+}
+
+// Any hook is a hook, whatever Helm runs it around.
+func TestIsHook(t *testing.T) {
+	for hook, want := range map[string]bool{
+		"test":                      true,
+		"post-install,post-upgrade": true,
+		"pre-upgrade":               true,
+		" post-install ":            true,
+		"":                          false,
+		" ":                         false,
+	} {
+		o := &unstructured.Unstructured{Object: map[string]interface{}{}}
+		o.SetAnnotations(map[string]string{"helm.sh/hook": hook})
+		assert.Equal(t, want, IsHook(o), "helm.sh/hook=%q", hook)
+	}
+	assert.False(t, IsHook(&unstructured.Unstructured{Object: map[string]interface{}{}}), "no annotation")
+	other := &unstructured.Unstructured{Object: map[string]interface{}{}}
+	other.SetAnnotations(map[string]string{"helm.sh/resource-policy": "keep"})
+	assert.False(t, IsHook(other), "another Helm annotation is no hook")
 }
 
 func TestIsTestHook(t *testing.T) {
@@ -247,7 +268,7 @@ func TestVerifyJobWithExternalIdentity(t *testing.T) {
 // the operator, which keeps a Secret of its own — and it is a hook, never a
 // platform object.
 func TestVerifyAccountHookSecret(t *testing.T) {
-	platform, tests := SplitTestHooks(helmRender(t, nil))
+	platform, tests := SplitHooks(helmRender(t, nil))
 	sec := find(t, tests, "Secret", VerifySecretName)
 	require.NotNil(t, sec)
 	assert.Equal(t, "test", sec.GetAnnotations()["helm.sh/hook"])
@@ -257,7 +278,7 @@ func TestVerifyAccountHookSecret(t *testing.T) {
 	assert.Len(t, pw, 32)
 	assert.Nil(t, find(t, platform, "Secret", VerifySecretName))
 
-	_, tests = SplitTestHooks(helmRender(t, map[string]interface{}{"secrets": map[string]interface{}{"external": true}}))
+	_, tests = SplitHooks(helmRender(t, map[string]interface{}{"secrets": map[string]interface{}{"external": true}}))
 	assert.Nil(t, find(t, tests, "Secret", VerifySecretName), "secrets.external: no rendered secrets at all")
 	_, tests = renderSplit(t, base("zaentrum"))
 	assert.Nil(t, find(t, tests, "Secret", VerifySecretName), "the operator's render carries no Secret")
@@ -304,7 +325,7 @@ func TestVerificationDisabledRendersNoHook(t *testing.T) {
 // reference, so the Job object itself — readable by anyone who can list Jobs —
 // holds none.
 func TestVerifyJobCarriesNoCredential(t *testing.T) {
-	_, tests := SplitTestHooks(helmRender(t, nil))
+	_, tests := SplitHooks(helmRender(t, nil))
 	job := VerifyJob(tests)
 	require.NotNil(t, job)
 	blob := fmt.Sprintf("%v", job.Object)
