@@ -668,6 +668,17 @@ spec:
                       so topics survive a pod restart/reschedule. Empty (default) → ephemeral
                       emptyDir (topics are recreated by the demo's topics Job + producer retry).
                     type: string
+                  mediaAccessMode:
+                    description: |-
+                      MediaAccessMode is the access mode of the media PVC the chart creates
+                      (provisionMedia). ReadWriteOnce, the default, suits a single node and
+                      node-local storage such as k3s's local-path, where every pod that mounts
+                      the library runs on the volume's node; ReadWriteMany is for a cluster
+                      whose storage class shares one volume across nodes (NFS, CephFS).
+                    enum:
+                    - ReadWriteOnce
+                    - ReadWriteMany
+                    type: string
                   mediaSize:
                     anyOf:
                     - type: integer

@@ -85,6 +85,15 @@ type StorageSpec struct {
 	// +optional
 	ClassName string `json:"className,omitempty"`
 
+	// MediaAccessMode is the access mode of the media PVC the chart creates
+	// (provisionMedia). ReadWriteOnce, the default, suits a single node and
+	// node-local storage such as k3s's local-path, where every pod that mounts
+	// the library runs on the volume's node; ReadWriteMany is for a cluster
+	// whose storage class shares one volume across nodes (NFS, CephFS).
+	// +kubebuilder:validation:Enum=ReadWriteOnce;ReadWriteMany
+	// +optional
+	MediaAccessMode string `json:"mediaAccessMode,omitempty"`
+
 	// ProvisionMedia controls whether the chart creates the media PVC. Set false
 	// when an external PV backs it (e.g. the demo's NFS export). Default true.
 	// +optional

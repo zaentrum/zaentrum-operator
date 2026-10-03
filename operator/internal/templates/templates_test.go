@@ -268,3 +268,31 @@ func asInt64(v any) int64 {
 	}
 	return -1
 }
+
+// The media claim the chart creates fits any cluster: no volume of one cluster
+// named in it, the default StorageClass unless one is set (an empty class
+// would turn dynamic provisioning off), and the access mode the CR asks for —
+// ReadWriteOnce by default, which local-path and one node can give.
+func TestMediaClaimFitsAnyCluster(t *testing.T) {
+	claim := func(z *zaentrumv1alpha1.Zaentrum) map[string]any {
+		t.Helper()
+		objs, err := Render(NewValues(z))
+		require.NoError(t, err)
+		pvc := find(t, objs, "PersistentVolumeClaim", "media")
+		require.NotNil(t, pvc)
+		spec, _, _ := unstructured.NestedMap(pvc.Object, "spec")
+		return spec
+	}
+
+	spec := claim(base("zaentrum"))
+	assert.Equal(t, []any{"ReadWriteOnce"}, spec["accessModes"])
+	assert.NotContains(t, spec, "volumeName", "no volume of another cluster")
+	assert.NotContains(t, spec, "storageClassName", "the cluster's default StorageClass")
+
+	z := base("zaentrum")
+	z.Spec.Storage.ClassName = "fast"
+	z.Spec.Storage.MediaAccessMode = "ReadWriteMany"
+	spec = claim(z)
+	assert.Equal(t, []any{"ReadWriteMany"}, spec["accessModes"])
+	assert.Equal(t, "fast", spec["storageClassName"])
+}
