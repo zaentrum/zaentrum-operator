@@ -119,6 +119,40 @@ type StorageSpec struct {
 	// required when KafkaPVC is a node-local volume. Empty → no node pinning.
 	// +optional
 	KafkaNode string `json:"kafkaNode,omitempty"`
+
+	// Postgres is the volume of the bundled Postgres (databases.mode perApp or
+	// single): a PersistentVolumeClaim, so users, watch state and the catalog
+	// outlive the pod. An install whose Postgres already runs on emptyDir stays
+	// there until Migrate copies its databases over.
+	// +optional
+	Postgres PostgresStorageSpec `json:"postgres,omitempty"`
+}
+
+// PostgresStorageSpec is where the bundled Postgres keeps its data.
+type PostgresStorageSpec struct {
+	// Size of the claim created for it, postgres-data.
+	// +kubebuilder:default="10Gi"
+	// +optional
+	Size resource.Quantity `json:"size,omitempty"`
+
+	// ClassName is the StorageClass of that claim. Empty: storage.className,
+	// else the cluster's default.
+	// +optional
+	ClassName string `json:"className,omitempty"`
+
+	// ClaimName names an existing PersistentVolumeClaim to keep the data on
+	// instead; none is created then.
+	// +optional
+	ClaimName string `json:"claimName,omitempty"`
+
+	// Migrate moves a database that lives anywhere else — on emptyDir, where
+	// the bundled Postgres kept it before it was persistent, or on another
+	// claim — onto the claim above: a Job copies every database into it from
+	// the running Postgres, and only once the copy has succeeded does the
+	// Postgres switch over. Without it the operator never moves the database,
+	// since a Postgres started on a new volume starts empty.
+	// +optional
+	Migrate bool `json:"migrate,omitempty"`
 }
 
 // FeaturesSpec toggles optional platform capabilities.
