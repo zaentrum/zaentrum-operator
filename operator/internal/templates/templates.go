@@ -44,6 +44,14 @@ type Values struct {
 	// OpenShift the SCC gives each pod its user, anywhere else the chart names
 	// one (z.podSecurity). The reconciler sets it from what it discovered.
 	OpenShift bool
+	// PostgresVolume is where the bundled Postgres's data is this pass —
+	// "emptyDir" or a claim's name — and PostgresMigrate whether the copy onto
+	// its claim (spec.storage.postgres) runs. The reconciler decides both from
+	// the running Postgres: a render never moves a database by itself, since a
+	// Postgres started on a new volume starts empty. Empty: a new install, on
+	// the claim.
+	PostgresVolume  string
+	PostgresMigrate bool
 }
 
 // NewValues builds the render context from a Zaentrum CR.
@@ -85,6 +93,10 @@ func (v Values) chartValues() map[string]interface{} {
 	if !spec.Storage.MediaSize.IsZero() {
 		mediaSize = spec.Storage.MediaSize.String()
 	}
+	postgresSize := "10Gi"
+	if !spec.Storage.Postgres.Size.IsZero() {
+		postgresSize = spec.Storage.Postgres.Size.String()
+	}
 	pull := make([]interface{}, 0, len(spec.ImagePullSecrets))
 	for _, s := range spec.ImagePullSecrets {
 		pull = append(pull, s)
@@ -121,6 +133,13 @@ func (v Values) chartValues() map[string]interface{} {
 			"provisionMedia":  derefBool(spec.Storage.ProvisionMedia, true),
 			"kafkaPvc":        spec.Storage.KafkaPVC,
 			"kafkaNode":       spec.Storage.KafkaNode,
+			"postgres": map[string]interface{}{
+				"size":      postgresSize,
+				"className": spec.Storage.Postgres.ClassName,
+				"claimName": spec.Storage.Postgres.ClaimName,
+				"current":   v.PostgresVolume,
+				"migrate":   v.PostgresMigrate,
+			},
 		},
 		"network": map[string]interface{}{
 			"issuerHostAliasIP": spec.Network.IssuerHostAliasIP,
@@ -303,6 +322,27 @@ const (
 // none (external identity).
 func RealmJob(hooks []*unstructured.Unstructured) *unstructured.Unstructured {
 	return hookJob(hooks, RealmJobName)
+}
+
+// The chart's Postgres migration Job (templates/postgres-migrate.yaml): it
+// copies the running Postgres's databases onto its claim.
+const (
+	// PostgresMigrationJobName is the hook Job's rendered name; each run gets
+	// a Job of its own named after it.
+	PostgresMigrationJobName = "postgres-migrate"
+	// PostgresMigrationContainer runs files/postgres-migrate.sh; its
+	// termination message is what was copied, or why not.
+	PostgresMigrationContainer = "migrate"
+	// AnnotationMigrationSource is where the copy reads from ("emptyDir" or a
+	// claim), AnnotationMigrationTarget the claim it writes.
+	AnnotationMigrationSource = "zaentrum.io/migration-source"
+	AnnotationMigrationTarget = "zaentrum.io/migration-target"
+)
+
+// PostgresMigrationJob returns the migration Job among the hooks, or nil when
+// the render copies nothing.
+func PostgresMigrationJob(hooks []*unstructured.Unstructured) *unstructured.Unstructured {
+	return hookJob(hooks, PostgresMigrationJobName)
 }
 
 // IsTestHook reports whether a rendered object is a Helm test hook (`helm

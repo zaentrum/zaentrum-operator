@@ -114,6 +114,33 @@ the console nor its sign-in needs a public route. Empty: the public host.
 {{- if not .Values.identity.exposeAdminConsole -}}http://localhost:8080/auth{{- end -}}
 {{- end -}}
 
+{{/* z.postgresClaim — the claim the bundled Postgres keeps its data on. */}}
+{{- define "z.postgresClaim" -}}
+{{- .Values.storage.postgres.claimName | default "postgres-data" -}}
+{{- end -}}
+
+{{/*
+z.postgresVolume — where the running Postgres's data is this render: "emptyDir"
+or a claim's name. storage.postgres.current when set (the operator always sets
+it); else what the running Postgres Deployment mounts (lookup, under helm
+install/upgrade), so that no upgrade moves a database by itself; else — a new
+install, or `helm template` — the claim.
+*/}}
+{{- define "z.postgresVolume" -}}
+{{- $volume := .Values.storage.postgres.current -}}
+{{- if not $volume -}}
+{{- $volume = include "z.postgresClaim" . -}}
+{{- $live := lookup "apps/v1" "Deployment" .Release.Namespace "postgres" -}}
+{{- range (dig "spec" "template" "spec" "volumes" (list) $live) -}}
+{{- if eq .name "data" -}}
+{{- if hasKey . "emptyDir" -}}{{- $volume = "emptyDir" -}}
+{{- else if .persistentVolumeClaim -}}{{- $volume = .persistentVolumeClaim.claimName -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $volume -}}
+{{- end -}}
+
 {{/* z.partOf — the app.kubernetes.io/part-of label value. */}}
 {{- define "z.partOf" -}}{{ .Values.global.partOf }}{{- end -}}
 

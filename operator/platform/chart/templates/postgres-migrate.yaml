@@ -1,0 +1,79 @@
+{{- if ne .Values.databases.mode "external" }}
+{{- $volume := include "z.postgresVolume" . }}
+{{- $claim := include "z.postgresClaim" . }}
+{{- if and .Values.storage.postgres.migrate (ne $volume $claim) }}
+# ── Moving the bundled Postgres onto its claim ──────────────────────────────
+#
+# Copies every database of the running Postgres — still on {{ $volume }} — onto
+# the claim {{ $claim }}, from the image the Postgres runs (files/postgres-migrate.sh).
+# Nothing switches here: the Postgres moves only once this has succeeded, by a
+# render whose storage.postgres.current is the claim. The script refuses a
+# claim that holds a database it did not write, or one a Postgres has run on.
+#
+# A Helm hook, so a plain Helm upgrade with storage.postgres.migrate runs it.
+# The operator never applies it with the platform: it starts it itself, as a
+# Job of its own, and switches the Postgres when it has succeeded
+# (internal/controller/database.go).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-migrate
+  labels:
+    app.kubernetes.io/name: postgres-migrate
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  annotations:
+    helm.sh/hook: post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+    zaentrum.io/migration-source: {{ $volume | quote }}
+    zaentrum.io/migration-target: {{ $claim | quote }}
+spec:
+  # One attempt, kept until it is deleted: a failed copy is looked at, not
+  # repeated.
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-migrate
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      # The user the Postgres runs as: the image's root, which hands the volume
+      # to its postgres user as the Postgres's own entrypoint does, or — on
+      # OpenShift — the namespace's user.
+      containers:
+        - name: migrate
+          image: postgres:16-alpine
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+{{ .Files.Get "files/postgres-migrate.sh" | indent 14 }}
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+            - name: POSTGRES_DB
+              value: zaentrum
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: SOURCE_HOST
+              value: postgres
+            - name: TARGET
+              value: {{ $claim | quote }}
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          terminationMessagePolicy: File
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: {{ $claim }} }
+{{- end }}
+{{- end }}

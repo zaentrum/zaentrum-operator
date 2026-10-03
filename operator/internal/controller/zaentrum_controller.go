@@ -128,6 +128,9 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	vals := templates.NewValues(&z)
 	vals.OpenShift = openShift
 	vals.Version = decision.RenderTag
+	// Every install keeps the bundled Postgres where it has always been until
+	// the operator decides from the running Postgres where its data is.
+	vals.PostgresVolume = "emptyDir"
 	rendered, err := templates.Render(vals)
 	if err != nil {
 		r.setApplied(&z, metav1.ConditionFalse, "RenderFailed", err.Error())

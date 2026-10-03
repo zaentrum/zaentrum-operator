@@ -1,0 +1,67 @@
+# The bundled Postgres's Deployment as the operator rendered it for the demo
+# profile (values-demo.yaml) before the chart kept the database on a claim, at
+# fad0e28. An install whose Postgres runs on emptyDir must keep getting exactly
+# this: any change to its pod template rolls the pod, and with it the emptyDir
+# and the whole database (TestPostgresOnEmptyDirRendersAsBefore).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: zaentrum-demo
+  name: postgres
+  namespace: zaentrum-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: zaentrum-db
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: zaentrum-db
+        - name: POSTGRES_DB
+          value: zaentrum
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        image: postgres:16-alpine
+        name: postgres
+        ports:
+        - containerPort: 5432
+          name: pg
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - zaentrum
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: data
+        - mountPath: /docker-entrypoint-initdb.d
+          name: initdb
+          readOnly: true
+      volumes:
+      - emptyDir:
+          sizeLimit: 5Gi
+        name: data
+      - configMap:
+          name: postgres-initdb
+        name: initdb

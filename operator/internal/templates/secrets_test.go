@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -27,14 +28,18 @@ func newCluster(t *testing.T, objs ...runtime.Object) cluster {
 	t.Helper()
 	s := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(s))
+	require.NoError(t, appsv1.AddToScheme(s))
 	return cluster{dynamicfake.NewSimpleDynamicClient(s, objs...)}
 }
 
 func (c cluster) GetClientFor(apiVersion, kind string) (dynamic.NamespaceableResourceInterface, bool, error) {
-	if apiVersion != "v1" || kind != "Secret" {
-		return nil, false, fmt.Errorf("the chart looks up %s %s; only Secrets are expected", apiVersion, kind)
+	switch {
+	case apiVersion == "v1" && kind == "Secret":
+		return c.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}), true, nil
+	case apiVersion == "apps/v1" && kind == "Deployment":
+		return c.client.Resource(schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}), true, nil
 	}
-	return c.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}), true, nil
+	return nil, false, fmt.Errorf("the chart looks up %s %s; only Secrets and Deployments are expected", apiVersion, kind)
 }
 
 // secretData is a rendered Secret's stringData.

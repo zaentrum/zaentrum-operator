@@ -37,6 +37,24 @@ storage:
   provisionMedia: true      # false → an external PV backs the `media` PVC (demo NFS); chart skips the PVC
   kafkaPvc: ""              # name of a pre-created PVC for kafka's log dir (topics survive restart); "" → emptyDir
   kafkaNode: ""             # kubernetes.io/hostname to pin kafka to (needed for a node-local kafkaPvc); "" → unpinned
+  # The bundled Postgres (databases.mode perApp or single) keeps users, watch
+  # state and the catalog on a claim.
+  postgres:
+    size: 10Gi
+    className: ""           # empty: storage.className, else the cluster's default
+    claimName: ""           # an existing claim; empty: the chart provisions postgres-data
+    # Where the running Postgres's data is when it is not on that claim yet:
+    # "emptyDir" (an install from before the chart kept it on a claim) or another
+    # claim's name. Empty: Helm looks at the running Postgres and keeps it where
+    # it is — a Postgres started on a new volume starts empty — and a new install
+    # starts on the claim. The operator always says.
+    current: ""
+    # Copy the databases from where they are onto the claim (a post-upgrade
+    # hook, templates/postgres-migrate.yaml); the Postgres stays where it is.
+    # Once the copy has succeeded, switch it with current set to the claim's
+    # name (postgres-data), migrate false. The operator does both itself
+    # (spec.storage.postgres.migrate).
+    migrate: false
 
 # Event streaming: the bundled broker, or a shared external cluster (per-tenant
 # topic prefix + mTLS). External mode skips the bundled kafka entirely.

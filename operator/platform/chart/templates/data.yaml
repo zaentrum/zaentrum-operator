@@ -1,6 +1,11 @@
 {{- if ne .Values.databases.mode "external" }}
-# Demo Postgres + Valkey — EPHEMERAL (emptyDir): a demo auto-resets, and emptyDir
-# sidesteps the no-dynamic-provisioner storage blocker on this cluster.
+{{- $volume := include "z.postgresVolume" . }}
+{{- $claim := include "z.postgresClaim" . }}
+# The bundled Postgres keeps users, watch state and the catalog on a claim
+# (storage.postgres), so they outlive the pod. An install from before that runs
+# it on an emptyDir, which a reschedule empties; it stays there until a copy
+# moves it (z.postgresVolume, postgres-migrate.yaml), since a Postgres started on
+# a new volume starts empty.
 # OKD restricted-v2 runs an arbitrary high UID, so PGDATA is a subdir the
 # container creates+owns (the chino-wunsch postgres proves this pattern).
 apiVersion: v1
@@ -53,7 +58,11 @@ spec:
             periodSeconds: 10
       volumes:
         - name: data
-          emptyDir: { sizeLimit: 5Gi }     # ephemeral demo DB
+{{- if eq $volume "emptyDir" }}
+          emptyDir: { sizeLimit: 5Gi }     # lost whenever the pod moves
+{{- else }}
+          persistentVolumeClaim: { claimName: {{ $volume }} }
+{{- end }}
         - name: initdb
           configMap: { name: postgres-initdb }
 ---
@@ -65,6 +74,23 @@ metadata:
 spec:
   selector: { app: postgres }
   ports: [{ name: pg, port: 5432, targetPort: pg }]
+{{- if and (not .Values.storage.postgres.claimName) (or (eq $volume $claim) .Values.storage.postgres.migrate) }}
+---
+# The claim the chart provisions, when it is the one the data lives on or is
+# copied onto; one an install brings (storage.postgres.claimName) is its own.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  labels: { app: postgres, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  # One Postgres mounts it (the Deployment's strategy is Recreate).
+  accessModes: [ReadWriteOnce]
+{{- with (.Values.storage.postgres.className | default .Values.storage.className) }}
+  storageClassName: {{ . | quote }}
+{{- end }}
+  resources: { requests: { storage: {{ .Values.storage.postgres.size | default "10Gi" | quote }} } }
+{{- end }}
 {{- end }}
 ---
 apiVersion: apps/v1
