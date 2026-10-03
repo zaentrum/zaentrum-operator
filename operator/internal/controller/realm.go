@@ -38,11 +38,14 @@ import (
 // and its image — differs from that of the last run. The Job compares before
 // it writes, so a run over a realm that is already right changes nothing.
 //
-// One run at a time. A run that succeeded is kept for a day (the hook's
-// ttlSecondsAfterFinished) and then runs again, so a redirect someone added by
-// hand does not stay; one that failed is tried again after realmRetryAfter, as
-// a Keycloak that refused is often only a Keycloak that was restarting. A run
-// starts only while Keycloak is available. The RealmConfigured condition says
+// One run at a time, and never beside a verification run: a realm run may move
+// where the master realm signs in, which ends the master token the
+// verification's account preparation holds. A run that succeeded is kept for
+// a day (the hook's ttlSecondsAfterFinished) and then runs again, so a
+// redirect someone added by hand does not stay; one that failed is tried again
+// after realmRetryAfter, as a Keycloak that refused is often only a Keycloak
+// that was restarting. A run starts only while Keycloak is available. The
+// RealmConfigured condition says
 // what the latest run did or why it failed. It never moves the phase or the
 // Ready condition, and never fails a reconcile.
 
@@ -117,6 +120,14 @@ func (r *ZaentrumReconciler) configureRealm(ctx context.Context, z *zaentrumv1al
 		setCondition(z, condTypeRealmConfigured, metav1.ConditionUnknown, "WaitingForKeycloak",
 			"the realm's clients are brought in step once Keycloak is available: "+why)
 		return false
+	}
+	if v := z.Status.Verification; v != nil && v.Result == zaentrumv1alpha1.VerificationRunning {
+		// A run can move where the master realm signs in, which ends every
+		// master token in flight — the one the verification's account
+		// preparation holds among them. The two never overlap.
+		setCondition(z, condTypeRealmConfigured, metav1.ConditionUnknown, "Waiting",
+			"the realm's clients are brought in step once the verification run "+v.Job+" has ended")
+		return true
 	}
 	for i := range runs {
 		err := r.Delete(ctx, &runs[i], client.PropagationPolicy(metav1.DeletePropagationBackground))

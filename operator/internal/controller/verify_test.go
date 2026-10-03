@@ -1014,19 +1014,31 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 		require.NoError(t, c.Status().Update(ctx, d))
 	}
 
+	// Keycloak is available: the realm's clients are brought in step first,
+	// and the check waits for that run, which may end the master token the
+	// check's account preparation would hold.
 	res, err = r.Reconcile(ctx, req)
 	require.NoError(t, err)
 	assert.Equal(t, verifyRequeueAfter, res.RequeueAfter, "polled while a run is in flight")
 	got := get()
 	assert.Equal(t, "Ready", got.Status.Phase)
+	assert.Nil(t, got.Status.Verification, "the check waits for the realm run")
+	var realm batchv1.JobList
+	require.NoError(t, c.List(ctx, &realm, client.InNamespace(verifyNS), client.MatchingLabels{labelRealm: realmRun}))
+	require.Len(t, realm.Items, 1)
+	realmRun := realm.Items[0]
+	realmRun.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+	require.NoError(t, c.Status().Update(ctx, &realmRun))
+
+	res, err = r.Reconcile(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, verifyRequeueAfter, res.RequeueAfter, "polled while a run is in flight")
+	got = get()
 	require.NotNil(t, got.Status.Verification)
 	assert.Equal(t, zaentrumv1alpha1.VerificationRunning, got.Status.Verification.Result)
 	require.NoError(t, c.List(ctx, &jobs, client.InNamespace(verifyNS), runs))
 	require.Len(t, jobs.Items, 1)
 	job := jobs.Items[0]
-	var realm batchv1.JobList
-	require.NoError(t, c.List(ctx, &realm, client.InNamespace(verifyNS), client.MatchingLabels{labelRealm: realmRun}))
-	assert.Len(t, realm.Items, 1, "the realm's clients are brought in step beside the check")
 
 	// The run fails a check. The platform stays Ready.
 	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"}}
@@ -1044,7 +1056,7 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 
 	res, err = r.Reconcile(ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, verifyRequeueAfter, res.RequeueAfter, "the realm run is still in flight")
+	assert.Equal(t, requeueAfter, res.RequeueAfter)
 	got = get()
 	assert.Equal(t, "Ready", got.Status.Phase)
 	ready := meta.FindStatusCondition(got.Status.Conditions, condTypeReady)
@@ -1058,6 +1070,7 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 
 	res, err = r.Reconcile(ctx, req)
 	require.NoError(t, err)
+	assert.Equal(t, requeueAfter, res.RequeueAfter)
 	require.NoError(t, c.List(ctx, &jobs, client.InNamespace(verifyNS), runs))
 	assert.Len(t, jobs.Items, 1, "a failed fingerprint is not run again")
 }

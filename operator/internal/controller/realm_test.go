@@ -308,3 +308,19 @@ func TestRealmFingerprint(t *testing.T) {
 	assert.Equal(t, same, render(func(z *zaentrumv1alpha1.Zaentrum) { z.Spec.Replicas = map[string]int32{"chino-api": 3} }),
 		"what the realm holds does not follow a replica count")
 }
+
+// A realm run never starts beside a verification run, whose account
+// preparation holds a master token a realm run may end.
+func TestRealmWaitsForAVerificationRun(t *testing.T) {
+	e := newRealmEnv(t, verifyCR())
+	e.keycloak(1)
+	e.z.Status.Verification = &zaentrumv1alpha1.VerificationStatus{Result: zaentrumv1alpha1.VerificationRunning, Job: "zaentrum-verify-abcde"}
+	require.True(t, e.pass(), "come back soon: the check ends within minutes")
+	assert.Empty(t, e.runs())
+	assert.Equal(t, "Waiting", e.cond().Reason)
+	assert.Contains(t, e.cond().Message, "zaentrum-verify-abcde")
+
+	e.z.Status.Verification.Result = zaentrumv1alpha1.VerificationPassed
+	require.True(t, e.pass())
+	assert.Len(t, e.runs(), 1, "once the check has ended")
+}

@@ -217,8 +217,10 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// The platform's self-test, after every update that leaves it Ready and on
 	// request. It reads the readiness just computed and writes only
-	// status.verification and the Verified condition; see verify.go.
-	verifying := r.verify(ctx, &z, vals.Version, objs, tests, allReady)
+	// status.verification and the Verified condition; see verify.go. A run
+	// waits for a realm run in flight, as a realm run waits for it: the realm
+	// Job may end the master token the check's account preparation holds.
+	verifying := r.verify(ctx, &z, vals.Version, objs, tests, allReady && !configuring)
 
 	if err := r.patchStatus(ctx, &z); err != nil {
 		return ctrl.Result{}, err
