@@ -34,20 +34,22 @@ MANIFEST_DIR=/var/lib/rancher/k3s/server/manifests
 # (the latter drives the in-cluster rewrite). They must agree, because the
 # issuer host is both the browser host and the in-cluster validation host.
 
-# --- in-cluster split-horizon for the OIDC issuer host ----------------------
+# --- in-cluster split-horizon for the public host -------------------------
 # The bundled Keycloak pins its issuer to the PUBLIC host (KC_HOSTNAME ->
 # http://zaentrum.localhost/auth), so tokens carry iss=http://zaentrum.localhost/auth/
 # realms/zaentrum. The Go services validate with coreos/go-oidc, which fetches
 # {OIDC_ISSUER}/.well-known/openid-configuration and requires the doc `issuer`
-# AND the token `iss` to equal OIDC_ISSUER. For that to work from inside the
-# cluster, the issuer host must resolve to Keycloak. We add a coredns-custom
-# entry rewriting zaentrum.localhost straight to the keycloak Service — pods then
-# reach the issuer directly (no ingress hop, Keycloak serves /auth natively), so
-# discovery + JWKS succeed while the browser reaches the SAME host on 127.0.0.1
-# (the *.localhost auto-resolution). To run under a different name, set your real
-# host in deploy/base/ingress.yaml + KC_HOSTNAME + OIDC_ISSUER + STUBE_ISSUER_HOST
-# (this rewrite follows STUBE_ISSUER_HOST). k3s applies anything in the manifest
-# dir, so drop the ConfigMap there. CoreDNS hot-reloads the import on change.
+# AND the token `iss` to equal OIDC_ISSUER — so from inside the cluster, the
+# public host has to answer too. We add a coredns-custom entry resolving
+# zaentrum.localhost to Traefik, the ingress the browser reaches on 127.0.0.1
+# (the *.localhost auto-resolution): a pod then takes exactly the browser's
+# routes — /auth to Keycloak for discovery and JWKS, and every app path as well,
+# which the platform's own check (status.verification) walks. Resolving the host
+# straight to Keycloak served /auth alone. To run under a different name, set your
+# real host in deploy/base/ingress.yaml + KC_HOSTNAME + OIDC_ISSUER +
+# STUBE_ISSUER_HOST (this rewrite follows STUBE_ISSUER_HOST). k3s applies anything
+# in the manifest dir, so drop the ConfigMap there. CoreDNS hot-reloads the import
+# on change.
 ISSUER_HOST="${STUBE_ISSUER_HOST:-zaentrum.localhost}"
 cat > "$MANIFEST_DIR/coredns-custom.yaml" <<EOF
 apiVersion: v1
@@ -60,7 +62,7 @@ data:
     ${ISSUER_HOST}:53 {
       template IN A ${ISSUER_HOST} {
         match ^${ISSUER_HOST}\.\$
-        answer "{{ .Name }} 5 IN CNAME keycloak.zaentrum.svc.cluster.local"
+        answer "{{ .Name }} 5 IN CNAME traefik.kube-system.svc.cluster.local"
         upstream
       }
       forward . /etc/resolv.conf

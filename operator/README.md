@@ -280,9 +280,10 @@ the platform as it then stands, and answers a request made in the meantime.
 
 Where the public host cannot reach the front door from inside the cluster, the
 route checks fail there even though users are fine — for instance where an
-in-cluster DNS rewrite sends the host to the identity provider alone, as the
-all-in-one appliance's does. Point `network.issuerHostAliasIP` at the edge, or
-turn verification off.
+in-cluster DNS rewrite sends the host to the identity provider alone. Resolve
+the host to the edge instead: `network.issuerHostAliasIP`, or a DNS rewrite to
+the ingress, as the all-in-one appliance does (its CoreDNS entry names Traefik),
+so a pod takes the routes a browser takes.
 
 RBAC needs nothing new: the ClusterRole already holds `jobs`, `secrets` and
 `pods` `get`/`list`; reading a run's pod is the first use of `pods/list` by the
