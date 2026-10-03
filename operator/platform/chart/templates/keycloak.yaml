@@ -231,9 +231,12 @@ metadata:
   labels: { app: keycloak }
 spec:
   selector: { app: keycloak }
-  # Pinned ClusterIP so the services' hostAliases (the platform hostname →
-  # this IP) stay valid across redeploys; the issuer host resolves straight to
-  # this Service on :80 (-> container :8080, which serves /auth).
-  clusterIP: 172.30.102.125
+  # No pinned ClusterIP: the cluster assigns one from its own service range. A
+  # fixed address only fits the cluster it was picked on — on k3s, whose range
+  # is 10.43.0.0/16, the Service could not even be created. Nothing resolves the
+  # platform hostname to this Service any more: pods reach the issuer through the
+  # router (network.issuerHostAliasIP) or, on the appliance, a DNS rewrite to the
+  # ingress. A Service created with the old pin keeps its address — Kubernetes
+  # carries an allocated clusterIP over when an apply leaves it out.
   ports: [{ name: http, port: 80, targetPort: http }]
 {{- end }}

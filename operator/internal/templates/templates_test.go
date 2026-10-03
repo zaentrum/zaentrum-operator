@@ -73,6 +73,13 @@ func TestRenderSelfHost(t *testing.T) {
 	assert.Nil(t, find(t, objs, "Deployment", "analyzer"), "pipeline off by default")
 	assert.NotNil(t, find(t, objs, "Secret", "zaentrum-db"), "dev secrets rendered")
 	assert.NotNil(t, find(t, objs, "PersistentVolumeClaim", "media"), "media PVC provisioned")
+	// The cluster assigns Keycloak's address from its own service range: a
+	// pinned one fits only the cluster it was picked on (on k3s, 10.43.0.0/16,
+	// the Service could not be created at all).
+	kc := find(t, objs, "Service", "keycloak")
+	require.NotNil(t, kc)
+	_, pinned, _ := unstructured.NestedString(kc.Object, "spec", "clusterIP")
+	assert.False(t, pinned, "the keycloak Service pins no clusterIP")
 	for _, o := range objs {
 		assert.Equal(t, "zaentrum", o.GetNamespace(), "namespace on %s/%s", o.GetKind(), o.GetName())
 	}
