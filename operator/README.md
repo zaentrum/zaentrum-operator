@@ -444,6 +444,13 @@ with `kcadm`, nothing else of a client, and leaves alone what is already so.
 `RealmConfigured` reports its summary, or why it failed; a failed run is tried
 again after ten minutes.
 
+The same run retires a password every bundled install once shared: a realm
+imported without Secret `zaentrum-demo-user` gave its `demo` user the
+password `${DEMO_USER_PASSWORD}`, the placeholder itself. If `demo` still
+signs in with it, it gets the Secret's password (the operator makes the Secret
+unless secrets are external), or is disabled where there is none. A `demo`
+user with a password of its own is left alone.
+
 ### The admin console
 
 Keycloak's admin console and admin API are not on the public host: the Routes
