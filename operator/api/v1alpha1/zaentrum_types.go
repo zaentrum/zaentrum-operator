@@ -72,6 +72,16 @@ type IdentitySpec struct {
 	// LoginTheme is the bundled Keycloak login theme name (empty = Keycloak default).
 	// +optional
 	LoginTheme string `json:"loginTheme,omitempty"`
+
+	// ExposeAdminConsole publishes the bundled Keycloak's admin console and its
+	// admin API on the public host, under /auth/admin. Off by default: the
+	// public host then routes only what people sign in through — /auth/realms
+	// (the login and account pages, the OIDC endpoints) and /auth/resources —
+	// and the console answers only through a port-forward, at
+	// http://localhost:8080/auth/admin/ after
+	// `kubectl port-forward svc/keycloak 8080:80`.
+	// +optional
+	ExposeAdminConsole bool `json:"exposeAdminConsole,omitempty"`
 }
 
 // StorageSpec configures persistent storage for the media library.

@@ -551,6 +551,16 @@ spec:
                     description: ClientID is the public OIDC client id the web SPA
                       authenticates as.
                     type: string
+                  exposeAdminConsole:
+                    description: |-
+                      ExposeAdminConsole publishes the bundled Keycloak's admin console and its
+                      admin API on the public host, under /auth/admin. Off by default: the
+                      public host then routes only what people sign in through — /auth/realms
+                      (the login and account pages, the OIDC endpoints) and /auth/resources —
+                      and the console answers only through a port-forward, at
+                      http://localhost:8080/auth/admin/ after
+                      `kubectl port-forward svc/keycloak 8080:80`.
+                    type: boolean
                   issuer:
                     description: |-
                       Issuer is the public OIDC issuer URL. When empty in bundled mode the
