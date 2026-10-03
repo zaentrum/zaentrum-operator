@@ -41,7 +41,10 @@ rules:
       - serviceaccounts
       - persistentvolumeclaims
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Workloads.
+  # Workloads. Jobs are also the platform's self-test: the operator creates one
+  # Job per verification run, reads it, and deletes the previous run's. Secrets
+  # (above) include the test account's, zaentrum-verify, which the operator
+  # creates and fills in.
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -82,6 +85,9 @@ rules:
   # report about the operator is not worth widening the operator's reach, which
   # is also why the Deployment name is derived from the pod's ReplicaSet owner
   # instead of adding a replicasets rule to read it.
+  #
+  # pods/list is how verification reads a run's result: the termination message
+  # of the run Job's pod. Read uncached, so no pod watch is needed.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]

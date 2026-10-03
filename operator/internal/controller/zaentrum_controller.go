@@ -59,6 +59,16 @@ type ZaentrumReconciler struct {
 	// Digest is the registry resolver. A shared instance keeps its digest cache
 	// warm across the 30s reconciles.
 	Digest *digest.Resolver
+
+	// APIReader reads straight from the API server. Verification reads its
+	// Jobs, their pods and the test account's Secret through it, so the
+	// operator does not cache every Job and Pod in the cluster to do so. Nil
+	// falls back to the client.
+	APIReader client.Reader
+
+	// Now is the clock verification timestamps come from; nil is time.Now.
+	// Tests set it.
+	Now func() time.Time
 }
 
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums,verbs=get;list;watch;create;update;patch;delete
@@ -74,7 +84,11 @@ type ZaentrumReconciler struct {
 // status.controller. Both verbs are already in the ClusterRole, held so the
 // operator may grant them to portal-api — this is the first use that reads
 // with them rather than handing them on.
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get
+// Verification (verify.go) reads the pod of each run's Job to collect its
+// report — the first use of pods/list here, also held for portal-api — and
+// creates and deletes the run's Job and the test account's Secret with the jobs
+// and secrets verbs above.
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list
 
 // Reconcile renders the embedded templates for the Zaentrum CR and applies every
 // object via server-side apply, then refreshes status.
@@ -108,9 +122,9 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, fmt.Errorf("render templates: %w", err)
 	}
 
-	// The chart's test hooks are not the platform: `helm test` runs them, and
-	// the operator never applies them with it.
-	objs, _ := templates.SplitTestHooks(rendered)
+	// The chart's test hooks are not the platform. They are never applied with
+	// it; the verification Job among them is started on its own (verify.go).
+	objs, tests := templates.SplitTestHooks(rendered)
 
 	z.Status.Phase = "Reconciling"
 
@@ -119,8 +133,9 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// harmless no-op flap-wise (that digest never moves), while a moving tag —
 	// "latest" OR a channel tag like "edge" — is exactly the case that needs it.
 	// Best-effort: an unresolvable image keeps its tag, so a registry hiccup
-	// degrades to today's behaviour instead of blocking the reconcile.
-	r.pinDigests(ctx, &z, objs)
+	// degrades to today's behaviour instead of blocking the reconcile. The test
+	// hooks are pinned in the same pass, so a run uses the images of its time.
+	r.pinDigests(ctx, &z, append(objs[:len(objs):len(objs)], tests...))
 
 	// Apply each object via server-side apply with our field manager. Set the
 	// Zaentrum as owner on namespaced resources so they GC with the CR (the
@@ -171,11 +186,19 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		r.setReady(&z, metav1.ConditionFalse, "ComponentsNotReady", "waiting for components to become ready")
 	}
 
+	// The platform's self-test, after every update that leaves it Ready and on
+	// request. It reads the readiness just computed and writes only
+	// status.verification and the Verified condition; see verify.go.
+	verifying := r.verify(ctx, &z, vals.Version, objs, tests, allReady)
+
 	if err := r.patchStatus(ctx, &z); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
+	if verifying {
+		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
+	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 

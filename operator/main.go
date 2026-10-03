@@ -100,6 +100,7 @@ func main() {
 		ReleasesURL: releasesURL,
 		PinDigests:  pinDigests,
 		Digest:      digest.New(nil),
+		APIReader:   mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Zaentrum")
 		os.Exit(1)

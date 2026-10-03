@@ -1157,7 +1157,9 @@ rules:
 # Held so the operator may GRANT them to the portal-api Role (operator console);
 # the RBAC escalation check requires the grantor to hold what it grants. pods/get
 # and deployments/get are also what the operator reads to report its OWN
-# controller in status.controller — no rule was added for that.
+# controller in status.controller — no rule was added for that. pods/list is how
+# verification reads a run's result from the run Job's pod (the jobs and secrets
+# rules above cover the run's Job and the test account's Secret).
 - apiGroups:
   - ""
   resources:
