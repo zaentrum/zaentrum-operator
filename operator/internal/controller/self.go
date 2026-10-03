@@ -122,8 +122,12 @@ func (r *ZaentrumReconciler) selfPod(ctx context.Context) (*corev1.Pod, bool) {
 	if name == "" || ns == "" {
 		return nil, false
 	}
+	// Straight from the API server, as verification reads its pods: a cached
+	// read would start a Pod informer over the whole cluster, which the
+	// operator may list but not watch (its ClusterRole holds pods get/list) —
+	// it re-lists every pod in the cluster, failing to watch, again and again.
 	var pod corev1.Pod
-	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &pod); err != nil {
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &pod); err != nil {
 		log.FromContext(ctx).Info("controller self-report: own pod not readable",
 			"pod", ns+"/"+name, "error", err.Error())
 		return nil, false

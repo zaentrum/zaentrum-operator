@@ -639,3 +639,21 @@ func TestControllerReportDisturbsNothingElse(t *testing.T) {
 	z.Status.Controller = nil
 	assert.Equal(t, before, z.Status, "only status.controller changed")
 }
+
+// The controller reads its own pod straight from the API server, never through
+// the cache: a cached read would start a Pod informer over the whole cluster,
+// and the operator may list pods but not watch them.
+func TestControllerReadsItsOwnPodUncached(t *testing.T) {
+	selfEnv(t)
+	image := "ghcr.io/zaentrum/operator:sha-a3d32ba16e1c89d3c3cfcd726f85502a3da39d39"
+	s := selfScheme(t)
+	r := &ZaentrumReconciler{
+		// The cache has no pod; only the API server does.
+		Client:    fake.NewClientBuilder().WithScheme(s).Build(),
+		APIReader: fake.NewClientBuilder().WithScheme(s).WithObjects(managerPod(image)).Build(),
+		Scheme:    s,
+	}
+	pod, ok := r.selfPod(context.Background())
+	require.True(t, ok, "the pod is read from the API server")
+	assert.Equal(t, selfPodName, pod.Name)
+}
