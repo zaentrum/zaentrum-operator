@@ -25,6 +25,21 @@ these so image/issuer/hostAliases/pull-secrets/labels stay consistent.
 {{- if or (eq .Values.identity.issuerScheme "https") .Values.routing.provisionRoutes -}}https{{- else -}}http{{- end -}}://{{ .Values.global.hostname }}
 {{- end -}}
 
+{{/*
+z.secretValue — a value for one key of a Secret the chart renders for a plain
+Helm install: what the cluster's Secret already holds (lookup, so an upgrade
+never rotates it), else .value, else .length (default 32) random alphanumerics.
+Use: {{ include "z.secretValue" (dict "root" . "secret" "zaentrum-db" "key" "password") }}
+*/}}
+{{- define "z.secretValue" -}}
+{{- $have := "" -}}
+{{- $live := lookup "v1" "Secret" .root.Release.Namespace .secret -}}
+{{- if and $live $live.data -}}
+{{- with index $live.data .key -}}{{- $have = b64dec . -}}{{- end -}}
+{{- end -}}
+{{- if $have -}}{{ $have }}{{- else if .value -}}{{ .value }}{{- else -}}{{ randAlphaNum (.length | default 32) }}{{- end -}}
+{{- end -}}
+
 {{/* z.partOf — the app.kubernetes.io/part-of label value. */}}
 {{- define "z.partOf" -}}{{ .Values.global.partOf }}{{- end -}}
 

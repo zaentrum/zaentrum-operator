@@ -1,0 +1,14 @@
+Zaentrum answers at {{ include "z.publicURL" . }} once its pods are ready.
+{{- if eq .Values.identity.mode "bundled" }}
+{{- if .Values.secrets.external }}
+
+The first administrator, admin, signs in with the one-time password in
+realm-admin-password of Secret zaentrum-keycloak-admin, which you provided.
+{{- else }}
+
+The first administrator, admin, signs in with a one-time password generated
+for this install, and chooses a new one at that first sign-in:
+
+  kubectl -n {{ .Release.Namespace }} get secret zaentrum-keycloak-admin -o jsonpath='{.data.realm-admin-password}' | base64 -d
+{{- end }}
+{{- end }}
