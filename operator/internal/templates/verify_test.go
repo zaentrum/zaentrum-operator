@@ -315,9 +315,11 @@ func TestVerificationDisabledRendersNoHook(t *testing.T) {
 	z := base("zaentrum")
 	no := false
 	z.Spec.Verification.Enabled = &no
-	platform, tests := renderSplit(t, z)
-	assert.Empty(t, tests)
-	assert.Nil(t, VerifyJob(tests))
+	platform, hooks := renderSplit(t, z)
+	for _, h := range hooks {
+		assert.False(t, IsTestHook(h), "%s/%s: a check with verification off", h.GetKind(), h.GetName())
+	}
+	assert.Nil(t, VerifyJob(hooks))
 	assert.NotEmpty(t, platform)
 }
 

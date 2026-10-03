@@ -856,7 +856,7 @@ func TestVerifyDisabled(t *testing.T) {
 	no := false
 	z.Spec.Verification.Enabled = &no
 	e.render()
-	assert.Empty(t, e.tests, "no checks rendered")
+	assert.Nil(t, templates.VerifyJob(e.tests), "no checks rendered")
 	assert.False(t, e.pass(true))
 	v := e.v()
 	assert.Equal(t, zaentrumv1alpha1.VerificationSkipped, v.Result)

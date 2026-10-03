@@ -287,6 +287,23 @@ const (
 	VerifyAccountContainer = "account"
 )
 
+// The chart's realm Job (templates/realm.yaml): it writes the platform's own
+// sign-in redirects into a realm that exists.
+const (
+	// RealmJobName is the hook Job's rendered name; each run gets a Job of its
+	// own named after it.
+	RealmJobName = "zaentrum-realm"
+	// RealmContainer runs files/realm-config.sh; its termination message is
+	// the run's summary, or why it failed.
+	RealmContainer = "realm"
+)
+
+// RealmJob returns the realm Job among the hooks, or nil when the render has
+// none (external identity).
+func RealmJob(hooks []*unstructured.Unstructured) *unstructured.Unstructured {
+	return hookJob(hooks, RealmJobName)
+}
+
 // IsTestHook reports whether a rendered object is a Helm test hook (`helm
 // test`). (The addon renderer drops them by the same rule.)
 func IsTestHook(obj *unstructured.Unstructured) bool {

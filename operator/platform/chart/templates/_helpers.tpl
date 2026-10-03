@@ -76,6 +76,8 @@ realm; the realm Job (realm.yaml) writes them into one that exists.
   chino-mobile  the published phone and tablet apps' custom scheme
   chino-tv      the device grant: no redirect at all
   zae           the command line's loopback redirects
+"+" as a post-logout value means the client's redirect URIs — what Keycloak
+gives a client that names none, and so what an import leaves.
 */}}
 {{- define "z.realmClients" -}}
 {{- $main := include "z.mainOrigins" . | fromJsonArray -}}
@@ -97,8 +99,8 @@ realm; the realm Job (realm.yaml) writes them into one that exists.
     "zaentrum-web" (dict "redirectUris" $portalBack "webOrigins" $main "attributes" (dict "post.logout.redirect.uris" (join "##" $portalOut)))
     "chino-web" (dict "redirectUris" $chinoBack "webOrigins" $web "attributes" (dict "post.logout.redirect.uris" (join "##" $web)))
     "chino-mobile" (dict "redirectUris" (list "cloud.nalet.chino:/oauth/callback") "webOrigins" (list) "attributes" (dict "post.logout.redirect.uris" "+"))
-    "chino-tv" (dict "redirectUris" (list) "webOrigins" (list))
-    "zae" (dict "redirectUris" (list "http://127.0.0.1/*" "http://localhost/*") "webOrigins" (list))
+    "chino-tv" (dict "redirectUris" (list) "webOrigins" (list) "attributes" (dict "post.logout.redirect.uris" "+"))
+    "zae" (dict "redirectUris" (list "http://127.0.0.1/*" "http://localhost/*") "webOrigins" (list) "attributes" (dict "post.logout.redirect.uris" "+"))
   | toJson -}}
 {{- end -}}
 

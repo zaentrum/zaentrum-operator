@@ -1,0 +1,85 @@
+{{- if eq .Values.identity.mode "bundled" }}
+# ── The bundled realm, kept in step with the platform ───────────────────────
+#
+# The realm import (keycloak-realm.yaml) only ever makes a new realm. A realm
+# that exists keeps what was imported when it was made, so this Job writes the
+# platform's own sign-in redirects (z.realmClients) into it, through the
+# in-cluster admin API, from the very image the platform's Keycloak runs. See
+# files/realm-config.sh. It changes nothing else of a client, and leaves alone
+# a client that already has them.
+#
+# A Helm hook, so a plain Helm install runs it after every install and upgrade.
+# The operator never applies it with the platform: it starts it itself, as a
+# Job of its own, whenever what it sets changes (internal/controller/realm.go).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zaentrum-realm
+  labels:
+    app.kubernetes.io/name: zaentrum-realm
+    app.kubernetes.io/component: identity
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  # One attempt: the script waits for Keycloak itself, and a second attempt
+  # would only repeat the first one's verdict.
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  # The last run is kept a day, for its logs and its verdict.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zaentrum-realm
+        app.kubernetes.io/component: identity
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      restartPolicy: Never
+      # It talks to Keycloak, never to the Kubernetes API.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      {{- include "z.podSecurity" . | nindent 6 }}
+      containers:
+        - name: realm
+          image: {{ .Values.keycloak.image }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+{{ .Files.Get "files/realm-config.sh" | indent 14 }}
+          env:
+            - name: KC_SERVER
+              value: http://keycloak:80/auth
+            - name: KC_ADMIN_USER
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: username, optional: true } }
+            # kcadm reads the admin password from here, so it is never an argument.
+            - name: KC_CLI_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: password, optional: true } }
+            # <clientId>|<redirect URIs>|<web origins>|<post-logout URIs ##-joined>
+            - name: REALM_CLIENTS
+              value: |
+{{- range $client, $c := include "z.realmClients" . | fromJson }}
+                {{ $client }}|{{ join " " $c.redirectUris }}|{{ join " " $c.webOrigins }}|{{ with $c.attributes }}{{ index . "post.logout.redirect.uris" }}{{ end }}
+{{- end }}
+            - name: HOME
+              value: /tmp
+            # kcadm starts a JVM per call: start it small and fast.
+            - name: KC_OPTS
+              value: -XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:-UsePerfData -XX:MaxRAMPercentage=50
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          terminationMessagePolicy: File
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+{{- end }}

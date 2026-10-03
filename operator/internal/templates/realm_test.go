@@ -9,7 +9,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 )
@@ -138,6 +141,10 @@ func TestRealmClientsAllowOnlyThePlatformsOwnRedirects(t *testing.T) {
 			assert.Empty(t, clients["chino-tv"].WebOrigins)
 			assert.Equal(t, []string{"http://127.0.0.1/*", "http://localhost/*"}, clients["zae"].RedirectURIs, "the CLI's loopback")
 			assert.Empty(t, clients["zae"].WebOrigins)
+			for _, id := range []string{"chino-tv", "zae"} {
+				assert.Equal(t, "+", clients[id].Attributes["post.logout.redirect.uris"],
+					"%s: what Keycloak gives a client that names none, so an import and the realm Job agree", id)
+			}
 			assert.Empty(t, clients["zaentrum-manager"].RedirectURIs, "a service account signs in through no browser")
 
 			for id, c := range clients {
@@ -277,4 +284,114 @@ func TestEveryRedirectReachesItsClient(t *testing.T) {
 		sort.Strings(checked)
 		assert.NotEmpty(t, checked, name)
 	}
+}
+
+// realmJob renders z and returns its realm Job, typed.
+func realmJob(t *testing.T, z *zaentrumv1alpha1.Zaentrum) *batchv1.Job {
+	t.Helper()
+	_, hooks := SplitHooks(renderCR(t, z))
+	u := RealmJob(hooks)
+	require.NotNil(t, u, "the render has no realm Job")
+	var job batchv1.Job
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &job))
+	return &job
+}
+
+// jobClients reads the realm Job's REALM_CLIENTS back into client settings.
+func jobClients(t *testing.T, job *batchv1.Job) map[string]realmClient {
+	t.Helper()
+	env := envByName(job.Spec.Template.Spec.Containers[0])
+	out := map[string]realmClient{}
+	for _, line := range strings.Split(strings.TrimSpace(env["REALM_CLIENTS"].Value), "\n") {
+		f := strings.Split(line, "|")
+		require.Len(t, f, 4, "a REALM_CLIENTS line is clientId|redirects|origins|post-logout: %q", line)
+		words := func(s string) []string {
+			if s == "" {
+				return []string{}
+			}
+			return strings.Split(s, " ")
+		}
+		out[f[0]] = realmClient{RedirectURIs: words(f[1]), WebOrigins: words(f[2]),
+			Attributes: map[string]string{"post.logout.redirect.uris": f[3]}}
+	}
+	return out
+}
+
+// The realm Job writes into an existing realm exactly what the import writes
+// into a new one: one derivation, two readers.
+func TestRealmJobSetsWhatTheImportSets(t *testing.T) {
+	for name, p := range redirectProfiles() {
+		imported := realmClients(t, renderCR(t, p.cr))
+		set := jobClients(t, realmJob(t, p.cr))
+		require.Len(t, set, 5, name)
+		for id, c := range set {
+			want := imported[id]
+			assert.Equal(t, want.RedirectURIs, c.RedirectURIs, "%s: %s", name, id)
+			assert.Equal(t, append([]string{}, want.WebOrigins...), c.WebOrigins, "%s: %s", name, id)
+			assert.Equal(t, want.Attributes["post.logout.redirect.uris"], c.Attributes["post.logout.redirect.uris"], "%s: %s", name, id)
+		}
+	}
+}
+
+// The Job a realm run starts from: a hook Helm runs after every install and
+// upgrade and the operator never applies, restricted-SCC friendly, from the
+// image the platform's Keycloak runs, the script as shipped, every credential
+// a reference.
+func TestRealmJobRendersTheConfiguration(t *testing.T) {
+	z := demoCR("zaentrum-demo")
+	z.Spec.Keycloak.Image = "registry.example.org/identity/keycloak:26.0.7-custom"
+	v := NewValues(z)
+	v.OpenShift = true
+	objs, err := Render(v)
+	require.NoError(t, err)
+	platform, hooks := SplitHooks(objs)
+	assert.Nil(t, find(t, platform, "Job", RealmJobName), "never applied with the platform")
+	u := RealmJob(hooks)
+	require.NotNil(t, u)
+	var job batchv1.Job
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &job))
+	spec := job.Spec.Template.Spec
+
+	assert.Equal(t, "post-install,post-upgrade", job.Annotations["helm.sh/hook"], "a plain Helm install runs it after each upgrade")
+	assert.Equal(t, "before-hook-creation", job.Annotations["helm.sh/hook-delete-policy"])
+	require.NotNil(t, job.Spec.BackoffLimit)
+	assert.Equal(t, int32(0), *job.Spec.BackoffLimit)
+	require.NotNil(t, job.Spec.ActiveDeadlineSeconds)
+	require.NotNil(t, job.Spec.TTLSecondsAfterFinished)
+	assert.Equal(t, corev1.RestartPolicyNever, spec.RestartPolicy)
+	require.NotNil(t, spec.AutomountServiceAccountToken)
+	assert.False(t, *spec.AutomountServiceAccountToken, "it talks to Keycloak, never to the Kubernetes API")
+	require.NotNil(t, spec.SecurityContext)
+	assert.True(t, *spec.SecurityContext.RunAsNonRoot)
+	assert.Nil(t, spec.SecurityContext.RunAsUser, "OpenShift gives the user")
+
+	require.Len(t, spec.Containers, 1)
+	c := spec.Containers[0]
+	assert.Equal(t, RealmContainer, c.Name)
+	assert.Equal(t, z.Spec.Keycloak.Image, c.Image, "the image the platform's Keycloak runs: it ships kcadm")
+	script, err := os.ReadFile("../../platform/chart/files/realm-config.sh")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/bin/bash", "-c"}, c.Command)
+	require.Len(t, c.Args, 1)
+	assert.Equal(t, string(script), c.Args[0], "the script runs exactly as shipped")
+	require.NotNil(t, c.SecurityContext)
+	assert.False(t, *c.SecurityContext.AllowPrivilegeEscalation)
+	assert.True(t, *c.SecurityContext.ReadOnlyRootFilesystem)
+	assert.Equal(t, []corev1.Capability{"ALL"}, c.SecurityContext.Capabilities.Drop)
+	assert.Equal(t, corev1.TerminationMessageReadFile, c.TerminationMessagePolicy)
+	assert.False(t, c.Resources.Limits.Memory().IsZero())
+	require.Len(t, c.VolumeMounts, 1)
+	assert.Equal(t, "/tmp", c.VolumeMounts[0].MountPath, "kcadm keeps its session in a scratch dir")
+
+	env := envByName(c)
+	assert.Equal(t, "http://keycloak:80/auth", env["KC_SERVER"].Value, "the in-cluster admin API")
+	secretRef(t, env, "KC_ADMIN_USER", "zaentrum-keycloak-admin", "username")
+	secretRef(t, env, "KC_CLI_PASSWORD", "zaentrum-keycloak-admin", "password")
+
+	// External identity has no realm to configure.
+	ext := base("zaentrum-beta")
+	ext.Spec.Identity.Mode = zaentrumv1alpha1.IdentityExternal
+	ext.Spec.Identity.Issuer = "https://sso.example.org/realms/x"
+	_, hooks = SplitHooks(renderCR(t, ext))
+	assert.Nil(t, RealmJob(hooks))
 }
