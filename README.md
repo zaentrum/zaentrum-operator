@@ -91,6 +91,12 @@ docker run -d --privileged -p 80:80 --name zaentrum ghcr.io/zaentrum/appliance:l
 kubectl apply -k deploy/base
 ```
 
+**After every update the platform checks itself** — outside-in through its public
+URL, with a real sign-in — and the operator reports the verdict in
+`status.verification` (`kubectl get zaentrum`, `zae platform status`). What runs,
+when, the test account and how to ask for a run:
+[operator/README.md](operator/README.md#the-platform-checks-itself-statusverification).
+
 **Running under a different name** (a LAN host, a public domain, or the box's IP):
 the issuer host must equal the host you reach Zaentrum at, so set it in all four places —
 `deploy/base/ingress.yaml` host, `zaentrum-env` `OIDC_ISSUER`, `zaentrum-keycloak-config`

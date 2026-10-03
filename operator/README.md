@@ -120,6 +120,174 @@ ClusterRole (held so the operator may grant them to `portal-api`). The
 Deployment's name is derived from the pod's ReplicaSet owner rather than read,
 so this report does not add a `replicasets` rule.
 
+### The platform checks itself (`status.verification`)
+
+After every update that leaves the platform Ready, the operator checks it the
+way a user meets it — from outside, through the public URL, with a real sign-in —
+and reports the verdict on the CR:
+
+```yaml
+status:
+  verification:
+    result:      Passed           # Passed | Failed | Running | Skipped | Error
+    trigger:     update           # update | request
+    request:     ""               # the last zaentrum.io/verify-request value answered
+    fingerprint: 7dc90b436e94     # which platform was verified (below)
+    version:     latest           # status.currentVersion when the run started
+    startedAt:   2026-10-03T09:00:10Z
+    finishedAt:  2026-10-03T09:00:15Z
+    job:         zaentrum-verify-cxklt
+    passed: 5
+    failed: 0
+    warned: 0
+    skipped: 0
+    checks:
+    - { name: tls,            status: ok, detail: "certificate valid, 61 days left" }
+    - { name: routes,         status: ok, detail: "3 public paths answer" }
+    - { name: oidc issuer,    status: ok, detail: "https://media.example.org/auth/realms/zaentrum serves discovery (advertised by /api/config)" }
+    - { name: sign-in,        status: ok, detail: "zaentrum-verify signed in through the zae client" }
+    - { name: image registry, status: ok, detail: "ghcr.io/zaentrum/portal-api:latest pulls anonymously" }
+    message: 5 of 5 checks passed
+  conditions:
+  - { type: Verified, status: "True", reason: Passed, message: 5 of 5 checks passed }
+```
+
+A failed run names what failed, in `checks` and in one line:
+
+```yaml
+    result: Failed
+    trigger: request
+    request: "1759482305"
+    passed: 3
+    failed: 1
+    warned: 0
+    skipped: 1
+    checks:
+    - { name: routes,  status: fail, detail: "not serving: /portal (502)" }
+    - { name: sign-in, status: skip, detail: "the portal is down, nothing to sign in to" }
+    # …
+    message: "1 of 5 checks failed: routes; skipped: sign-in"
+  conditions:
+  - { type: Verified, status: "False", reason: Failed, message: "1 of 5 checks failed: routes; skipped: sign-in" }
+```
+
+`kubectl get zaentrum` shows the result in its `VERIFIED` column, and `zae
+platform status` shows the whole of it.
+
+**What runs.** The checks ship the way Helm says a chart's checks should: as a
+chart test, [`templates/tests/verify.yaml`](platform/chart/templates/tests/verify.yaml)
+(`helm.sh/hook: test`), so a plain Helm install runs them with `helm test`. The
+operator never applies a test hook with the platform. It splits them off every
+render, pins their images to digests like the rest, and starts the verification
+Job itself, as a Job of its own (`zaentrum-verify-<suffix>`, owned by the
+Zaentrum). The Job runs `zae doctor --url <public URL> --sign-in --report
+/dev/termination-log` from `ghcr.io/zaentrum/zae` on the platform's tag: TLS,
+the published routes, the issuer, a real sign-in and whatever else the doctor
+checks. Its compact report is the container's termination message, which the
+operator reads back from the pod — no log scraping, nothing in the run that may
+write to the API. The public URL is `https://<hostname>` where the edge
+terminates TLS (OpenShift Routes, or `identity.issuerScheme: https`), else
+`http://<hostname>`. The Job gets the same `hostAliases` as the services that
+validate tokens (`network.issuerHostAliasIP`), so the public host resolves from
+inside the cluster the way it does for them. It runs under the restricted SCC:
+non-root, no privilege escalation, every capability dropped, `RuntimeDefault`
+seccomp, a read-only root filesystem, no service account token, one attempt
+(`backoffLimit: 0`) and a ten-minute deadline.
+
+**When a run happens.**
+
+- *After an update.* The fingerprint is the first 12 hex characters of the
+  sha256 over the sorted `deployment/container=image` lines of every platform
+  Deployment, init containers included, with images as applied after digest
+  pinning. When it differs from `status.verification.fingerprint` and the
+  platform is Ready, a run starts. A replica count or a configuration change
+  moves no image, so it starts no run by itself; ask for one.
+- *On request.* Any value of the annotation `zaentrum.io/verify-request` that
+  differs from `status.verification.request` asks for a run, once the platform
+  is Ready. `zae platform verify` sets a fresh value, and so can you:
+
+  ```sh
+  kubectl -n zaentrum annotate zaentrum zaentrum --overwrite \
+    zaentrum.io/verify-request="$(date +%s)"
+  ```
+
+  Only a run a request started answers it: an update-triggered run keeps the
+  last answered value, so an annotation left in place never reads as a new
+  request.
+- *One at a time, nothing dropped.* An update or a request that arrives while a
+  run is in flight waits for it to end; its verdict is written first, and the
+  next run starts on the next pass. The previous run's Job is deleted when the
+  next one starts, so at most the latest is kept, for its logs
+  (`kubectl logs job/zaentrum-verify-…`); `ttlSecondsAfterFinished` (one day)
+  is the backstop.
+- *Never again by itself.* A failed run, or one that could not start, is not
+  retried for the same fingerprint — a broken platform is not mended by asking
+  again every 30 seconds. A new update or a new request starts the next run.
+
+While a run is in flight the operator polls it every 10 seconds instead of 30
+(a Job watch would cache every Job in the cluster) and says in `message` what
+holds it up, if anything does — an image that does not pull, say — long before
+the deadline turns it into a verdict.
+
+**Passed, Failed, Error.** A readable report decides: any failed check is
+`Failed`; `Passed` takes no failed check *and* exit code 0. Without a verdict
+the result is `Error`, and `message` says why — the run could not start, the
+test account could not be prepared, the deadline passed, the runner was killed,
+the report could not be read (the kubelet keeps only the last 4 KiB of a
+termination message), or a report and an exit code disagree. `status.verification`
+holds at most 40 checks (failures and warnings kept first) with 200 characters
+of detail each. Verification never moves the phase or the `Ready` condition and
+never fails a reconcile: a failed check is a reading beside the platform's
+status, not a degraded platform. The `Verified` condition is `True` on Passed,
+`False` with reason `Failed` or `Error`, `Unknown` while `Running` and with
+reason `Disabled` when verification is off.
+
+**The test account.** With bundled identity the checks sign in as
+`zaentrum-verify`, a regular user of the `zaentrum` realm. Its credentials live
+in the Secret `zaentrum-verify` (keys `username`, `password`), which is the
+operator's own state: created once — even with `secrets.external` — with a
+32-character password from `crypto/rand`, owned by the Zaentrum, and never
+rotated; only a key that has gone missing is filled in. Before every run an
+init container, from the same Keycloak image the platform runs, prepares the
+account through the in-cluster admin API with the bootstrap admin from
+`zaentrum-keycloak-admin` ([`files/verify-account.sh`](platform/chart/files/verify-account.sh)):
+enabled, email and name set and verified so profile checks never interrupt the
+sign-in, no required actions, the Secret's password (set only when it does not
+already sign in, so a password-history policy is no obstacle), the realm role
+`zaentrum-user` and nothing else, and no brute-force lockout. A password changed
+by hand, a lockout or a role granted by mistake heals itself on the next run.
+No password leaves the cluster: it is never printed, never an argument on a
+command line (kcadm reads it from the environment), and blanked out of anything
+copied into status. To rotate it, delete the Secret; the next run makes a new
+one and the account follows.
+
+**External identity.** There is no realm to prepare an account in, so the
+account is yours to provide: create the Secret `zaentrum-verify` in the
+platform's namespace with the keys `username` and `password` of an account in
+your identity provider that holds the role the platform's users hold
+(`zaentrum-user`) and needs no second factor. Without it, the sign-in checks
+skip and the rest still run. The operator never makes up an account there, and
+removes the Secret it generated if the platform moved off bundled identity.
+
+```sh
+kubectl -n zaentrum create secret generic zaentrum-verify \
+  --from-literal=username=verify@example.org --from-literal=password='…'
+```
+
+**Turning it off.** `spec.verification.enabled: false` stops the runs (one in
+flight is abandoned) and reports `result: Skipped`. Turning it back on verifies
+the platform as it then stands, and answers a request made in the meantime.
+
+Where the public host cannot reach the front door from inside the cluster, the
+route checks fail there even though users are fine — for instance where an
+in-cluster DNS rewrite sends the host to the identity provider alone, as the
+all-in-one appliance's does. Point `network.issuerHostAliasIP` at the edge, or
+turn verification off.
+
+RBAC needs nothing new: the ClusterRole already holds `jobs`, `secrets` and
+`pods` `get`/`list`; reading a run's pod is the first use of `pods/list` by the
+operator itself. Pods, Jobs and the Secret are read uncached.
+
 ## Addons (`ZaentrumAddon`)
 
 A second, isolated reconciler installs a standard Helm chart next to the
