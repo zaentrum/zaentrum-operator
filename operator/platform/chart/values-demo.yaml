@@ -19,6 +19,10 @@ features:
 
 storage:
   provisionMedia: false      # the demo binds an external NFS PV (bootstrap)
+  postgres:
+    # The demo's Postgres still runs on an emptyDir; the operator keeps it there
+    # until spec.storage.postgres.migrate copies it onto its claim.
+    current: emptyDir
 
 network:
   issuerHostAliasIP: "77.109.148.13"   # OKD HostNetwork router node
