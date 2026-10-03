@@ -13,6 +13,13 @@
 # alone; one the realm lacks is reported, not made — making clients is the
 # realm import's job.
 #
+# Then the demo user. A realm imported without Secret zaentrum-demo-user gave it
+# the password "${DEMO_USER_PASSWORD}" — Keycloak leaves a placeholder it cannot
+# resolve as it is — the same on every such install. If it still signs in with
+# that, it gets the Secret's password, or, without one, is disabled. A demo
+# user with a password of its own is left alone; the probe costs it one failed
+# sign-in.
+#
 # Then, last, where the admin console signs in: the master realm's frontend
 # URL, MASTER_FRONTEND_URL — the port-forward's address while the console is
 # not on the public host, so its sign-in pages stay on the port-forward with
@@ -34,6 +41,7 @@
 #                    (Keycloak's own separator), each list possibly empty
 #   MASTER_FRONTEND_URL  the master realm's frontend URL; empty unsets it.
 #                    Not set at all: left as it is.
+#   DEMO_USER_PASSWORD   from Secret zaentrum-demo-user, when there is one
 set -euo pipefail
 # The lists are split into words below; a pattern such as zae's
 # http://localhost/* must stay a word, never a file name.
@@ -147,6 +155,25 @@ $(sorted "$have_logout" '##')"
 	set_clients+=("$client")
 done <<<"$REALM_CLIENTS"
 
+demo=""
+placeholder='${DEMO_USER_PASSWORD}'
+demo_id=$(kc get users -r "$realm" -q username=demo -q exact=true --fields id --format csv --noquotes) ||
+	fail "cannot look up the demo user in realm $realm: $(why)"
+if [ -n "$demo_id" ] && KC_CLI_PASSWORD=$placeholder "$kcadm" config credentials --server "$KC_SERVER" --realm "$realm" \
+	--user demo --client admin-cli --config "$tmp/probe.config" >/dev/null 2>&1; then
+	if [ -n "${DEMO_USER_PASSWORD:-}" ] && [ "$DEMO_USER_PASSWORD" != "$placeholder" ]; then
+		printf '{"type":"password","temporary":false,"value":%s}' "$(js "$DEMO_USER_PASSWORD")" |
+			kc update "users/$demo_id/reset-password" -r "$realm" -f - -n ||
+			fail "cannot set the password of the demo user: $(why)"
+		demo="the demo user no longer signs in with the placeholder password: it has the one in Secret zaentrum-demo-user"
+	else
+		kc update "users/$demo_id" -r "$realm" -s enabled=false ||
+			fail "cannot disable the demo user: $(why)"
+		demo="the demo user signed in with the placeholder password and no Secret zaentrum-demo-user gives it another: disabled"
+	fi
+	echo "realm-config: $demo"
+fi
+
 console=""
 if [ -n "${MASTER_FRONTEND_URL+set}" ]; then
 	have=$(kc get realms/master --fields 'attributes(frontendUrl)' --format csv --noquotes) ||
@@ -167,6 +194,7 @@ summary=""
 [ ${#set_clients[@]} -eq 0 ] || summary+="set the redirects of ${set_clients[*]}"
 [ ${#same[@]} -eq 0 ] || summary+="${summary:+; }already so: ${same[*]}"
 [ ${#missing[@]} -eq 0 ] || summary+="${summary:+; }not in realm $realm: ${missing[*]}"
+[ -z "$demo" ] || summary+="${summary:+; }$demo"
 [ -z "$console" ] || summary+="${summary:+; }$console"
 echo "realm-config: $summary"
 printf '%s' "$summary" >"$termlog" 2>/dev/null || true

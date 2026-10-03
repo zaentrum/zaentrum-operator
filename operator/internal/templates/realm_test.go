@@ -387,6 +387,8 @@ func TestRealmJobRendersTheConfiguration(t *testing.T) {
 	assert.Equal(t, "http://keycloak:80/auth", env["KC_SERVER"].Value, "the in-cluster admin API")
 	secretRef(t, env, "KC_ADMIN_USER", "zaentrum-keycloak-admin", "username")
 	secretRef(t, env, "KC_CLI_PASSWORD", "zaentrum-keycloak-admin", "password")
+	secretRef(t, env, "DEMO_USER_PASSWORD", "zaentrum-demo-user", "password")
+	assert.Equal(t, "http://localhost:8080/auth", env["MASTER_FRONTEND_URL"].Value)
 
 	// External identity has no realm to configure.
 	ext := base("zaentrum-beta")

@@ -64,6 +64,10 @@ spec:
 {{- range $client, $c := include "z.realmClients" . | fromJson }}
                 {{ $client }}|{{ join " " $c.redirectUris }}|{{ join " " $c.webOrigins }}|{{ with $c.attributes }}{{ index . "post.logout.redirect.uris" }}{{ end }}
 {{- end }}
+            # What a demo user still signing in with the import's placeholder
+            # password gets instead.
+            - name: DEMO_USER_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-demo-user, key: password, optional: true } }
             # Where the admin console signs in: the port-forward's URL, or empty
             # for the public host (identity.exposeAdminConsole).
             - name: MASTER_FRONTEND_URL
