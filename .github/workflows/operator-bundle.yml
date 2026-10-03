@@ -177,12 +177,14 @@ jobs:
         run: |
           set -euo pipefail
           # latest (default branch only) + long sha, mirroring the bundle tags.
+          # Comma-separated: build-push-action reads its tags input as a list
+          # split on commas or newlines, never on spaces.
           tags="${CATALOG_IMAGE}:sha-${SHA}"
           if [ "$REF_TYPE" = "tag" ]; then
-            tags="${tags} ${CATALOG_IMAGE}:${REF_NAME}"
+            tags="${tags},${CATALOG_IMAGE}:${REF_NAME}"
           fi
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            tags="${tags} ${CATALOG_IMAGE}:latest"
+            tags="${tags},${CATALOG_IMAGE}:latest"
           fi
           echo "list=${tags}" >> "$GITHUB_OUTPUT"
           echo "primary=${CATALOG_IMAGE}:latest" >> "$GITHUB_OUTPUT"
