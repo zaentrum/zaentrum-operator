@@ -65,6 +65,11 @@ spec:
     every update it checks the platform outside-in, with a real sign-in, and
     reports the verdict in `verification`.
 
+    It generates the platform's secrets once, from crypto/rand, keeps the
+    bundled database on a persistent volume (moving an existing one only by a
+    copy), lets sign-ins return only to the platform's own origins, and keeps
+    Keycloak's admin console off the public host unless asked to publish it.
+
     The bundle is content-neutral: it ships only the platform. It never fetches
     content and has no downloaders or indexer integrations. # neutrality-guard:allow
   maturity: alpha
@@ -128,6 +133,21 @@ spec:
           - path: verification.enabled
             displayName: Verification
             description: Check the platform outside-in after every update and on request.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+          - path: identity.exposeAdminConsole
+            displayName: Publish the Keycloak Admin Console
+            description: Route /auth/admin on the public host; off, the console answers through a port-forward only.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
+          - path: storage.postgres.size
+            displayName: Database Size
+            description: Size of the claim the bundled Postgres keeps its data on.
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
+          - path: storage.postgres.migrate
+            displayName: Move the Database onto Its Claim
+            description: Copy a database that runs on emptyDir or another claim onto its claim, then switch.
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
         statusDescriptors:
