@@ -28,10 +28,7 @@ spec:
     spec:
       {{- include "z.imagePullSecrets" . | nindent 6 }}
       {{- include "z.hostAliases" . | nindent 6 }}
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+      {{- include "z.podSecurity" . | nindent 6 }}
       initContainers:
         # Deploy the CAP schema (cds-generated schema-postgres.sql, made
         # idempotent) before the app starts. The demo Postgres is ephemeral, so

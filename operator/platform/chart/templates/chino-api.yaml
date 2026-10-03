@@ -28,10 +28,7 @@ spec:
     spec:
       {{- include "z.imagePullSecrets" . | nindent 6 }}
       {{- include "z.hostAliases" . | nindent 6 }}
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+      {{- include "z.podSecurity" . | nindent 6 }}
       containers:
       - name: app
         image: ghcr.io/zaentrum/chino-api:{{ .Values.global.version }}

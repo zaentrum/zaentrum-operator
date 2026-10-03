@@ -219,3 +219,52 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	assert.Nil(t, find(t, objs2, "Route", "zaentrum-demo-auth"), "no bundled-keycloak /auth route in external identity")
 	assert.NotNil(t, find(t, objs2, "Route", "zaentrum-demo-auth-callback"), "SPA callback route stays")
 }
+
+// On OpenShift the SCC gives every pod its user, and a fixed one would fall
+// outside the namespace's range; anywhere else the kubelet must see a number
+// to verify runAsNonRoot, so every pod that refuses root names 65532. Both
+// hold for every workload the chart renders, the pipeline's and the
+// verification Job's included.
+func TestPodsNameAUserOnlyOffOpenShift(t *testing.T) {
+	z := base("zaentrum")
+	z.Spec.Features.Pipeline = true
+	for _, openShift := range []bool{false, true} {
+		v := NewValues(z)
+		v.OpenShift = openShift
+		objs, err := Render(v)
+		require.NoError(t, err)
+		checked := 0
+		for _, o := range objs {
+			if o.GetKind() != "Deployment" && o.GetKind() != "Job" {
+				continue
+			}
+			sc, found, _ := unstructured.NestedMap(o.Object, "spec", "template", "spec", "securityContext")
+			if !found || sc["runAsNonRoot"] != true {
+				continue
+			}
+			checked++
+			raw, named, _ := unstructured.NestedFieldNoCopy(o.Object, "spec", "template", "spec", "securityContext", "runAsUser")
+			user := asInt64(raw)
+			if openShift {
+				assert.False(t, named, "%s/%s names a user on OpenShift", o.GetKind(), o.GetName())
+			} else {
+				assert.True(t, named, "%s/%s names no user off OpenShift", o.GetKind(), o.GetName())
+				assert.Equal(t, int64(65532), user, "%s/%s", o.GetKind(), o.GetName())
+			}
+		}
+		assert.GreaterOrEqual(t, checked, 12, "every pod that refuses root (openShift=%v)", openShift)
+	}
+}
+
+// asInt64 reads a number as the YAML decoder left it, whichever type that was.
+func asInt64(v any) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return -1
+}

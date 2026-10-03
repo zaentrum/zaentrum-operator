@@ -32,10 +32,7 @@ spec:
       serviceAccountName: portal-api
       {{- include "z.imagePullSecrets" . | nindent 6 }}
       {{- include "z.hostAliases" . | nindent 6 }}
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+      {{- include "z.podSecurity" . | nindent 6 }}
 {{- if ne .Values.databases.mode "external" }}
       initContainers:
         # Create the `portal` DB if it is missing. The demo Postgres is ephemeral

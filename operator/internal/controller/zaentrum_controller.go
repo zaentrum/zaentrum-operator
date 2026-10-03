@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -69,6 +70,11 @@ type ZaentrumReconciler struct {
 	// Now is the clock verification timestamps come from; nil is time.Now.
 	// Tests set it.
 	Now func() time.Time
+
+	// OpenShift says whether the cluster is OpenShift (serves its SCC API). Nil
+	// until discovered, then kept (openshift.go); a test sets it.
+	OpenShift *bool
+	clusterMu sync.Mutex
 }
 
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums,verbs=get;list;watch;create;update;patch;delete
@@ -112,7 +118,15 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Render the platform from the embedded templates with CR-driven values.
 	// The decision's render tag overrides spec.version so auto-mode rolls the
 	// channel target in this very pass.
+	// Whether the cluster is OpenShift decides the user the chart names for its
+	// pods, so the render waits for an answer rather than guess one.
+	openShift, err := r.openShift()
+	if err != nil {
+		logger.Info("render deferred", "reason", err.Error())
+		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
+	}
 	vals := templates.NewValues(&z)
+	vals.OpenShift = openShift
 	vals.Version = decision.RenderTag
 	rendered, err := templates.Render(vals)
 	if err != nil {

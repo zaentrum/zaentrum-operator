@@ -28,10 +28,7 @@ spec:
         app.kubernetes.io/part-of: {{ .Values.global.partOf }}
     spec:
       {{- include "z.imagePullSecrets" . | nindent 6 }}
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+      {{- include "z.podSecurity" . | nindent 6 }}
       containers:
       - name: app
         # Standalone catalog-management console (GraphQL to katalog-manager). Split

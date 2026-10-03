@@ -20,7 +20,15 @@ import (
 // renderSplit renders z and splits the test hooks off, as the reconciler does.
 func renderSplit(t *testing.T, z *zaentrumv1alpha1.Zaentrum) (platform, tests []*unstructured.Unstructured) {
 	t.Helper()
-	objs, err := Render(NewValues(z))
+	return renderSplitOn(t, z, false)
+}
+
+// renderSplitOn is renderSplit on a cluster that is, or is not, OpenShift.
+func renderSplitOn(t *testing.T, z *zaentrumv1alpha1.Zaentrum, openShift bool) (platform, tests []*unstructured.Unstructured) {
+	t.Helper()
+	v := NewValues(z)
+	v.OpenShift = openShift
+	objs, err := Render(v)
 	require.NoError(t, err)
 	return SplitTestHooks(objs)
 }
@@ -103,7 +111,12 @@ func TestIsTestHook(t *testing.T) {
 // contract, credentials from Secret zaentrum-verify only.
 func TestVerifyJobRendersTheCheck(t *testing.T) {
 	z := demoCR("zaentrum-demo")
-	job := verifyJob(t, z)
+	_, demoTests := renderSplitOn(t, z, true) // the demo runs on OpenShift
+	u := VerifyJob(demoTests)
+	require.NotNil(t, u)
+	var typed batchv1.Job
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &typed))
+	job := &typed
 	spec := job.Spec.Template.Spec
 
 	assert.Equal(t, "test", job.Annotations["helm.sh/hook"], "plain `helm test` runs it")
@@ -117,7 +130,7 @@ func TestVerifyJobRendersTheCheck(t *testing.T) {
 	assert.False(t, *spec.AutomountServiceAccountToken, "the checks never talk to the Kubernetes API")
 
 	// The same hostAliases the issuer-validating services get.
-	platform, _ := renderSplit(t, z)
+	platform, _ := renderSplitOn(t, z, true)
 	api := find(t, platform, "Deployment", "chino-api")
 	require.NotNil(t, api)
 	var validator appsv1.Deployment

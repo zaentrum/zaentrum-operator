@@ -73,10 +73,7 @@ spec:
       # The split-horizon entries the issuer-validating services get, so the
       # public host resolves to the edge from in here as well.
       {{- include "z.hostAliases" . | nindent 6 }}
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+      {{- include "z.podSecurity" . | nindent 6 }}
 {{- if $bundled }}
       initContainers:
         # Prepares the test account in the bundled realm through the in-cluster

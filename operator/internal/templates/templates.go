@@ -39,9 +39,18 @@ type Values struct {
 	cr        *zaentrumv1alpha1.Zaentrum
 	Version   string
 	Namespace string
+	// OpenShift says the cluster serves OpenShift's security API (SCCs). The
+	// chart reads it from .Capabilities, as it would under plain Helm: on
+	// OpenShift the SCC gives each pod its user, anywhere else the chart names
+	// one (z.podSecurity). The reconciler sets it from what it discovered.
+	OpenShift bool
 }
 
 // NewValues builds the render context from a Zaentrum CR.
+// OpenShiftSecurityAPI is the API group/version of OpenShift's
+// SecurityContextConstraints, which the chart gates its pods' user on.
+const OpenShiftSecurityAPI = "security.openshift.io/v1"
+
 func NewValues(z *zaentrumv1alpha1.Zaentrum) Values {
 	ns := z.Namespace
 	if ns == "" {
@@ -199,6 +208,9 @@ func Render(v Values) ([]*unstructured.Unstructured, error) {
 	// Route GVK. Release name/namespace back .Release.* in the templates.
 	caps := chartutil.DefaultCapabilities.Copy()
 	caps.APIVersions = append(caps.APIVersions, "route.openshift.io/v1", "route.openshift.io/v1/Route")
+	if v.OpenShift {
+		caps.APIVersions = append(caps.APIVersions, OpenShiftSecurityAPI, OpenShiftSecurityAPI+"/SecurityContextConstraints")
+	}
 	relOpts := chartutil.ReleaseOptions{Name: "zaentrum", Namespace: v.Namespace}
 	renderVals, err := chartutil.ToRenderValues(chrt, v.chartValues(), relOpts, caps)
 	if err != nil {

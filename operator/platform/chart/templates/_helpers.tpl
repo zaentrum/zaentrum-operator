@@ -57,6 +57,28 @@ hostAliases:
 {{- end -}}
 
 {{/*
+z.podSecurity — the pod securityContext of every platform pod: never root, the
+runtime's default seccomp profile. On OpenShift the SCC gives each pod a user
+from the namespace's range, so the chart names none (a fixed one would fall
+outside it). Anywhere else the kubelet must see a numeric user to verify
+runAsNonRoot, and an image that names its user (distroless "nonroot") or none
+(root, as postgres:16-alpine's init steps) would not start — so the pod runs as
+65532, distroless's nonroot user, as OpenShift runs any image as an arbitrary
+user. OpenShift is told by its security API in .Capabilities: plain Helm sees
+the cluster's, and the operator passes what it discovered.
+Place under spec.template.spec:  {{- include "z.podSecurity" . | nindent 6 }}
+*/}}
+{{- define "z.podSecurity" -}}
+securityContext:
+  runAsNonRoot: true
+{{- if not (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}
+  runAsUser: 65532
+{{- end }}
+  seccompProfile:
+    type: RuntimeDefault
+{{- end -}}
+
+{{/*
 z.imagePullSecrets — the pull-secrets block, or nothing. Place under
 spec.template.spec:  {{- include "z.imagePullSecrets" . | nindent 6 }}
 */}}
