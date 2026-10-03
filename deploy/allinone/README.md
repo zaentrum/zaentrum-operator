@@ -16,6 +16,21 @@ docker run -d --privileged --name zaentrum -p 8080:80 ghcr.io/zaentrum/appliance
 Then open <http://localhost:8080>. First boot pulls the application images
 (see below) and runs the database migrations, so give it a minute.
 
+### Signing in the first time
+
+The first administrator is `admin`, with a one-time password generated for this
+container — no two appliances share one. Keycloak asks for a new password at
+that first sign-in:
+
+```bash
+docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
+  -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
+```
+
+Keycloak's own admin console is not on the published port; see
+[the operator's README](../../operator/README.md#the-admin-console) for the
+port-forward that reaches it.
+
 ### Why `--privileged`?
 
 The container runs **k3s**, which needs to mount filesystems, manage cgroups,
@@ -34,16 +49,31 @@ supported default here.)
 
 ### Persistence
 
-Everything (Postgres, the Kafka log, the media library, the HLS cache) lives on
-PersistentVolumeClaims backed by k3s's `local-path` StorageClass, i.e. inside
-the container's writable layer. To keep your data across `docker rm`, mount a
-host directory at k3s's storage path:
+Postgres (users, watch state, the catalog), the media library and the HLS cache
+live on PersistentVolumeClaims backed by k3s's `local-path` StorageClass, so
+they outlive a pod's restart or reschedule and a `docker restart`. They are
+still inside the container, though: `docker rm` takes them with it. To keep
+them across a re-created container, keep the whole k3s state on a volume, and
+give the container a fixed host name — k3s names its node after it, and a
+`local-path` volume belongs to the node it was made on:
 
 ```bash
-docker run -d --privileged --name zaentrum -p 8080:80 \
-  -v zaentrum-data:/var/lib/rancher/k3s/storage \
+docker run -d --privileged --name zaentrum -h zaentrum -p 8080:80 \
+  -v zaentrum:/var/lib/rancher/k3s \
   ghcr.io/zaentrum/appliance:latest
 ```
+
+The volume then also keeps the operator install the first container brought.
+To take a newer one from a newer image, copy it over before you re-create:
+
+```bash
+docker run --rm -v zaentrum:/state --entrypoint sh ghcr.io/zaentrum/appliance:latest \
+  -c 'cp /var/lib/rancher/k3s/server/manifests/10-operator.yaml /state/server/manifests/'
+```
+
+An appliance made before Postgres moved onto a claim keeps it on an emptyDir
+until it is copied over: see
+[the operator's README](../../operator/README.md#the-bundled-postgres-keeps-its-data-specstoragepostgres).
 
 Put your own library files where the stream service expects them (the `media`
 PVC under `local-path`), or point `chino-stream` at a host path via an overlay

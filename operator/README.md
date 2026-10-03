@@ -12,7 +12,7 @@ spec:
   version: latest          # tag applied to every ghcr.io/zaentrum/* image
   hostname: zaentrum.localhost
   identity: { mode: bundled, clientId: chino-web, audience: chino }
-  storage:  { mediaSize: 50Gi }
+  storage:  { mediaSize: 50Gi, postgres: { size: 10Gi } }
   features: { gpu: false, kafka: true }
   update:   { mode: manual }   # manual | auto  (Stage-2)
 ```
@@ -294,6 +294,176 @@ so a pod takes the routes a browser takes.
 RBAC needs nothing new: the ClusterRole already holds `jobs`, `secrets` and
 `pods` `get`/`list`; reading a run's pod is the first use of `pods/list` by the
 operator itself. Pods, Jobs and the Secret are read uncached.
+
+### The platform's Secrets
+
+Unless `spec.secrets.external` says someone else provides them, the operator
+makes every Secret the platform reads, before anything that reads it is
+applied, and once:
+
+| Secret | Keys | |
+|---|---|---|
+| `zaentrum-db` | `user` (`zaentrum`), `password` | the bundled Postgres's superuser |
+| `zaentrum-stream-signing` | `key` | 32 random bytes, base64 |
+| `zaentrum-keycloak` | `client-secret` | the `zaentrum-manager` client (bundled identity) |
+| `zaentrum-keycloak-admin` | `username` (`admin`), `password`, `realm-admin-password` | the master realm's bootstrap admin; the first administrator's one-time password (bundled identity) |
+| `zaentrum-demo-user` | `password` | the realm import's `${DEMO_USER_PASSWORD}` (bundled identity) |
+
+Every value comes from `crypto/rand` and is alphanumeric. Each Secret is owned
+by the Zaentrum (it goes with the platform) and labelled
+`zaentrum.io/generated=true`. Nothing in one is ever rotated by a reconcile: a
+key that went missing is filled in, a value that is there stays, because it
+also lives where the Secret does not reach — the database's role, the realm's
+client, Keycloak's admin user. The chart renders none of them for the
+operator; a plain `helm install` makes its own, random, and reads them back on
+every upgrade (`templates/secrets.yaml`).
+
+**The first administrator** signs in as `admin` with a one-time password; the
+realm import marks it temporary, so Keycloak asks for a new one at that first
+sign-in. Status says where it is, never what it is:
+
+```sh
+kubectl get zaentrum zaentrum -n zaentrum \
+  -o jsonpath='{.status.conditions[?(@.type=="SecretsGenerated")].message}'
+kubectl -n zaentrum get secret zaentrum-keycloak-admin -o jsonpath='{.data.realm-admin-password}' | base64 -d
+```
+
+The bootstrap admin's `password` is a machine credential: the operator's Jobs
+sign in to the admin API with it (`kcadm`). It is also how a person reaches the
+admin console through a port-forward ([below](#the-admin-console)).
+
+**An install made from an earlier chart** still holds the values that chart
+shipped to every install. `SecretsGenerated` is then `False`, reason
+`PublishedDefaults`, and names each Secret and key. They are reported, not
+replaced: each has to change where it is used first. Through a port-forward or
+`kubectl exec`, for instance:
+
+```sh
+ns=zaentrum
+new() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
+
+# The database: its role first, then the Secret.
+pw=$(new)
+kubectl -n $ns exec deploy/postgres -- psql -U zaentrum -c "ALTER ROLE zaentrum PASSWORD '$pw'"
+kubectl -n $ns patch secret zaentrum-db -p "{\"stringData\":{\"password\":\"$pw\"}}"
+
+# The signing key: nothing else holds it.
+kubectl -n $ns patch secret zaentrum-stream-signing -p "{\"stringData\":{\"key\":\"$(openssl rand -base64 32)\"}}"
+
+# zaentrum-manager's secret (Clients → zaentrum-manager → Credentials) and the
+# bootstrap admin's password (master realm → Users → admin → Credentials): in the
+# admin console through a port-forward, then the same values in zaentrum-keycloak
+# and zaentrum-keycloak-admin. realm-admin-password only matters until the first
+# sign-in: if admin has never signed in, sign in now and choose a password.
+
+# Then restart what reads them — never the Postgres itself while it runs on an
+# emptyDir: its restart would empty the database.
+kubectl -n $ns rollout restart deploy -l 'app!=postgres'
+```
+
+With `secrets.external` (the demo, beta) the operator makes, reads and reports
+none of them.
+
+### The bundled Postgres keeps its data (`spec.storage.postgres`)
+
+```yaml
+spec:
+  storage:
+    postgres:
+      size: 10Gi            # the claim postgres-data, ReadWriteOnce
+      className: ""         # default storage.className, else the cluster's default
+      claimName: ""         # an existing claim to keep it on instead
+      migrate: false        # copy a database that lives elsewhere onto the claim
+```
+
+A new install keeps users, watch state and the catalog on a claim, so they
+outlive the pod. Where the data is, though, is read from the running Postgres
+before every render, and a Postgres that already runs somewhere else — on an
+`emptyDir`, as the chart had it before, or on another claim — stays there: a
+Postgres started on a new volume starts empty. `DatabasePersistent` says which:
+
+| Reason | |
+|---|---|
+| `OnClaim` (True) | on its claim |
+| `EmptyDir` / `OtherClaim` (False) | where it ran before; `migrate` moves it |
+| `Migrating` (False) | a copy is running |
+| `Migrated` (True) | the copy succeeded; the Postgres switches now |
+| `MigrationFailed` (False) | the copy failed, the reason beside it; the Postgres stays |
+
+**Moving it.** Set `spec.storage.postgres.migrate: true`. The operator applies
+the claim and starts `postgres-migrate-<suffix>` (the chart's
+`templates/postgres-migrate.yaml`), from the Postgres's own image and Secret,
+the claim mounted where the Postgres mounts it, while the Postgres keeps
+serving. The Job initialises the claim as the image does at a first start,
+then copies the roles and every database from the running Postgres —
+`pg_dump` into `psql`, stopping at the first error — checks each copy holds its
+source's tables, and records the checkpoint it stopped at. It writes only into
+an empty claim or an earlier copy of its own nothing has run on, and refuses
+anything else. Once it has succeeded, the next pass switches the Postgres onto
+the claim; a copy older than five minutes is taken again instead, since it has
+missed what was written since. While it copies, neither a realm run nor a
+verification run starts.
+
+Writes made while the copy runs and until the Postgres has switched — a
+minute, typically — are not carried across: do it when the platform is quiet.
+A failed copy is not repeated by itself; `kubectl logs job/postgres-migrate-…`
+says what happened, and deleting the Job asks for another. `migrate` may stay
+set: on its claim there is nothing to move.
+
+A plain Helm release moves the same way, in two upgrades: one with
+`storage.postgres.migrate=true` (the copy is a post-upgrade hook, the Postgres
+stays), then, once it succeeded, one with `storage.postgres.current=postgres-data`
+and `migrate=false` (the switch). Without `current`, an upgrade looks at the
+running Postgres and keeps it where it is.
+
+With `databases.mode: external` the databases are the tenant's: no claim, no
+copy, no condition.
+
+### Sign-in redirects, and the realm Job
+
+The clients people sign in through return only to the platform's own origins
+— derived from `hostname` and the routing (`z.realmClients`):
+
+| Client | Redirect URIs | Post-logout |
+|---|---|---|
+| `chino-web` | `<origin>/auth/callback` | `<origin>` |
+| `zaentrum-web` | `<origin>/portal/`, `/katalog/`, `/katalog-manage/` + `auth/callback` | `<origin>` + those bases |
+| `chino-mobile` | `cloud.nalet.chino:/oauth/callback` | its redirect |
+| `chino-tv` | none (device grant) | |
+| `zae` | `http://127.0.0.1/*`, `http://localhost/*` | its redirects |
+
+`<origin>` is the public URL, plain `http` beside it where OpenShift Routes
+serve the host (they allow it), and for `chino-web` also `https://<hosts.chino>`
+in subdomains routing. Web origins are those origins. A new realm gets them
+from the import. A realm that exists keeps what was imported when it was made,
+so the operator runs the chart's realm Job, `zaentrum-realm-<suffix>`
+(`templates/realm.yaml`, `files/realm-config.sh`), whenever what it sets
+changes — and once a day besides, as a run's Job is kept a day — while Keycloak
+is available, never beside a verification run. It sets exactly those lists
+with `kcadm`, nothing else of a client, and leaves alone what is already so.
+`RealmConfigured` reports its summary, or why it failed; a failed run is tried
+again after ten minutes.
+
+### The admin console
+
+Keycloak's admin console and admin API are not on the public host: the Routes
+and the Ingress send only `/auth/realms` (login, account, device and OIDC
+endpoints) and `/auth/resources` to Keycloak. Reach the console through a
+port-forward, signed in as the bootstrap admin:
+
+```sh
+kubectl -n zaentrum port-forward svc/keycloak 8080:80
+kubectl -n zaentrum get secret zaentrum-keycloak-admin -o jsonpath='{.data.username}' | base64 -d; echo
+kubectl -n zaentrum get secret zaentrum-keycloak-admin -o jsonpath='{.data.password}' | base64 -d; echo
+open http://localhost:8080/auth/admin/
+```
+
+The console and its sign-in live at `http://localhost:8080/auth` then:
+`KC_HOSTNAME_ADMIN` points the console there, and the realm Job sets the master
+realm's frontend URL to the same, so its sign-in pages stay on the
+port-forward too. Use local port 8080. `spec.identity.exposeAdminConsole: true`
+publishes `/auth` whole on the public host instead, as before, and the realm
+Job unsets the master realm's frontend URL again.
 
 ## Addons (`ZaentrumAddon`)
 

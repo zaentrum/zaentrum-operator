@@ -15,8 +15,14 @@ open http://zaentrum.localhost
 
 Then open **http://zaentrum.localhost** — the first-run setup **wizard** guides you through it.
 (Modern browsers auto-resolve `*.localhost` to `127.0.0.1`, so this needs **no `/etc/hosts`
-edit**.) Sign-in uses the **bundled Keycloak** — log in with its admin account
-(`admin` / `dev` by default; you are forced to set a new password on first login).
+edit**.) Sign-in uses the **bundled Keycloak** — log in as `admin` with the one-time
+password generated for your appliance (you are asked to choose a new one at that first
+sign-in):
+
+```bash
+docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
+  -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
+```
 
 That single container is the whole product. It runs a full Kubernetes (k3s) **in-process**
 alongside the web app, the admin UI, the catalog, transcode/package, and streaming — plus
