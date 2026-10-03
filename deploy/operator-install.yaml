@@ -412,6 +412,9 @@ spec:
     - jsonPath: .status.currentVersion
       name: Version
       type: string
+    - jsonPath: .status.verification.result
+      name: Verified
+      type: string
     - jsonPath: .spec.hostname
       name: Host
       type: string
@@ -695,6 +698,18 @@ spec:
                     - auto
                     type: string
                 type: object
+              verification:
+                description: Verification configures the platform's self-test after
+                  each update.
+                properties:
+                  enabled:
+                    default: true
+                    description: |-
+                      Enabled runs the checks after every update that leaves the platform
+                      Ready, and whenever the zaentrum.io/verify-request annotation changes.
+                      Default true.
+                    type: boolean
+                type: object
               version:
                 default: latest
                 description: Version is the image tag applied to every ghcr.io/zaentrum/*
@@ -848,6 +863,107 @@ spec:
               phase:
                 description: Phase is a coarse human-facing lifecycle string.
                 type: string
+              verification:
+                description: |-
+                  Verification reports the platform's latest self-test. Absent until the
+                  first run; see VerificationStatus.
+                properties:
+                  checks:
+                    description: |-
+                      Checks are the report's lines, at most 40; when there are more, failures
+                      and warnings are kept first and message says how many are not shown.
+                    items:
+                      description: VerificationCheck is one line of the run's report.
+                      properties:
+                        detail:
+                          description: Detail is what the check saw, at most 200 characters.
+                          type: string
+                        name:
+                          description: Name of the check, as the check runner names
+                            it.
+                          type: string
+                        status:
+                          description: Status is ok, warn, fail or skip.
+                          enum:
+                          - ok
+                          - warn
+                          - fail
+                          - skip
+                          type: string
+                      required:
+                      - name
+                      - status
+                      type: object
+                    type: array
+                  failed:
+                    description: Failed counts the report's checks that failed.
+                    format: int32
+                    type: integer
+                  fingerprint:
+                    description: |-
+                      Fingerprint identifies the platform the run verified: the first 12 hex
+                      characters of the sha256 over the sorted "deployment/container=image"
+                      lines of every platform Deployment (init containers included), images as
+                      applied after digest pinning. A run starts whenever it moves.
+                    type: string
+                  finishedAt:
+                    description: FinishedAt is when the run ended.
+                    format: date-time
+                    type: string
+                  job:
+                    description: Job is the name of the run's Job, in the platform's
+                      namespace.
+                    type: string
+                  message:
+                    description: 'Message is one line about the result: a summary,
+                      or why there is none.'
+                    type: string
+                  passed:
+                    description: Passed counts the report's checks that passed.
+                    format: int32
+                    type: integer
+                  request:
+                    description: Request is the zaentrum.io/verify-request value the
+                      run answered.
+                    type: string
+                  result:
+                    description: Result is Passed, Failed, Running, Skipped or Error.
+                    enum:
+                    - Passed
+                    - Failed
+                    - Running
+                    - Skipped
+                    - Error
+                    type: string
+                  skipped:
+                    description: Skipped counts the report's checks that did not run.
+                    format: int32
+                    type: integer
+                  startedAt:
+                    description: StartedAt is when the run started.
+                    format: date-time
+                    type: string
+                  trigger:
+                    description: 'Trigger is what started the run: update or request.'
+                    enum:
+                    - update
+                    - request
+                    type: string
+                  version:
+                    description: Version is status.currentVersion when the run started.
+                    type: string
+                  warned:
+                    description: Warned counts the report's checks that passed with
+                      a warning.
+                    format: int32
+                    type: integer
+                required:
+                - failed
+                - passed
+                - result
+                - skipped
+                - warned
+                type: object
             type: object
         type: object
     served: true

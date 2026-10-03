@@ -250,6 +250,23 @@ type UpdateSpec struct {
 	Mode UpdateMode `json:"mode,omitempty"`
 }
 
+// VerifyRequestAnnotation asks the operator for a verification run: any value
+// it has not answered yet (status.verification.request) starts one once the
+// platform is Ready. Set a fresh token per request.
+const VerifyRequestAnnotation = "zaentrum.io/verify-request"
+
+// VerificationSpec configures the platform's self-test: the chart's test hook,
+// which the operator runs after every update and on request and reports in
+// status.verification.
+type VerificationSpec struct {
+	// Enabled runs the checks after every update that leaves the platform
+	// Ready, and whenever the zaentrum.io/verify-request annotation changes.
+	// Default true.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
 // ZaentrumSpec defines the desired state of a Zaentrum platform instance.
 type ZaentrumSpec struct {
 	// Channel selects the release train (consumed by Stage-2 auto-update).
@@ -286,6 +303,10 @@ type ZaentrumSpec struct {
 	// Update configures Stage-2 auto-update.
 	// +optional
 	Update UpdateSpec `json:"update,omitempty"`
+
+	// Verification configures the platform's self-test after each update.
+	// +optional
+	Verification VerificationSpec `json:"verification,omitempty"`
 
 	// Network configures split-horizon / hostAliases.
 	// +optional
@@ -378,6 +399,125 @@ type ControllerStatus struct {
 	ObservedAt metav1.Time `json:"observedAt"`
 }
 
+// VerificationResult is the verdict of the platform's latest self-test.
+// +kubebuilder:validation:Enum=Passed;Failed;Running;Skipped;Error
+type VerificationResult string
+
+const (
+	// VerificationPassed means every check passed (warnings and skips allowed).
+	VerificationPassed VerificationResult = "Passed"
+	// VerificationFailed means at least one check failed; checks says which.
+	VerificationFailed VerificationResult = "Failed"
+	// VerificationRunning means a run is in flight.
+	VerificationRunning VerificationResult = "Running"
+	// VerificationSkipped means verification is disabled (spec.verification).
+	VerificationSkipped VerificationResult = "Skipped"
+	// VerificationError means no verdict could be reached — the run could not
+	// start, or ended without a readable report (an image that does not pull,
+	// the deadline, an account that could not be prepared). message says why.
+	VerificationError VerificationResult = "Error"
+)
+
+// VerificationTrigger says what started a verification run.
+// +kubebuilder:validation:Enum=update;request
+type VerificationTrigger string
+
+const (
+	// VerificationTriggerUpdate is a run for a platform whose images changed.
+	VerificationTriggerUpdate VerificationTrigger = "update"
+	// VerificationTriggerRequest is a run the zaentrum.io/verify-request
+	// annotation asked for.
+	VerificationTriggerRequest VerificationTrigger = "request"
+)
+
+// VerificationCheckStatus is one check's outcome.
+// +kubebuilder:validation:Enum=ok;warn;fail;skip
+type VerificationCheckStatus string
+
+const (
+	// VerificationCheckOK is a check that passed.
+	VerificationCheckOK VerificationCheckStatus = "ok"
+	// VerificationCheckWarn is a check that passed with a warning.
+	VerificationCheckWarn VerificationCheckStatus = "warn"
+	// VerificationCheckFail is a check that failed.
+	VerificationCheckFail VerificationCheckStatus = "fail"
+	// VerificationCheckSkip is a check that did not run (e.g. sign-in without
+	// an account to sign in with).
+	VerificationCheckSkip VerificationCheckStatus = "skip"
+)
+
+// VerificationCheck is one line of the run's report.
+type VerificationCheck struct {
+	// Name of the check, as the check runner names it.
+	Name string `json:"name"`
+	// Status is ok, warn, fail or skip.
+	Status VerificationCheckStatus `json:"status"`
+	// Detail is what the check saw, at most 200 characters.
+	// +optional
+	Detail string `json:"detail,omitempty"`
+}
+
+// VerificationStatus reports the platform's latest self-test: the chart's test
+// hook (`zae doctor`, outside-in against the public URL, with a real sign-in),
+// which the operator runs after every update and on request.
+//
+// It is a reading beside the platform's status, never a gate: it does not move
+// the phase or the Ready condition, and a failed run is not retried by itself —
+// only a new update or a new request starts another.
+type VerificationStatus struct {
+	// Result is Passed, Failed, Running, Skipped or Error.
+	Result VerificationResult `json:"result"`
+
+	// Trigger is what started the run: update or request.
+	// +optional
+	Trigger VerificationTrigger `json:"trigger,omitempty"`
+
+	// Request is the zaentrum.io/verify-request value the run answered.
+	// +optional
+	Request string `json:"request,omitempty"`
+
+	// Fingerprint identifies the platform the run verified: the first 12 hex
+	// characters of the sha256 over the sorted "deployment/container=image"
+	// lines of every platform Deployment (init containers included), images as
+	// applied after digest pinning. A run starts whenever it moves.
+	// +optional
+	Fingerprint string `json:"fingerprint,omitempty"`
+
+	// Version is status.currentVersion when the run started.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// StartedAt is when the run started.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// FinishedAt is when the run ended.
+	// +optional
+	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+
+	// Job is the name of the run's Job, in the platform's namespace.
+	// +optional
+	Job string `json:"job,omitempty"`
+
+	// Passed counts the report's checks that passed.
+	Passed int32 `json:"passed"`
+	// Failed counts the report's checks that failed.
+	Failed int32 `json:"failed"`
+	// Warned counts the report's checks that passed with a warning.
+	Warned int32 `json:"warned"`
+	// Skipped counts the report's checks that did not run.
+	Skipped int32 `json:"skipped"`
+
+	// Checks are the report's lines, at most 40; when there are more, failures
+	// and warnings are kept first and message says how many are not shown.
+	// +optional
+	Checks []VerificationCheck `json:"checks,omitempty"`
+
+	// Message is one line about the result: a summary, or why there is none.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // ComponentStatus reports the readiness of one managed Deployment.
 type ComponentStatus struct {
 	// Name is the Deployment name.
@@ -423,6 +563,11 @@ type ZaentrumStatus struct {
 	// the CR.
 	// +optional
 	Controller *ControllerStatus `json:"controller,omitempty"`
+
+	// Verification reports the platform's latest self-test. Absent until the
+	// first run; see VerificationStatus.
+	// +optional
+	Verification *VerificationStatus `json:"verification,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -430,6 +575,7 @@ type ZaentrumStatus struct {
 // +kubebuilder:resource:shortName=stb,path=zaentrums,singular=zaentrum
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.currentVersion`
+// +kubebuilder:printcolumn:name="Verified",type=string,JSONPath=`.status.verification.result`
 // +kubebuilder:printcolumn:name="Host",type=string,JSONPath=`.spec.hostname`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
