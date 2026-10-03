@@ -183,7 +183,13 @@ Job itself, as a Job of its own (`zaentrum-verify-<suffix>`, owned by the
 Zaentrum). The Job runs `zae doctor --url <public URL> --sign-in --report
 /dev/termination-log` from `ghcr.io/zaentrum/zae` on the platform's tag: TLS,
 the published routes, the issuer, a real sign-in and whatever else the doctor
-checks. Its compact report is the container's termination message, which the
+checks. A platform tag the zae image does not carry — a release cut without a
+zae image of the same tag — would leave the run unable to start, so when the
+registry says that tag does not exist, the run checks with `zae:latest` (pinned
+like every image) and its message ends with "checked with zae:latest, as no zae
+image is tagged <tag>". The checks are outside-in and skip what an instance does
+not offer, so a newer checker suits an older platform. A registry that cannot be
+asked keeps the tag. Its compact report is the container's termination message, which the
 operator reads back from the pod — no log scraping, nothing in the run that may
 write to the API. The public URL is `https://<hostname>` where the edge
 terminates TLS (OpenShift Routes, or `identity.issuerScheme: https`), else

@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	"github.com/zaentrum/zaentrum-operator/operator/internal/digest"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/templates"
 )
 
@@ -75,6 +76,9 @@ const (
 	// The Job carries what started it, for whoever reads it with kubectl.
 	annotationVerifyTrigger     = "zaentrum.io/verify-trigger"
 	annotationVerifyFingerprint = "zaentrum.io/verify-fingerprint"
+	// annotationVerifyCheckerFallback marks a run that checks with zae:latest
+	// because no zae image carries the platform's own tag; its value is that tag.
+	annotationVerifyCheckerFallback = "zaentrum.io/verify-checker-fallback"
 
 	// What status.verification holds at most.
 	maxVerifyChecks  = 40
@@ -504,6 +508,57 @@ func (r *ZaentrumReconciler) redactor(ctx context.Context, z *zaentrumv1alpha1.Z
 	}
 }
 
+// ── the checker's image ─────────────────────────────────────────────────────
+
+// imageResolver is the part of the digest resolver the checker's fallback asks.
+type imageResolver interface {
+	Resolve(ctx context.Context, image string) (string, error)
+}
+
+// checkerFallback keeps the platform's checks runnable on every platform
+// version. The verification Job runs the zae image of the platform's own tag,
+// as every component runs its image of that tag; a platform release cut
+// without a zae image of the same tag would leave the run unable to start. So
+// when the registry says the zae image has no such tag, the Job checks with
+// zae:latest instead, and the run's message says so: the checks are
+// outside-in and read nothing they cannot skip, so a newer checker suits an
+// older platform. Any other registry failure keeps the tag — the registry was
+// not answering, which says nothing about the tag. It returns what it did, or
+// "" when it left the Job alone.
+func checkerFallback(ctx context.Context, rv imageResolver, objs []*unstructured.Unstructured) string {
+	job := templates.VerifyJob(objs)
+	if job == nil {
+		return ""
+	}
+	spec, _ := job.Object["spec"].(map[string]any)
+	tmpl, _ := spec["template"].(map[string]any)
+	podSpec, _ := tmpl["spec"].(map[string]any)
+	containers, _ := podSpec["containers"].([]any)
+	for _, c := range containers {
+		cm, ok := c.(map[string]any)
+		if !ok || cm["name"] != templates.VerifyCheckContainer {
+			continue
+		}
+		image, _ := cm["image"].(string)
+		ref := digest.Parse(image)
+		if ref.Registry != "ghcr.io" || ref.Repo != "zaentrum/zae" || ref.Pinned() || ref.Tag == "" || ref.Tag == "latest" {
+			return ""
+		}
+		if _, err := rv.Resolve(ctx, image); err == nil || !errors.Is(err, digest.ErrNotFound) {
+			return ""
+		}
+		cm["image"] = ref.Registry + "/" + ref.Repo + ":latest"
+		annotations := job.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[annotationVerifyCheckerFallback] = ref.Tag
+		job.SetAnnotations(annotations)
+		return fmt.Sprintf("no zae image is tagged %s; the platform's checks run zae:latest", ref.Tag)
+	}
+	return ""
+}
+
 // ── the run's result ────────────────────────────────────────────────────────
 
 // collect reads the in-flight run's Job and, once it has finished, the verdict.
@@ -539,6 +594,9 @@ func (r *ZaentrumReconciler) collect(ctx context.Context, z *zaentrumv1alpha1.Za
 	}
 
 	judge(v, runOutcomeOf(pods, failedCond), v.Message, r.redactor(ctx, z))
+	if tag := job.GetAnnotations()[annotationVerifyCheckerFallback]; tag != "" {
+		v.Message = clip(v.Message+"; checked with zae:latest, as no zae image is tagged "+tag, maxVerifyMessage)
+	}
 	if v.FinishedAt == nil {
 		finished := r.now()
 		v.FinishedAt = &finished

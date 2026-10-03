@@ -4,6 +4,7 @@ import (
 	"context"
 	b64 "encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -252,4 +253,29 @@ func TestTokenCredentialStaysOnRegistryHost(t *testing.T) {
 		t.Fatal("credential was sent to the challenge-supplied (foreign) token host")
 	}
 	_ = ownGotAuth
+}
+
+// A tag the registry does not hold is ErrNotFound; a registry that cannot
+// answer is not — the caller tells "no such image" from "could not ask".
+func TestResolveTellsAMissingTagFromAFailure(t *testing.T) {
+	status := http.StatusNotFound
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	rv := New(nil)
+	rv.Scheme = "http"
+	rv.HTTP = srv.Client()
+	image := strings.TrimPrefix(srv.URL, "http://") + "/zaentrum/zae:v9.9.9"
+
+	_, err := rv.Resolve(context.Background(), image)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("404: err = %v, want ErrNotFound", err)
+	}
+	status = http.StatusInternalServerError
+	rv.TTL = 0
+	_, err = rv.Resolve(context.Background(), image+"x")
+	if err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("500: err = %v, want a failure that is not ErrNotFound", err)
+	}
 }

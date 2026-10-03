@@ -217,6 +217,11 @@ func (r *ZaentrumReconciler) pinDigests(ctx context.Context, z *zaentrumv1alpha1
 	} else {
 		resolver.SetCreds(r.pullCreds(ctx, z))
 	}
+	// The checker's image first: a platform tag the zae image lacks becomes
+	// zae:latest, which the pass below then pins like every other image.
+	if note := checkerFallback(ctx, resolver, objs); note != "" {
+		logger.Info("verification: " + note)
+	}
 	n, errs := resolver.PinImages(ctx, objs, digest.ZaentrumImages)
 	for _, err := range errs {
 		logger.Info("digest pin skipped for an image (kept its tag)", "error", err.Error())

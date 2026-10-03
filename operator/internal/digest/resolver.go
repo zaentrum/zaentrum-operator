@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -29,6 +30,11 @@ import (
 // acceptManifest lists every manifest media type a digest lookup may meet: a
 // multi-arch index or a single-arch manifest, OCI or Docker. The registry
 // returns the digest of whichever it served in Docker-Content-Digest.
+// ErrNotFound is the registry saying it holds no manifest for the tag: the
+// image does not exist, which is not the same as a registry that could not be
+// asked. Resolve wraps it, so a caller can tell the two apart with errors.Is.
+var ErrNotFound = errors.New("no such manifest")
+
 var acceptManifest = strings.Join([]string{
 	"application/vnd.oci.image.index.v1+json",
 	"application/vnd.docker.distribution.manifest.list.v2+json",
@@ -237,6 +243,9 @@ func (rv *Resolver) fetchDigest(ctx context.Context, ref Ref) (string, error) {
 		}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("manifest %s: %w (%s)", ref.Repo+":"+ref.Tag, ErrNotFound, resp.Status)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("manifest %s: %s", ref.Repo+":"+ref.Tag, resp.Status)
 	}
