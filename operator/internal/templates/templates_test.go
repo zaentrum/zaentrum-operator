@@ -32,6 +32,15 @@ func find(t *testing.T, objs []*unstructured.Unstructured, kind, name string) *u
 	return nil
 }
 
+// helmRender renders the chart as `helm template` does: values.yaml under
+// vals, no cluster to look anything up in.
+func helmRender(t *testing.T, vals map[string]interface{}) []*unstructured.Unstructured {
+	t.Helper()
+	objs, err := render(vals, "zaentrum", false, nil)
+	require.NoError(t, err)
+	return objs
+}
+
 func count(objs []*unstructured.Unstructured, kind string) int {
 	n := 0
 	for _, o := range objs {
@@ -71,7 +80,7 @@ func TestRenderSelfHost(t *testing.T) {
 	assert.Equal(t, 1, count(objs, "Ingress"), "self-host renders an Ingress")
 	assert.Equal(t, 0, count(objs, "Route"), "no OpenShift Routes by default")
 	assert.Nil(t, find(t, objs, "Deployment", "analyzer"), "pipeline off by default")
-	assert.NotNil(t, find(t, objs, "Secret", "zaentrum-db"), "dev secrets rendered")
+	assert.Zero(t, count(objs, "Secret"), "the operator makes the platform's Secrets itself; the render carries none")
 	assert.NotNil(t, find(t, objs, "PersistentVolumeClaim", "media"), "media PVC provisioned")
 	// The cluster assigns Keycloak's address from its own service range: a
 	// pinned one fits only the cluster it was picked on (on k3s, 10.43.0.0/16,

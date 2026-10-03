@@ -243,10 +243,11 @@ func TestVerifyJobWithExternalIdentity(t *testing.T) {
 }
 
 // The account Secret the chart renders is for a plain `helm test` of a
-// self-host install only — never with external secrets or identity — and it is
-// a hook, never a platform object.
+// self-host install only — never with external secrets or identity, never for
+// the operator, which keeps a Secret of its own — and it is a hook, never a
+// platform object.
 func TestVerifyAccountHookSecret(t *testing.T) {
-	platform, tests := renderSplit(t, base("zaentrum"))
+	platform, tests := SplitTestHooks(helmRender(t, nil))
 	sec := find(t, tests, "Secret", VerifySecretName)
 	require.NotNil(t, sec)
 	assert.Equal(t, "test", sec.GetAnnotations()["helm.sh/hook"])
@@ -256,8 +257,10 @@ func TestVerifyAccountHookSecret(t *testing.T) {
 	assert.Len(t, pw, 32)
 	assert.Nil(t, find(t, platform, "Secret", VerifySecretName))
 
-	_, tests = renderSplit(t, demoCR("zaentrum-demo"))
+	_, tests = SplitTestHooks(helmRender(t, map[string]interface{}{"secrets": map[string]interface{}{"external": true}}))
 	assert.Nil(t, find(t, tests, "Secret", VerifySecretName), "secrets.external: no rendered secrets at all")
+	_, tests = renderSplit(t, base("zaentrum"))
+	assert.Nil(t, find(t, tests, "Secret", VerifySecretName), "the operator's render carries no Secret")
 }
 
 // The doctor is pointed where users arrive: https wherever the edge terminates
@@ -301,7 +304,7 @@ func TestVerificationDisabledRendersNoHook(t *testing.T) {
 // reference, so the Job object itself — readable by anyone who can list Jobs —
 // holds none.
 func TestVerifyJobCarriesNoCredential(t *testing.T) {
-	_, tests := renderSplit(t, base("zaentrum"))
+	_, tests := SplitTestHooks(helmRender(t, nil))
 	job := VerifyJob(tests)
 	require.NotNil(t, job)
 	blob := fmt.Sprintf("%v", job.Object)

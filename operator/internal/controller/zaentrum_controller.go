@@ -151,6 +151,15 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// hooks are pinned in the same pass, so a run uses the images of its time.
 	r.pinDigests(ctx, &z, append(objs[:len(objs):len(objs)], tests...))
 
+	// The platform's Secrets, unless someone else provides them, before
+	// anything that reads them is applied: made once, never rotated
+	// (secrets.go). The chart renders none of them for the operator.
+	if err := r.ensureSecrets(ctx, &z); err != nil {
+		z.Status.Phase = "Error"
+		_ = r.patchStatus(ctx, &z)
+		return ctrl.Result{}, err
+	}
+
 	// Apply each object via server-side apply with our field manager. Set the
 	// Zaentrum as owner on namespaced resources so they GC with the CR (the
 	// cluster-scoped Namespace cannot carry a namespaced owner ref, so skip it).

@@ -138,8 +138,13 @@ func (v Values) chartValues() map[string]interface{} {
 			"certSecret":  spec.EventStreaming.CertSecret,
 			"topicPrefix": orDefault(spec.EventStreaming.TopicPrefix, "stube."),
 		},
+		// The chart never renders the platform's Secrets for the operator: with
+		// spec.secrets.external CI makes them, and otherwise the operator
+		// generates each one once itself (internal/controller/secrets.go). A
+		// value made in a render the operator applies every 30 seconds would
+		// change on every pass.
 		"secrets": map[string]interface{}{
-			"external": spec.Secrets.External,
+			"external": true,
 		},
 		// seed/scan/enqueue Jobs are demo choreography applied externally; the
 		// operator never renders them.
@@ -201,6 +206,13 @@ func loadChart() (*chart.Chart, error) {
 // objects. Client-only (no Helm release/apply). Every object is namespaced to the
 // CR's namespace (templates that omit the field still land correctly).
 func Render(v Values) ([]*unstructured.Unstructured, error) {
+	return render(v.chartValues(), v.Namespace, v.OpenShift, nil)
+}
+
+// render renders the chart with the given values over values.yaml, as `helm
+// template` would. lookup answers the chart's lookup calls the way a cluster
+// does under `helm install`; nil answers none, as `helm template` does.
+func render(vals map[string]interface{}, namespace string, openShift bool, lookup engine.ClientProvider) ([]*unstructured.Unstructured, error) {
 	chrt, err := loadChart()
 	if err != nil {
 		return nil, err
@@ -209,15 +221,20 @@ func Render(v Values) ([]*unstructured.Unstructured, error) {
 	// Route GVK. Release name/namespace back .Release.* in the templates.
 	caps := chartutil.DefaultCapabilities.Copy()
 	caps.APIVersions = append(caps.APIVersions, "route.openshift.io/v1", "route.openshift.io/v1/Route")
-	if v.OpenShift {
+	if openShift {
 		caps.APIVersions = append(caps.APIVersions, OpenShiftSecurityAPI, OpenShiftSecurityAPI+"/SecurityContextConstraints")
 	}
-	relOpts := chartutil.ReleaseOptions{Name: "zaentrum", Namespace: v.Namespace}
-	renderVals, err := chartutil.ToRenderValues(chrt, v.chartValues(), relOpts, caps)
+	relOpts := chartutil.ReleaseOptions{Name: "zaentrum", Namespace: namespace}
+	renderVals, err := chartutil.ToRenderValues(chrt, vals, relOpts, caps)
 	if err != nil {
 		return nil, fmt.Errorf("build render values: %w", err)
 	}
-	rendered, err := engine.Render(chrt, renderVals)
+	var rendered map[string]string
+	if lookup != nil {
+		rendered, err = engine.RenderWithClientProvider(chrt, renderVals, lookup)
+	} else {
+		rendered, err = engine.Render(chrt, renderVals)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("render chart: %w", err)
 	}
@@ -246,7 +263,7 @@ func Render(v Values) ([]*unstructured.Unstructured, error) {
 	}
 	for _, o := range objs {
 		if o.GetNamespace() == "" {
-			o.SetNamespace(v.Namespace)
+			o.SetNamespace(namespace)
 		}
 	}
 	return objs, nil

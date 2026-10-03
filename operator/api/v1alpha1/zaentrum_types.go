@@ -197,8 +197,11 @@ type EventStreamingSpec struct {
 
 // SecretsSpec controls secret provisioning.
 type SecretsSpec struct {
-	// External means the platform secrets are pre-created (e.g. by CI); the chart
-	// does not render them. Default false (bundled dev-default secrets).
+	// External means the platform's Secrets are pre-created (e.g. by CI) and
+	// left alone. Default false: the operator generates each one it needs once,
+	// from crypto/rand, owns it and never rotates it — zaentrum-db,
+	// zaentrum-stream-signing and, with bundled identity, zaentrum-keycloak,
+	// zaentrum-keycloak-admin and zaentrum-demo-user.
 	// +optional
 	External bool `json:"external,omitempty"`
 }
@@ -325,7 +328,8 @@ type ZaentrumSpec struct {
 	// +optional
 	Routing RoutingSpec `json:"routing,omitempty"`
 
-	// Secrets controls whether platform secrets are rendered or external.
+	// Secrets says whether the platform's Secrets are the operator's to make or
+	// provided from outside.
 	// +optional
 	Secrets SecretsSpec `json:"secrets,omitempty"`
 

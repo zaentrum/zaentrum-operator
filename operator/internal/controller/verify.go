@@ -430,16 +430,21 @@ func (r *ZaentrumReconciler) ensureVerifyAccount(ctx context.Context, z *zaentru
 }
 
 func verifyAccountLabels(z *zaentrumv1alpha1.Zaentrum) map[string]string {
-	partOf := z.Spec.PartOf
-	if partOf == "" {
-		partOf = z.Namespace
-	}
 	return map[string]string{
 		"app.kubernetes.io/name":      templates.VerifySecretName,
 		"app.kubernetes.io/component": "verification",
-		"app.kubernetes.io/part-of":   partOf,
+		"app.kubernetes.io/part-of":   partOf(z),
 		labelVerification:             verificationAccount,
 	}
+}
+
+// partOf is the app.kubernetes.io/part-of value the chart labels the platform
+// with: spec.partOf, else the namespace.
+func partOf(z *zaentrumv1alpha1.Zaentrum) string {
+	if z.Spec.PartOf != "" {
+		return z.Spec.PartOf
+	}
+	return z.Namespace
 }
 
 // generatedAccount reports whether the operator made this Secret.
@@ -460,27 +465,7 @@ var verifyPasswordClasses = []string{
 // and a symbol are each guaranteed, the rest drawn from all of them, then
 // shuffled.
 func newVerifyPassword() ([]byte, error) {
-	all := strings.Join(verifyPasswordClasses, "")
-	out := make([]byte, verifyPasswordLen)
-	for i := range out {
-		set := all
-		if i < len(verifyPasswordClasses) {
-			set = verifyPasswordClasses[i]
-		}
-		n, err := randIndex(len(set))
-		if err != nil {
-			return nil, err
-		}
-		out[i] = set[n]
-	}
-	for i := len(out) - 1; i > 0; i-- {
-		j, err := randIndex(i + 1)
-		if err != nil {
-			return nil, err
-		}
-		out[i], out[j] = out[j], out[i]
-	}
-	return out, nil
+	return randomString(verifyPasswordClasses, verifyPasswordLen)
 }
 
 func randIndex(n int) (int, error) {
