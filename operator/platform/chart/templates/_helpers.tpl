@@ -17,6 +17,14 @@ these so image/issuer/hostAliases/pull-secrets/labels stay consistent.
 {{- .Values.identity.issuerScheme }}://{{ .Values.global.hostname }}/auth
 {{- end -}}
 
+{{/* z.publicURL — the origin users reach the platform at: https where the edge
+     terminates TLS (OpenShift Routes always do; issuerScheme https says a proxy
+     in front does), else http. The verification Job checks the platform from
+     there, outside-in, the way a user meets it. */}}
+{{- define "z.publicURL" -}}
+{{- if or (eq .Values.identity.issuerScheme "https") .Values.routing.provisionRoutes -}}https{{- else -}}http{{- end -}}://{{ .Values.global.hostname }}
+{{- end -}}
+
 {{/* z.partOf — the app.kubernetes.io/part-of label value. */}}
 {{- define "z.partOf" -}}{{ .Values.global.partOf }}{{- end -}}
 

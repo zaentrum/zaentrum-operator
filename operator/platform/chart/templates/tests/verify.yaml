@@ -1,0 +1,153 @@
+{{- if .Values.verification.enabled }}
+{{- $bundled := eq .Values.identity.mode "bundled" }}
+# ── Verification: the platform checks itself, outside-in ────────────────────
+#
+# A chart test (helm.sh/hook: test), so `helm test` runs it on a plain Helm
+# install. The operator never applies it with the platform: it splits every
+# test hook off the render and starts this Job itself, under a fresh name, after
+# each update that leaves the platform Ready and whenever the
+# zaentrum.io/verify-request annotation changes, then reads the verdict from
+# the pod's termination message into status.verification.
+#
+# The checks are `zae doctor` against the public URL — TLS, the published
+# routes, the issuer, and a real sign-in with the account in Secret
+# zaentrum-verify. That account's password is made in the cluster and never
+# printed or reported. With bundled identity the init container prepares the
+# account in the realm on every run; with an external identity provider the
+# account is yours to provide (the sign-in checks skip without it).
+{{- if and $bundled (not .Values.secrets.external) }}
+# For a plain `helm test` only: the account's Secret, with a password made for
+# this test run. The operator drops this hook and keeps a Secret of its own;
+# with secrets.external, create zaentrum-verify like the platform's others.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: zaentrum-verify
+  labels:
+    app.kubernetes.io/name: zaentrum-verify
+    app.kubernetes.io/component: verification
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+type: Opaque
+stringData:
+  username: zaentrum-verify
+  password: {{ randAlphaNum 32 | quote }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zaentrum-verify
+  labels:
+    app.kubernetes.io/name: zaentrum-verify
+    app.kubernetes.io/component: verification
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  # One attempt: a second would only repeat the first one's verdict, later.
+  backoffLimit: 0
+  # A run that has not finished in ten minutes will not — an image that does not
+  # pull, an issuer that never answers. The deadline turns it into a verdict.
+  activeDeadlineSeconds: 600
+  # The operator keeps the latest run's Job for its logs and deletes it when the
+  # next run starts; this is the backstop for when nothing does.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zaentrum-verify
+        app.kubernetes.io/component: verification
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      restartPolicy: Never
+      # The checks reach the platform the way any client does; nothing here
+      # talks to the Kubernetes API.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+      # The split-horizon entries the issuer-validating services get, so the
+      # public host resolves to the edge from in here as well.
+      {{- include "z.hostAliases" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+{{- if $bundled }}
+      initContainers:
+        # Prepares the test account in the bundled realm through the in-cluster
+        # admin API, from the very image the platform's Keycloak runs (it ships
+        # kcadm). See files/verify-account.sh.
+        - name: account
+          image: {{ .Values.keycloak.image }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+{{ .Files.Get "files/verify-account.sh" | indent 14 }}
+          env:
+            - name: KC_SERVER
+              value: http://keycloak:80/auth
+            - name: KC_ADMIN_USER
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: username, optional: true } }
+            # kcadm reads the admin password from here, so it is never an argument.
+            - name: KC_CLI_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: password, optional: true } }
+            - name: VERIFY_USERNAME
+              valueFrom: { secretKeyRef: { name: zaentrum-verify, key: username, optional: true } }
+            - name: VERIFY_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-verify, key: password, optional: true } }
+            - name: VERIFY_EMAIL
+              value: zaentrum-verify@zaentrum.invalid
+            - name: HOME
+              value: /tmp
+            # kcadm starts a JVM per call: start it small and fast.
+            - name: KC_OPTS
+              value: -XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:-UsePerfData -XX:MaxRAMPercentage=50
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          terminationMessagePolicy: File
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+{{- end }}
+      containers:
+        - name: doctor
+          image: ghcr.io/zaentrum/zae:{{ .Values.global.version }}
+          # Exit 1 on any failed check; the compact report becomes the
+          # termination message the operator reads.
+          args:
+            - doctor
+            - --url
+            - {{ include "z.publicURL" . | quote }}
+            - --sign-in
+            - --report
+            - /dev/termination-log
+          env:
+            - name: ZAE_DOCTOR_USER
+              valueFrom: { secretKeyRef: { name: zaentrum-verify, key: username, optional: true } }
+            - name: ZAE_DOCTOR_PASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-verify, key: password, optional: true } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          terminationMessagePolicy: File
+{{- if $bundled }}
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+{{- end }}
+{{- end }}

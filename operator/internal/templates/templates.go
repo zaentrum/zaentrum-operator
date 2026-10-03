@@ -149,6 +149,9 @@ func (v Values) chartValues() map[string]interface{} {
 		"keycloak": map[string]interface{}{
 			"image": orDefault(spec.Keycloak.Image, "quay.io/keycloak/keycloak:26.0.7"),
 		},
+		"verification": map[string]interface{}{
+			"enabled": derefBool(spec.Verification.Enabled, true),
+		},
 		"services": services,
 	}
 }
@@ -234,6 +237,60 @@ func Render(v Values) ([]*unstructured.Unstructured, error) {
 		}
 	}
 	return objs, nil
+}
+
+// The chart's verification test hook (templates/tests/verify.yaml): the Job the
+// operator starts for every run, its containers, and what the operator reads.
+const (
+	// VerifyJobName is the hook Job's rendered name; each run gets a Job of its
+	// own named after it.
+	VerifyJobName = "zaentrum-verify"
+	// VerifySecretName is the Secret the test account's credentials live in.
+	VerifySecretName = "zaentrum-verify"
+	// VerifyAccountName is the test account's username.
+	VerifyAccountName = "zaentrum-verify"
+	// VerifyCheckContainer runs `zae doctor`; its termination message is the
+	// run's report.
+	VerifyCheckContainer = "doctor"
+	// VerifyAccountContainer is the init container that prepares the test
+	// account in the bundled realm.
+	VerifyAccountContainer = "account"
+)
+
+// IsTestHook reports whether a rendered object is a Helm test hook (`helm
+// test`). Test hooks are not part of the platform: the operator never applies
+// them with it. (The addon renderer drops them by the same rule.)
+func IsTestHook(obj *unstructured.Unstructured) bool {
+	for _, hook := range strings.Split(obj.GetAnnotations()["helm.sh/hook"], ",") {
+		if strings.HasPrefix(strings.TrimSpace(hook), "test") {
+			return true
+		}
+	}
+	return false
+}
+
+// SplitTestHooks separates the chart's test hooks from the platform objects,
+// keeping each list in render order.
+func SplitTestHooks(objs []*unstructured.Unstructured) (platform, tests []*unstructured.Unstructured) {
+	for _, o := range objs {
+		if IsTestHook(o) {
+			tests = append(tests, o)
+			continue
+		}
+		platform = append(platform, o)
+	}
+	return platform, tests
+}
+
+// VerifyJob returns the verification Job among the test hooks, or nil when the
+// render has none (verification disabled).
+func VerifyJob(tests []*unstructured.Unstructured) *unstructured.Unstructured {
+	for _, o := range tests {
+		if o.GetKind() == "Job" && o.GetName() == VerifyJobName {
+			return o
+		}
+	}
+	return nil
 }
 
 // decode splits a multi-document YAML stream into unstructured objects,

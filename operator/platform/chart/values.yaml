@@ -79,6 +79,13 @@ databases:
 keycloak:
   image: quay.io/keycloak/keycloak:26.0.7
 
+# The platform's self-test: templates/tests/verify.yaml, a chart test (`helm
+# test`). The operator runs it after every update and on request and reports it
+# in status.verification. `zae doctor` checks the public URL outside-in and signs
+# in with the account in Secret zaentrum-verify.
+verification:
+  enabled: true
+
 # Per-service replica overrides (CR spec.replicas). Unlisted services render 1.
 services:
   packager:

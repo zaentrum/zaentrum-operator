@@ -100,13 +100,17 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// channel target in this very pass.
 	vals := templates.NewValues(&z)
 	vals.Version = decision.RenderTag
-	objs, err := templates.Render(vals)
+	rendered, err := templates.Render(vals)
 	if err != nil {
 		r.setApplied(&z, metav1.ConditionFalse, "RenderFailed", err.Error())
 		z.Status.Phase = "Error"
 		_ = r.patchStatus(ctx, &z)
 		return ctrl.Result{}, fmt.Errorf("render templates: %w", err)
 	}
+
+	// The chart's test hooks are not the platform: `helm test` runs them, and
+	// the operator never applies them with it.
+	objs, _ := templates.SplitTestHooks(rendered)
 
 	z.Status.Phase = "Reconciling"
 
