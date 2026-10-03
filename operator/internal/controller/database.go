@@ -89,8 +89,10 @@ func (r *ZaentrumReconciler) planDatabase(ctx context.Context, z *zaentrumv1alph
 		want = "postgres-data"
 	}
 
+	// Read straight from the API server: the decision must not rest on a cache
+	// that has not seen the last switch yet.
 	var dep appsv1.Deployment
-	err := r.Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: postgresDeployment}, &dep)
+	err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: postgresDeployment}, &dep)
 	switch {
 	case apierrors.IsNotFound(err):
 		// A new install: it starts on the claim.
