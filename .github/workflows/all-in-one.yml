@@ -94,3 +94,77 @@ jobs:
           provenance: false
           cache-from: type=gha,scope=all-in-one
           cache-to: type=gha,mode=max,scope=all-in-one
+
+  boot:
+    # Building the image says nothing about whether it runs. Boot it as a user
+    # would — `docker run --privileged -p 80:80` — and wait for the platform to
+    # check itself: k3s comes up, the operator reconciles the Zaentrum, every
+    # component turns ready, and the platform's own verification (the chart test:
+    # zae doctor --sign-in, as its test account, through the appliance's ingress)
+    # must pass. The appliance once could not create its Keycloak Service at all;
+    # only a boot shows that.
+    needs: build
+    # The appliance runs the operator's :latest. Only the run that follows
+    # build-images (or a manual one) is sure that :latest is this commit's; a
+    # push-triggered run may race the operator build and boot yesterday's.
+    # build-images runs on every push to main, so every push is booted anyway.
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APPLIANCE: ghcr.io/zaentrum/appliance:sha-${{ github.sha }}
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Boot the appliance
+        run: docker run -d --name zaentrum --privileged -p 80:80 "$APPLIANCE"
+
+      - name: Wait for the platform to be Ready
+        run: |
+          k() { docker exec zaentrum k3s kubectl "$@"; }
+          for i in $(seq 1 150); do
+            phase=$(k -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            [ "$phase" = Ready ] && { echo "Ready after $((i * 10))s"; exit 0; }
+            [ $((i % 6)) -eq 0 ] && echo "$((i * 10))s: phase=${phase:-none}"
+            sleep 10
+          done
+          echo "::error::the platform did not become Ready in 25 minutes"
+          exit 1
+
+      - name: Wait for the platform's verification of itself
+        run: |
+          k() { docker exec zaentrum k3s kubectl "$@"; }
+          for i in $(seq 1 90); do
+            result=$(k -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.verification.result}' 2>/dev/null || true)
+            case "$result" in Passed|Failed|Error|Skipped) break ;; esac
+            sleep 10
+          done
+          k -n zaentrum get zaentrum zaentrum -o jsonpath='{range .status.verification.checks[*]}{.status}{"\t"}{.name}{"\t"}{.detail}{"\n"}{end}'
+          echo "result: ${result:-none} — $(k -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.verification.message}')"
+          [ "$result" = Passed ] || { echo "::error::the platform's verification is ${result:-missing}, not Passed"; exit 1; }
+
+      - name: The web client answers from outside
+        run: |
+          for path in / /chino/ /portal/ /auth/realms/zaentrum/.well-known/openid-configuration; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --resolve zaentrum.localhost:80:127.0.0.1 "http://zaentrum.localhost$path")
+            echo "$code $path"
+            case "$code" in 2??|3??) ;; *) echo "::error::$path answered $code"; exit 1 ;; esac
+          done
+
+      - name: What the cluster looked like
+        if: always()
+        run: |
+          k() { docker exec zaentrum k3s kubectl "$@"; }
+          k get pods -A -o wide || true
+          k -n zaentrum get zaentrum zaentrum -o yaml | sed -n '/^status:/,$p' || true
+          k -n zaentrum get events --sort-by=.lastTimestamp | tail -40 || true
+          k -n zaentrum-operator-system logs deploy/zaentrum-operator-controller-manager --tail=80 || true
+          for j in $(k -n zaentrum get jobs -l zaentrum.io/verification=run -o name 2>/dev/null); do
+            k -n zaentrum logs "$j" --all-containers --tail=60 || true
+          done
+          docker logs zaentrum --tail 40 || true
