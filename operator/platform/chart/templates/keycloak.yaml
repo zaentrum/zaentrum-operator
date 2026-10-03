@@ -154,6 +154,15 @@ spec:
             # answers on the in-cluster name (keycloak:8080) and the public host.
             - name: KC_HOSTNAME_STRICT
               value: "false"
+{{- with include "z.adminConsoleURL" . }}
+            # The admin console is not on the public host (identity.
+            # exposeAdminConsole): its links and its sign-in point at the
+            # port-forward instead. The master realm's frontend URL, which the
+            # realm Job sets to the same, keeps the console's sign-in pages
+            # there too.
+            - name: KC_HOSTNAME_ADMIN
+              value: {{ . }}
+{{- end }}
             # Health + metrics endpoints (/auth/health/*). Needed for the probe.
             - name: KC_HEALTH_ENABLED
               value: "true"

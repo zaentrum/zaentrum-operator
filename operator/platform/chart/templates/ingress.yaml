@@ -59,13 +59,19 @@ spec:
                 name: zaentrum-portal
                 port:
                   number: 80
-          - path: /auth
+          # Bundled Keycloak: only what people sign in through — the login and
+          # account pages and the OIDC endpoints, and their styles and scripts.
+          # The admin console (/auth/admin) answers through a port-forward,
+          # unless identity.exposeAdminConsole publishes /auth whole.
+{{- range (ternary (list "/auth") (list "/auth/realms" "/auth/resources") .Values.identity.exposeAdminConsole) }}
+          - path: {{ . }}
             pathType: Prefix
             backend:
               service:
                 name: keycloak
                 port:
                   number: 80
+{{- end }}
           # chino-web returns from a sign-in to the site root's /auth/callback
           # (z.realmClients): more specific than /auth, so it reaches the SPA
           # rather than Keycloak, as the Routes' auth-callback route does.

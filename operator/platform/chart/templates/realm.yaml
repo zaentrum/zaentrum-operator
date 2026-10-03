@@ -3,10 +3,11 @@
 #
 # The realm import (keycloak-realm.yaml) only ever makes a new realm. A realm
 # that exists keeps what was imported when it was made, so this Job writes the
-# platform's own sign-in redirects (z.realmClients) into it, through the
+# platform's own sign-in redirects (z.realmClients) into it, and where the
+# admin console signs in (z.adminConsoleURL) into the master realm, through the
 # in-cluster admin API, from the very image the platform's Keycloak runs. See
-# files/realm-config.sh. It changes nothing else of a client, and leaves alone
-# a client that already has them.
+# files/realm-config.sh. It changes nothing else, and leaves alone what is
+# already so.
 #
 # A Helm hook, so a plain Helm install runs it after every install and upgrade.
 # The operator never applies it with the platform: it starts it itself, as a
@@ -63,6 +64,10 @@ spec:
 {{- range $client, $c := include "z.realmClients" . | fromJson }}
                 {{ $client }}|{{ join " " $c.redirectUris }}|{{ join " " $c.webOrigins }}|{{ with $c.attributes }}{{ index . "post.logout.redirect.uris" }}{{ end }}
 {{- end }}
+            # Where the admin console signs in: the port-forward's URL, or empty
+            # for the public host (identity.exposeAdminConsole).
+            - name: MASTER_FRONTEND_URL
+              value: {{ include "z.adminConsoleURL" . | quote }}
             - name: HOME
               value: /tmp
             # kcadm starts a JVM per call: start it small and fast.

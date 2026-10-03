@@ -128,8 +128,13 @@ spec:
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
 {{- if eq .Values.identity.mode "bundled" }}
 ---
-# Bundled headless Keycloak under /auth → issuer https://<hostname>/auth/realms/zaentrum
+# Bundled headless Keycloak → issuer https://<hostname>/auth/realms/zaentrum
 # (external identity has no in-namespace keycloak Service — the route would 503).
+# Only what people sign in through is public: /auth/realms (the login and
+# account pages, the OIDC endpoints) and /auth/resources (their styles and
+# scripts). The admin console and admin API (/auth/admin) answer through a
+# port-forward, unless identity.exposeAdminConsole publishes /auth whole. The
+# same two Routes in either case, so turning it off narrows this one again.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -137,7 +142,19 @@ metadata:
   labels: { app: keycloak, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
 spec:
   host: {{ .Values.global.hostname }}
-  path: /auth
+  path: {{ if .Values.identity.exposeAdminConsole }}/auth{{ else }}/auth/realms{{ end }}
+  to: { kind: Service, name: keycloak, weight: 100 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: zaentrum-demo-auth-resources
+  labels: { app: keycloak, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
+spec:
+  host: {{ .Values.global.hostname }}
+  path: /auth/resources
   to: { kind: Service, name: keycloak, weight: 100 }
   port: { targetPort: http }
   tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }

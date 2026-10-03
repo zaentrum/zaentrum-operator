@@ -104,6 +104,16 @@ gives a client that names none, and so what an import leaves.
   | toJson -}}
 {{- end -}}
 
+{{/*
+z.adminConsoleURL — where the bundled Keycloak's admin console signs in and is
+served: the public host when identity.exposeAdminConsole, else only the
+port-forward `kubectl port-forward svc/keycloak 8080:80` makes, so that neither
+the console nor its sign-in needs a public route. Empty: the public host.
+*/}}
+{{- define "z.adminConsoleURL" -}}
+{{- if not .Values.identity.exposeAdminConsole -}}http://localhost:8080/auth{{- end -}}
+{{- end -}}
+
 {{/* z.partOf — the app.kubernetes.io/part-of label value. */}}
 {{- define "z.partOf" -}}{{ .Values.global.partOf }}{{- end -}}
 

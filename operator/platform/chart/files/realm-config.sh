@@ -13,6 +13,12 @@
 # alone; one the realm lacks is reported, not made — making clients is the
 # realm import's job.
 #
+# Then, last, where the admin console signs in: the master realm's frontend
+# URL, MASTER_FRONTEND_URL — the port-forward's address while the console is
+# not on the public host, so its sign-in pages stay on the port-forward with
+# it, or unset when it is. Last, because Keycloak refuses every master token
+# issued before that changes, this run's own included.
+#
 # Secrets travel in the environment only: kcadm reads the bootstrap admin's
 # password from KC_CLI_PASSWORD. Nothing here prints one. On failure the
 # reason, and only the reason, is the termination message, which the operator
@@ -26,6 +32,8 @@
 #                      <clientId>|<redirect URIs>|<web origins>|<post-logout URIs>
 #                    the URIs separated by spaces, the post-logout ones by ##
 #                    (Keycloak's own separator), each list possibly empty
+#   MASTER_FRONTEND_URL  the master realm's frontend URL; empty unsets it.
+#                    Not set at all: left as it is.
 set -euo pipefail
 # The lists are split into words below; a pattern such as zae's
 # http://localhost/* must stay a word, never a file name.
@@ -139,9 +147,26 @@ $(sorted "$have_logout" '##')"
 	set_clients+=("$client")
 done <<<"$REALM_CLIENTS"
 
+console=""
+if [ -n "${MASTER_FRONTEND_URL+set}" ]; then
+	have=$(kc get realms/master --fields 'attributes(frontendUrl)' --format csv --noquotes) ||
+		fail "cannot read the master realm: $(why)"
+	where="the admin console signs in on the public host"
+	[ -z "$MASTER_FRONTEND_URL" ] || where="the admin console signs in at $MASTER_FRONTEND_URL only"
+	if [ "$have" != "$MASTER_FRONTEND_URL" ]; then
+		kc update realms/master -s "attributes.frontendUrl=$MASTER_FRONTEND_URL" ||
+			fail "cannot set where the admin console signs in: $(why)"
+		echo "realm-config: master realm frontend URL [${have}] -> [${MASTER_FRONTEND_URL}]"
+		console="now $where"
+	else
+		console=$where
+	fi
+fi
+
 summary=""
 [ ${#set_clients[@]} -eq 0 ] || summary+="set the redirects of ${set_clients[*]}"
 [ ${#same[@]} -eq 0 ] || summary+="${summary:+; }already so: ${same[*]}"
 [ ${#missing[@]} -eq 0 ] || summary+="${summary:+; }not in realm $realm: ${missing[*]}"
+[ -z "$console" ] || summary+="${summary:+; }$console"
 echo "realm-config: $summary"
 printf '%s' "$summary" >"$termlog" 2>/dev/null || true

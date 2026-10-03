@@ -19,6 +19,11 @@ identity:
   clientId: chino-web
   audience: chino
   loginTheme: ""           # bundled Keycloak login theme name (demo: zaentrum)
+  # The bundled Keycloak's admin console and admin API on the public host
+  # (/auth/admin). false: the host routes only /auth/realms and /auth/resources,
+  # and the console answers through a port-forward only —
+  #   kubectl port-forward svc/keycloak 8080:80   → http://localhost:8080/auth/admin/
+  exposeAdminConsole: false
 
 features:
   kafka: true              # bundled single-node KRaft broker (ignored when eventStreaming.mode=external)
