@@ -137,16 +137,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=operator-bundle
 
   # ── Build + push an opm catalog/index image referencing the bundle ───────
-  # Best-effort and non-blocking: a CatalogSource can point at
-  # ghcr.io/zaentrum/operator-catalog to make the bundle installable via a
-  # Subscription. We only run this once the bundle has actually been pushed (so
-  # opm can pin it by digest); PRs skip it. If opm or the catalog build fails it
-  # does NOT fail the workflow — the bundle image is the required artefact.
+  # A CatalogSource can point at ghcr.io/zaentrum/operator-catalog to make the
+  # bundle installable via a Subscription. We only run this once the bundle has
+  # actually been pushed (so opm can pin it by digest); PRs skip it. A failure
+  # fails the run: this job was continue-on-error once, and it failed on every
+  # push for weeks without anyone seeing it.
   catalog:
     needs: bundle
     if: needs.bundle.outputs.pushed == 'true'
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -207,16 +206,20 @@ jobs:
           # declarative catalog, add the package + stable channel, validate it,
           # then build a tiny image around it using opm's generated Dockerfile.
           mkdir -p catalog
-          opm render "${BUNDLE_REF}" --output=yaml > catalog/bundle.yaml
+          opm render "${BUNDLE_REF}" --output=json > catalog/bundle.json
 
           # Package + channel head. The package/channel must match the bundle's
           # annotations (package=zaentrum-operator, channel=stable). opm derives the
           # bundle name from the rendered CSV; pull it back out so the channel
-          # entry points at the real bundle name.
-          BUNDLE_NAME="$(awk '/^schema: olm.bundle$/{f=1} f&&/^name:/{print $2; exit}' catalog/bundle.yaml)"
-          if [ -z "${BUNDLE_NAME}" ]; then
-            echo "::warning::could not determine bundle name from rendered catalog; leaving channel head empty"
+          # entry points at the real bundle name. Read it from JSON: opm writes
+          # YAML keys in alphabetical order, so a document's `schema` comes after
+          # its `name`, and a line scan for the name after the schema finds none.
+          BUNDLE_NAME="$(jq -r 'select(.schema == "olm.bundle") | .name' catalog/bundle.json | head -n1)"
+          if [ -z "${BUNDLE_NAME}" ] || [ "${BUNDLE_NAME}" = "null" ]; then
+            echo "::error::the rendered catalog names no olm.bundle; cannot set the channel head"
+            exit 1
           fi
+          echo "channel head: ${BUNDLE_NAME}"
           cat > catalog/package.yaml <<EOF
           ---
           schema: olm.package
