@@ -173,7 +173,7 @@ Zaentrum is the platform; the clients are skins over one shared core.
 | **chino-api** / **chino-stream** | Product BFF + HLS/CMAF origin | Real |
 | **katalog-manager-api** | Neutral management / write API | Real |
 | **katalog-api** | Neutral catalog read API | Real |
-| processing (analyzer, packager, transcoder, katalog-ingest) | The media pipeline — off unless `features.pipeline` | Real |
+| processing (analyzer, packager, transcoder, katalog-ingest) | The media pipeline — `features.pipeline`, on a GPU or the CPU (`spec.pipeline`); the appliance runs it on the CPU | Real |
 | **musig** / **tv** | Music / live clients | Planned |
 
 ## Releases

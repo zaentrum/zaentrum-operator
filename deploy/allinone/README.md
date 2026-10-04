@@ -183,7 +183,7 @@ three:
   its RBAC and its controller (`ghcr.io/zaentrum/operator:latest`), which
   reports the install as `appliance` in `status.controller.source`;
 - `20-zaentrum.yaml` — the `Zaentrum`: bundled identity, a 50Gi library, Kafka
-  on, the media pipeline off, manual updates.
+  on, the media pipeline on the CPU, manual updates.
 
 The entrypoint adds `coredns-custom.yaml`, a CoreDNS entry that sends
 `zaentrum.localhost` to the ingress inside the cluster too, so the services
@@ -204,8 +204,9 @@ From that `Zaentrum` the operator brings up:
   Postgres, Valkey, and a single-node KRaft Kafka broker for the internal event
   stream.
 
-The media pipeline (analyzer, packager, transcoder, katalog-ingest) does not
-run: the appliance's `Zaentrum` leaves `features.pipeline` off.
+- the media pipeline — the analyzer, the transcoder, one packager and
+  katalog-ingest — which prepares and packages every title for every client,
+  on the CPU ([below](#the-media-pipeline-on-the-cpu)).
 
 Inspect it like any cluster — the k3s image ships `kubectl`:
 
@@ -215,12 +216,45 @@ docker exec zaentrum kubectl -n zaentrum get pods
 docker exec zaentrum kubectl -n zaentrum logs deploy/katalog-manager-api
 ```
 
+### The media pipeline, on the CPU
+
+The appliance's `Zaentrum` turns the pipeline on with `pipeline.encoder: cpu`
+([the operator's README](../../operator/README.md#the-media-pipeline-specpipeline)):
+no GPU is asked for, and the transcoder encodes with libx264/libx265. What it
+costs the box:
+
+- **Time.** A title whose video the clients play as it is — HEVC, or H.264 a
+  browser decodes (8-bit 4:2:0, up to High), as most files are — passes
+  through: a remux, minutes. Anything else (MPEG-2, VC-1, AV1, 10-bit H.264)
+  is an x265 encode, hours a title on a few cores. One title is prepared at a
+  time. A packaged title starts at once and costs next to nothing to play;
+  until a title is packaged, chino-stream transcodes it on the fly while it
+  plays, at the cost of the CPU then.
+- **Disk.** Every title is packaged as HLS beside the library on the `media`
+  volume, which then holds about twice the library.
+- **First boot.** About 3.9 GiB more of images to pull, compressed — the
+  analyzer 2.2 GiB, the transcoder 1.4 GiB, the packager 0.2 GiB — and about
+  twice that on disk once unpacked.
+- **CPU and memory.** The pipeline's pods ask for 1.55 CPUs and 3.1 GiB of
+  the platform's 2.3 CPUs and 5.1 GiB, so the box wants four cores and 8 GiB;
+  an encode takes up to four cores when they are free, and what it asked for
+  when they are not.
+
+Turn it off — titles are then served as chino-stream finds them, transcoded on
+the fly for a client that needs it — with:
+
+```bash
+docker exec zaentrum kubectl -n zaentrum patch zaentrum zaentrum --type merge \
+  -p '{"spec":{"features":{"pipeline":false}}}'
+```
+
 ## Where the images come from
 
 Pods pull their images as they start: the operator's
 `ghcr.io/zaentrum/operator`; the platform's `ghcr.io/zaentrum/<service>`
 images — `zaentrum-portal`, `portal-api`, `chino-web`, `chino-api`,
-`chino-stream`, `katalog-api`, `katalog-manager`, `katalog-manager-ui`, and
+`chino-stream`, `katalog-api`, `katalog-manager`, `katalog-manager-ui`, the
+pipeline's `analyzer`, `transcoder`, `packager` and `katalog-ingest`, and
 `zae` for the platform's check of itself; and the upstream `postgres`,
 `valkey/valkey`, `apache/kafka` and `quay.io/keycloak/keycloak` images.
 

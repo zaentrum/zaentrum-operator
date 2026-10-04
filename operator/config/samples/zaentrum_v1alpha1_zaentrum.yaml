@@ -16,5 +16,16 @@ spec:
   features:
     gpu: false
     kafka: true
+    # The media pipeline makes the library's titles playable on every client:
+    # analyzed, prepared and packaged as HLS beside the library.
+    pipeline: true
+  pipeline:
+    # On this machine's CPU, no GPU needed. HEVC and browser-friendly H.264
+    # sources pass through, which is a remux; anything else is an x265 encode,
+    # hours a title.
+    encoder: cpu
+  # One packager is plenty for one machine (the chart's default is two).
+  replicas:
+    packager: 1
   update:
     mode: manual
