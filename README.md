@@ -24,6 +24,8 @@ image, one port, nothing else to install; the first boot pulls the platform's im
   only, and its sign-in is bound to `http://zaentrum.localhost` — no other name, no other port.
   Modern browsers resolve `*.localhost` to `127.0.0.1`, so this needs no `/etc/hosts` edit.
 - **linux/amd64 only.** No arm64 image is published yet.
+- **This machine only.** Phones, TVs and other computers need https — see
+  [phones and TVs](#phones-and-tvs).
 
 The appliance in detail: [deploy/allinone/README.md](deploy/allinone/README.md).
 
@@ -53,6 +55,17 @@ There is **no setup wizard**: a fresh install comes up configured, with the bund
 3. **Copy your files into the library, then trigger a scan** in Catalog Management. The library
    is the `media/` folder of the platform's `media` volume — on the appliance, a directory
    inside the container ([how to fill it](deploy/allinone/README.md#first-run)).
+
+## Phones and TVs
+
+Sign-in needs **https** everywhere but on the machine itself. Keycloak marks its login cookies
+`Secure`, which a browser keeps over plain http for `localhost` names only — over
+`http://<lan-ip>` Keycloak answers the login form with "Cookie not found" — and the Android
+phone and TV apps refuse plain http altogether and trust public certificate authorities only.
+The appliance serves plain http at `zaentrum.localhost`, so it is for the machine it runs on.
+For other devices, run the operator on a cluster under a real hostname with TLS
+([self-hosting](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#b-self-host-with-the-operator),
+[troubleshooting](https://github.com/zaentrum/zaentrum/blob/main/docs/troubleshooting.md#8-sign-in-fails-over-plain-http-cookie-not-found)).
 
 ---
 

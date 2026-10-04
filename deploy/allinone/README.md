@@ -31,6 +31,14 @@ by another name (`http://localhost`, the machine's IP) and the pages answer
 
 **linux/amd64 only.** No arm64 image is published yet.
 
+**This machine only.** The appliance serves plain http, and sign-in works over
+plain http on `localhost` names alone: Keycloak marks its login cookies
+`Secure`, which a browser keeps over http only for `localhost`. A phone, a TV or
+another computer cannot sign in to it — and the Android phone and TV apps
+refuse plain http outright. For other devices, run the operator on a cluster
+under a real hostname with https
+([self-hosting](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#b-self-host-with-the-operator)).
+
 ### Why `--privileged`?
 
 The container runs **k3s**, which needs to mount filesystems, manage cgroups,
