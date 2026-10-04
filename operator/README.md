@@ -470,6 +470,12 @@ kubectl -n zaentrum get secret zaentrum-keycloak-admin -o jsonpath='{.data.passw
 open http://localhost:8080/auth/admin/
 ```
 
+In the master realm's console, the realm `zaentrum` — its users, its clients
+— is one switch away; the realm's own console (`/auth/admin/zaentrum/console/`)
+signs in on the public host and does not work through the port-forward. On
+the all-in-one appliance, publish `127.0.0.1:8080:8080` and port-forward with
+`--address 0.0.0.0` inside it (`deploy/allinone/README.md`).
+
 The console and its sign-in live at `http://localhost:8080/auth` then:
 `KC_HOSTNAME_ADMIN` points the console there, and the realm Job sets the master
 realm's frontend URL to the same, so its sign-in pages stay on the

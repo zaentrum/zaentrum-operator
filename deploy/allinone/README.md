@@ -27,9 +27,20 @@ docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
   -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
 ```
 
-Keycloak's own admin console is not on the published port; see
-[the operator's README](../../operator/README.md#the-admin-console) for the
-port-forward that reaches it.
+Keycloak's own admin console — where further accounts are made — is not on the
+published port. It answers through a port-forward on `localhost:8080`, so
+publish that port when you start the container (`-p 127.0.0.1:8080:8080` beside
+`-p 80:80`), then:
+
+```bash
+docker exec -d zaentrum kubectl -n zaentrum port-forward --address 0.0.0.0 svc/keycloak 8080:80
+docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+open http://localhost:8080/auth/admin/    # as admin, with that password
+```
+
+Or publish it on the appliance's own port with `spec.identity.exposeAdminConsole:
+true` ([the operator's README](../../operator/README.md#the-admin-console)).
 
 ### Why `--privileged`?
 
