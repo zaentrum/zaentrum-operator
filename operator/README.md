@@ -19,55 +19,51 @@ spec:
 
 ## How it works
 
-The platform's deployable manifests live in `../deploy/base` (35 objects via
-`kubectl kustomize deploy/base`). The operator does **not** hand-rewrite those
-35 resources as Go structs. Instead, `internal/templates/data/*.yaml` are Go
-`text/template` files derived 1:1 from the rendered `deploy/base`, embedded via
-`go:embed`, with two deliberate edits:
-
-1. **Un-kustomized names.** Kustomize hashes `ConfigMap`/`Secret` names
-   (`zaentrum-env-bc6ctgt9bg`, …). The operator owns and applies the full set
-   atomically, so it uses **stable** names (`zaentrum-env`, `zaentrum-db`,
-   `zaentrum-stream-signing`, `zaentrum-keycloak`, `zaentrum-keycloak-admin`) and
-   references them by plain name from every pod (`envFrom` / `configMapKeyRef`
-   / `secretKeyRef`).
-2. **CR-driven parameterization.** Image tag → `{{ image "<svc>" }}` (resolves
-   to `ghcr.io/zaentrum/<svc>:{{.Version}}`) on all 7 zaentrum images; issuer
-   host → `{{.Hostname}}` (`OIDC_ISSUER`, `KC_HOSTNAME`, ingress host);
-   issuer/clientId/audience from `spec.identity`; media PVC size from
-   `spec.storage.mediaSize` (+ `storageClassName` when set); GPU overlay gated
-   on `spec.features.gpu`; kafka resources gated on `spec.features.kafka`;
-   bundled-identity resources (Keycloak Deployment/Service/realm + the
-   `wait-for-oidc` initContainers + the `/auth` ingress path) gated on
-   `identity.mode == bundled`.
-
-Every **boot fix** from `deploy/base` is preserved verbatim: Keycloak `Service`
-on `:80`, management-port (`:9000`) `/auth/health/{ready,live}` probes,
-`wait-for-oidc` init containers, base64 `zaentrum-stream-signing` key, the `zaentrum`
-realm import `ConfigMap`, and the CoreDNS-friendly
-`http://<host>/auth/realms/zaentrum` issuer.
+The platform is the Helm chart in [`platform/chart`](platform/chart) — the
+chart a plain `helm install` takes — compiled into the binary (`go:embed`,
+`platform/embed.go`). The operator renders it with Helm's template engine
+alone, client-side: no release, no Helm apply (`internal/templates`). The CR's
+spec maps onto the chart's values (`chartValues`; the keys `values.yaml`
+documents), with what the operator decides each pass: the tag to run, whether
+the cluster is OpenShift and serves cert-manager, where the bundled Postgres
+keeps its data, whether a restore runs, the platform's certificate for the
+Routes.
 
 ### Reconcile
 
-`internal/controller/zaentrum_controller.go`:
+`internal/controller/zaentrum_controller.go`, every 30 seconds — every 10 while
+a run is in flight:
 
-1. Render the embedded templates with the CR's (defaulted) values.
-2. Decode each rendered document into an `unstructured.Unstructured`.
-3. Set the `Zaentrum` as controller owner on every **namespaced** object (so they
-   cascade-delete with the CR; the cluster-scoped `Namespace` is skipped).
-4. **Server-side apply** each object: `Patch(ctx, obj, client.Apply,
-   client.FieldOwner("zaentrum-operator"), client.ForceOwnership)`. SSA makes the
-   operator the declarative owner of exactly the fields it sets — the API
-   server merges intent, prunes fields the operator dropped, and re-applying an
-   identical object is a no-op (no read-modify-write conflicts). `ForceOwnership`
-   reclaims any field a prior manager (e.g. `kubectl`) touched.
-5. Refresh `status`: `phase`, `currentVersion` (= `spec.version`),
-   `components[]` readiness (read live `Deployments`), `conditions[]`
-   (`ResourcesApplied`, `Ready`), `observedGeneration`. Requeue every 30s.
+1. Read the Zaentrum from the API server, not the cache: the pass starts Jobs
+   from what status says about the last ones.
+2. Decide what the render needs: the release channel's tag
+   (`internal/updates`), OpenShift (asked once), where the bundled Postgres
+   keeps its data (`database.go`), a restore in flight (`restore.go`), the
+   platform's certificate (`tls.go`).
+3. Render the chart and split off its hooks — the verification, the realm
+   Job, the database copy, the restore — which are never applied with the
+   platform: the operator starts each itself, as a Job of its own, when its
+   time comes.
+4. Pin every `ghcr.io/zaentrum/*` image to its current digest
+   (`internal/digest`), so a new push on a moving tag rolls.
+5. Make the platform's Secrets that are missing, once (`secrets.go`).
+6. **Server-side apply** every object as field manager `zaentrum-operator`
+   with `ForceOwnership`: the operator owns exactly the fields it sets, the API
+   server prunes the ones it stopped setting, and an identical apply is a
+   no-op. The Zaentrum is controller owner of every namespaced object — but
+   what the chart marks `helm.sh/resource-policy: keep`, the claim with the
+   backups — so they go with the CR. An object the render no longer carries is
+   not removed; the backups' CronJob, once backups are off, is removed
+   explicitly.
+7. Take the restore's step, read the backups and the certificate, refresh
+   `status` — `phase`, `currentVersion`, `components[]`, the conditions,
+   `status.controller` — and then keep the realm in step and verify the
+   platform.
 
-**Stage 2 (auto-update)** is stubbed: `spec.channel` and `spec.update.mode` are
-stored and surfaced into `status.availableUpdate`; the tag-discovery + image
-bump logic is marked `TODO(S2)` in the reconciler.
+**Release channels.** `spec.channel` resolves through `releases.json` to a tag:
+with `spec.update.mode: auto` that tag is rendered, with `manual` it is
+reported in `status.availableUpdate`. Both channels point at `latest` today,
+which digest pinning follows push by push.
 
 ### The controller reports itself (`status.controller`)
 
@@ -778,32 +774,57 @@ finish.
 ## Build / test
 
 ```sh
-go build ./...     # compiles
-go test  ./...     # template render + boot-fix assertions
+go build ./... && go vet ./... && go test ./...
+helm lint platform/chart && helm lint platform/chart -f platform/chart/values-demo.yaml
+../scripts/check-neutrality.sh       # the public boundary; it checks its own patterns first
+../deploy/allinone/build.sh render   # must leave deploy/allinone/manifests unchanged
 ```
 
-The render test asserts the default `Zaentrum` produces **35 objects** including a
-`Deployment` named `keycloak` with a `:80` `Service` and a `/auth` health probe
-on the management port.
+`internal/templates` renders the chart per profile — self-host, the demo's,
+a shared-services install — through the operator and as `helm template` and
+`helm install` would (a fake cluster answering the chart's lookups);
+`internal/controller` runs the reconciler's flows on controller-runtime's fake
+client; `install_bundles_test.go` holds the shipped CRD copies and
+ClusterRoles to the canonical ones.
+
+The CRD is controller-gen v0.16.5 output (`controller-gen crd
+paths=./api/... output:crd:dir=config/crd`, `controller-gen object
+paths=./api/...`). A few descriptions of the committed copy are shortened by
+hand, so a new field's block is spliced into it and copied to
+`bundle/manifests`; `build.sh render` carries it into the appliance.
+`deploy/operator-install.yaml` changes only when it is re-pinned
+(`sinceThePin`).
 
 ## Layout
 
 ```
 api/v1alpha1/            CRD types + deepcopy + scheme
-internal/templates/      go:embed manifests + renderer + tests
-internal/controller/     the reconciler (server-side apply)
-config/crd/              generated CRD
-config/rbac/             ServiceAccount + ClusterRole/Binding (CRUD on all kinds)
+platform/chart/          the platform's Helm chart, embedded (platform/embed.go)
+internal/templates/      the chart's renderer (Helm's engine, client-side) + render tests
+internal/controller/     the reconcilers: the platform's (server-side apply) and the addons'
+internal/addon/          addon charts: fetch, render, guardrails
+internal/digest/         image digest pinning
+internal/updates/        release channels
+config/crd/              generated CRDs
+config/rbac/             ServiceAccount + ClusterRole/Binding
 config/manager/          operator Deployment + namespace
-config/samples/          example Zaentrum CR
+config/samples/          the example Zaentrum, which the appliance boots
+bundle/                  the OLM bundle
 Dockerfile               multi-stage, distroless → ghcr.io/zaentrum/operator
 ```
 
 ## Install
 
+Once, as a cluster-admin, from the pinned install — the CRDs, the cluster RBAC
+and the controller on one `operator:sha-<commit>` image — then a Zaentrum:
+
 ```sh
-kubectl apply -f config/crd/
-kubectl apply -f config/rbac/
-kubectl apply -f config/manager/manager.yaml
-kubectl apply -f config/samples/   # creates ns 'zaentrum' worth of platform
+kubectl apply -f https://raw.githubusercontent.com/zaentrum/zaentrum-operator/main/deploy/operator-install.yaml
+kubectl create namespace zaentrum
+kubectl apply -f config/samples/zaentrum_v1alpha1_zaentrum.yaml   # or a Zaentrum of your own
+kubectl -n zaentrum get zaentrum                                  # PHASE Ready once it is up
 ```
+
+From a checkout, `kubectl apply -k config` installs the same, its image tag
+pinned in `config/kustomization.yaml`; on OpenShift or any OLM cluster, the
+bundle in [`bundle/`](bundle).
