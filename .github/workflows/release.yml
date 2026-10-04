@@ -1,0 +1,52 @@
+# Publish a release of the operator: on a tag vX.Y.Z, the GitHub release with
+# the release's install attached as operator-install.yaml — the CRDs, the
+# cluster RBAC and the controller on ghcr.io/zaentrum/operator:vX.Y.Z
+# (scripts/render-release.sh):
+#
+#   kubectl apply -f https://github.com/zaentrum/zaentrum-operator/releases/download/vX.Y.Z/operator-install.yaml
+#
+# The images are built by the same tag's other runs: build-images (operator,
+# admin, keycloak), operator-bundle (the OLM bundle and catalog) and all-in-one
+# (the appliance). The release is published once the operator image it
+# installs exists. A pre-release tag (vX.Y.Z-rc.1) is published as one.
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render the release's operator install
+        run: ./scripts/render-release.sh "$GITHUB_REF_NAME" dist
+
+      # An install that names an image which does not exist installs nothing.
+      - name: Wait for the release's operator image
+        timeout-minutes: 45
+        run: ./scripts/wait-for-images.sh "$GITHUB_REF_NAME" operator
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A re-run, or a release made by hand first: replace the asset.
+            gh release upload "$TAG" dist/operator-install.yaml --clobber
+          else
+            args=(--verify-tag --title "$TAG" --generate-notes)
+            case "$TAG" in *-*) args+=(--prerelease) ;; esac
+            gh release create "$TAG" dist/operator-install.yaml "${args[@]}"
+          fi
