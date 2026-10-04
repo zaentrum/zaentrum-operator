@@ -3,6 +3,7 @@ package templates
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -52,7 +53,7 @@ func secretData(t *testing.T, objs []*unstructured.Unstructured, name string) ma
 	return data
 }
 
-var chartSecrets = []string{"zaentrum-db", "zaentrum-stream-signing", "zaentrum-keycloak", "zaentrum-keycloak-admin", "zaentrum-demo-user"}
+var chartSecrets = []string{"zaentrum-db", "zaentrum-stream-signing", "zaentrum-keycloak", "zaentrum-keycloak-admin", "zaentrum-demo-user", "zaentrum-people"}
 
 // The values every install of an earlier chart shared.
 var publishedValues = []string{"zaentrum-dev-change-me", "dev-change-me", "zaentrum-manager-dev-change-me",
@@ -122,6 +123,7 @@ func TestChartSecretsSurviveAnUpgrade(t *testing.T) {
 	assert.Equal(t, "Kept0admin0password", admin["password"])
 	assert.Len(t, admin["realm-admin-password"], 24, "the missing key is made")
 	assert.Len(t, secretData(t, objs, "zaentrum-demo-user")["password"], 32, "the missing Secret is made")
+	assert.Len(t, secretData(t, objs, "zaentrum-people")["client-secret"], 32, "the missing Secret is made")
 }
 
 // Provided secrets, and the operator's render, carry none of them; external
@@ -168,4 +170,19 @@ func TestChartNotesSayWhereTheFirstPasswordIs(t *testing.T) {
 	for _, o := range objs {
 		assert.NotEmpty(t, o.GetKind(), "NOTES.txt is text, not an object")
 	}
+}
+
+// The People page's Secret, as a plain Helm install makes it: both keys
+// random, alphanumeric, the deletion token 43 characters (256 bits).
+func TestChartMakesThePeopleSecret(t *testing.T) {
+	first, second := secretData(t, helmRender(t, nil), "zaentrum-people"), secretData(t, helmRender(t, nil), "zaentrum-people")
+	assert.Len(t, first["client-secret"], 32)
+	assert.Len(t, first["deletion-token"], 43)
+	for k, v := range first {
+		assert.NotEqual(t, v, second[k], "%s is the same for two installs", k)
+		assert.Regexp(t, `^[A-Za-z0-9]+$`, v, k)
+	}
+	raw, err := os.ReadFile("../../platform/chart/templates/secrets.yaml")
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"secret" "zaentrum-people" "key" "client-secret"`, "read back on an upgrade, never rotated")
 }

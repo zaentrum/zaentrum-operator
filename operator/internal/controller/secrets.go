@@ -56,6 +56,11 @@ const (
 	adminUsernameKey      = "username"
 	firstAdminPasswordKey = "realm-admin-password"
 	firstAdminUsername    = "admin"
+
+	// peopleSecretName holds the People page's credentials: the
+	// zaentrum-people client's secret, and the token account deletion is
+	// called with between chino-api and portal-api.
+	peopleSecretName = "zaentrum-people"
 )
 
 // alnum is what a generated value is made of: it travels unescaped through a
@@ -132,6 +137,17 @@ var platformSecrets = []platformSecret{
 	// would sign in with the password "${DEMO_USER_PASSWORD}".
 	{name: "zaentrum-demo-user", bundled: true, keys: []secretKey{
 		{name: "password", make: random(32)},
+	}},
+	// The People page's. client-secret is the zaentrum-people client's, which
+	// the realm Job sets in the realm and portal-api signs in with to manage
+	// the realm's people — that client may view, query and manage users,
+	// nothing else. deletion-token is what chino-api shows portal-api when a
+	// person deletes their own account, and portal-api shows chino-api when an
+	// admin deletes someone's: the call comes from the service that deletes
+	// that person's data, and from no client.
+	{name: peopleSecretName, bundled: true, keys: []secretKey{
+		{name: "client-secret", make: random(32)},
+		{name: "deletion-token", make: random(43)},
 	}},
 }
 

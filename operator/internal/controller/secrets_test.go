@@ -46,7 +46,7 @@ func secretsCond(z *zaentrumv1alpha1.Zaentrum) *metav1.Condition {
 	return meta.FindStatusCondition(z.Status.Conditions, condTypeSecretsGenerated)
 }
 
-var bundledSecrets = []string{"zaentrum-db", "zaentrum-stream-signing", "zaentrum-keycloak", "zaentrum-keycloak-admin", "zaentrum-demo-user"}
+var bundledSecrets = []string{"zaentrum-db", "zaentrum-stream-signing", "zaentrum-keycloak", "zaentrum-keycloak-admin", "zaentrum-demo-user", peopleSecretName}
 
 func isAlnum(s string) bool {
 	for _, r := range s {
@@ -93,6 +93,10 @@ func TestSecretsAreGeneratedOnce(t *testing.T) {
 	assert.NotEqual(t, admin[adminPasswordKey], admin[firstAdminPasswordKey], "two accounts, two passwords")
 	assert.Len(t, first["zaentrum-demo-user"]["password"], 32,
 		"without it the realm's demo user would sign in with the literal ${DEMO_USER_PASSWORD}")
+	people := first[peopleSecretName]
+	assert.Len(t, people["client-secret"], 32, "the zaentrum-people client's, which the realm Job sets")
+	assert.Len(t, people["deletion-token"], 43, "256 bits: what chino-api and portal-api show each other to delete an account")
+	assert.NotEqual(t, people["client-secret"], people["deletion-token"])
 	for name, data := range first {
 		for k, v := range data {
 			if k != "key" {
@@ -204,7 +208,7 @@ func TestSecretsWithExternalIdentity(t *testing.T) {
 
 	assert.NotNil(t, liveSecret(t, c, "zaentrum-db"))
 	assert.NotNil(t, liveSecret(t, c, "zaentrum-stream-signing"))
-	for _, name := range []string{"zaentrum-keycloak", adminSecretName, "zaentrum-demo-user"} {
+	for _, name := range []string{"zaentrum-keycloak", adminSecretName, "zaentrum-demo-user", peopleSecretName} {
 		assert.Nil(t, liveSecret(t, c, name), "%s belongs to the bundled Keycloak", name)
 	}
 	cond := secretsCond(z)
