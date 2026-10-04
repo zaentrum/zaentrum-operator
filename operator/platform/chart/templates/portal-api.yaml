@@ -78,6 +78,14 @@ spec:
           value: chino
         - name: PORTAL_ADMIN_ROLE
           value: zaentrum-admin
+{{- if eq .Values.identity.mode "external" }}
+        # Admin requests are taken only from tokens of the portal's own client
+        # and the CLI's. Bundled, portal-api's default already names them
+        # (zaentrum-web, zae); on a shared realm the portal signs in with the
+        # per-instance client instead, so name it here.
+        - name: PORTAL_ADMIN_CLIENTS
+          value: {{ printf "%s,zae" .Values.identity.clientId | quote }}
+{{- end }}
         - name: DB_USER
           valueFrom:
             secretKeyRef:

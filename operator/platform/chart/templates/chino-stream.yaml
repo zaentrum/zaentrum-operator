@@ -101,7 +101,9 @@ spec:
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /healthz
+            # /readyz also answers 503 while ffmpeg has no AAC encoder: a pod
+            # that can't encode fallback audio takes no playback traffic.
+            path: /readyz
             port: http
             scheme: HTTP
           initialDelaySeconds: 3

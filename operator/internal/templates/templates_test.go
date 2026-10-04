@@ -225,6 +225,8 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	assert.Contains(t, api, "OIDC_CLIENT_ID_PORTAL value:chino-beta", "portal rides the per-instance client on a shared realm")
 	pa := fmt.Sprintf("%v", find(t, objs2, "Deployment", "portal-api").Object)
 	assert.Contains(t, pa, "CHINO_PUBLIC_URL value:https://chino.example.com/", "chino tile gets the subdomain origin")
+	assert.Equal(t, "chino-beta,zae", envValue(t, objs2, "portal-api", "PORTAL_ADMIN_CLIENTS"),
+		"admin requests come from the per-instance client the portal signs in with, and the CLI")
 	assert.Nil(t, find(t, objs2, "Route", "zaentrum-demo-auth"), "no bundled-keycloak /auth route in external identity")
 	assert.NotNil(t, find(t, objs2, "Route", "zaentrum-demo-auth-callback"), "SPA callback route stays")
 }
@@ -304,4 +306,23 @@ func TestMediaClaimFitsAnyCluster(t *testing.T) {
 	spec = claim(z)
 	assert.Equal(t, []any{"ReadWriteMany"}, spec["accessModes"])
 	assert.Equal(t, "fast", spec["storageClassName"])
+}
+
+// Bundled, portal-api's own default names the bundled realm's portal and CLI
+// clients, so the chart sets no PORTAL_ADMIN_CLIENTS there; and chino-stream
+// takes traffic only once /readyz finds an AAC encoder for fallback audio.
+func TestPortalAdminClientsDefaultAndStreamReadiness(t *testing.T) {
+	objs, err := Render(NewValues(base("zaentrum")))
+	require.NoError(t, err)
+	pa := fmt.Sprintf("%v", find(t, objs, "Deployment", "portal-api").Object)
+	assert.NotContains(t, pa, "PORTAL_ADMIN_CLIENTS", "bundled: portal-api's default applies")
+
+	cs := find(t, objs, "Deployment", "chino-stream")
+	require.NotNil(t, cs)
+	containers, _, _ := unstructured.NestedSlice(cs.Object, "spec", "template", "spec", "containers")
+	require.NotEmpty(t, containers)
+	ready, _, _ := unstructured.NestedString(containers[0].(map[string]interface{}), "readinessProbe", "httpGet", "path")
+	live, _, _ := unstructured.NestedString(containers[0].(map[string]interface{}), "livenessProbe", "httpGet", "path")
+	assert.Equal(t, "/readyz", ready, "readiness gates on the AAC encoder")
+	assert.Equal(t, "/healthz", live, "liveness stays on /healthz: a missing encoder is not a reason to restart")
 }
