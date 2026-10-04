@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+// The channel document is the front door's: a release moves stable there, and
+// an operator that reads any other copy never sees it.
+func TestDefaultReleasesURLIsTheFrontDoors(t *testing.T) {
+	const want = "https://raw.githubusercontent.com/zaentrum/zaentrum/main/releases.json"
+	if DefaultReleasesURL != want {
+		t.Fatalf("DefaultReleasesURL = %q, want %q", DefaultReleasesURL, want)
+	}
+}
+
 func TestResolve(t *testing.T) {
 	rel := Releases{Channels: map[string]string{
 		"stable": "v1.2.0",
