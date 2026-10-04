@@ -1,20 +1,35 @@
 # Zaentrum all-in-one (`ghcr.io/zaentrum/appliance`)
 
-A whole Zaentrum cluster in **one container** — a neutral media client + server for
-a library you own and are entitled to stream. The image bundles a single-node
-[k3s](https://k3s.io) (real Kubernetes) and the rendered `deploy/base`
-manifests. k3s auto-applies those manifests on boot, so starting the container
-installs Zaentrum. This is the zero-clone option: nothing to check out, one
-`docker run`.
+The whole Zaentrum platform in **one container** — a neutral media client +
+server for a library you own and are entitled to stream. The image bundles a
+single-node [k3s](https://k3s.io) (real Kubernetes), the operator's install and
+a `Zaentrum` resource. k3s applies them on boot, and the operator brings up the
+platform from that resource as it would on any cluster. This is the zero-clone
+option: nothing to check out, one `docker run`.
 
 ## Run it
 
 ```bash
-docker run -d --privileged --name zaentrum -p 8080:80 ghcr.io/zaentrum/appliance:latest
+docker run -d --privileged --restart unless-stopped --name zaentrum -p 80:80 \
+  ghcr.io/zaentrum/appliance:latest
 ```
 
-Then open <http://localhost:8080>. First boot pulls the application images
-(see below) and runs the database migrations, so give it a minute.
+Then open <http://zaentrum.localhost> — modern browsers resolve `*.localhost` to
+`127.0.0.1`, with no `/etc/hosts` edit. First boot pulls the application images
+(see below) and runs the database migrations, so give it a few minutes;
+`--restart unless-stopped` brings the container back after a reboot or a Docker
+restart.
+
+**Port 80, and that one name.** The `Zaentrum` the appliance boots
+([`manifests/20-zaentrum.yaml`](manifests/20-zaentrum.yaml)) sets
+`hostname: zaentrum.localhost`, and the platform binds both its ingress and its
+sign-in to it: the Ingress answers that host only, and Keycloak issues its
+tokens for, and sends every sign-in back to, `http://zaentrum.localhost` on
+port 80. Publish the container on another host port (`-p 8080:80`) or open it
+by another name (`http://localhost`, the machine's IP) and the pages answer
+404, or the sign-in redirects to a port nothing listens on.
+
+**linux/amd64 only.** No arm64 image is published yet.
 
 ### Signing in the first time
 
@@ -51,13 +66,6 @@ simple, reliable way to grant them. (Hardened setups can instead pass the
 narrower set of capabilities + mounts k3s documents, but `--privileged` is the
 supported default here.)
 
-### Ports
-
-- `-p 8080:80` maps the bundled **Traefik** ingress (container `:80`) to
-  `localhost:8080`. Use any host port you like (`-p 80:80` for the default web
-  port). The ingress answers on **any** host name or IP, so the box's LAN
-  address works too.
-
 ### Persistence
 
 Postgres (users, watch state, the catalog), the media library and the HLS cache
@@ -69,7 +77,7 @@ give the container a fixed host name — k3s names its node after it, and a
 `local-path` volume belongs to the node it was made on:
 
 ```bash
-docker run -d --privileged --name zaentrum -h zaentrum -p 8080:80 \
+docker run -d --privileged --name zaentrum -h zaentrum -p 80:80 \
   -v zaentrum:/var/lib/rancher/k3s \
   ghcr.io/zaentrum/appliance:latest
 ```
@@ -92,22 +100,45 @@ if you run the cluster form instead.
 
 ## What's inside
 
-The container starts k3s, which applies the rendered `deploy/base` bundle:
+k3s applies the manifests in its auto-apply directory
+(`/var/lib/rancher/k3s/server/manifests`) in filename order. The image carries
+three:
 
-- `chino-web` (the main app) at `/`,
-- the management UI (`admin`) at `/manage` (first run opens the setup wizard at
-  `/manage/setup`),
-- `chino-api` (product BFF) at `/api`,
-- `katalog-manager-api` (neutral management/write API) at `/api/manage`,
-- `katalog-api` (neutral catalog read API), `chino-stream` (HLS/CMAF origin),
-- Postgres, Valkey, and a single-node KRaft Kafka broker for the internal
-  event stream.
+- `00-namespace.yaml` — the namespace `zaentrum`;
+- `10-operator.yaml` — the operator's install from `operator/config`: its CRDs,
+  its RBAC and its controller (`ghcr.io/zaentrum/operator:latest`), which
+  reports the install as `appliance` in `status.controller.source`;
+- `20-zaentrum.yaml` — the `Zaentrum`: bundled identity, a 50Gi library, Kafka
+  on, the media pipeline off, manual updates.
 
-Inspect it like any cluster:
+The entrypoint adds `coredns-custom.yaml`, a CoreDNS entry that sends
+`zaentrum.localhost` to the ingress inside the cluster too, so the services
+validate tokens against the issuer the browser signs in at.
+
+From that `Zaentrum` the operator brings up:
+
+- the portal (`zaentrum-portal`, `portal-api`) at `/` and `/portal`, whose
+  launchpad opens the apps;
+- `chino-web`, the video app, at `/chino`, and `chino-api` (the product BFF) at
+  `/api`;
+- the Catalog and Catalog Management consoles at `/katalog` and
+  `/katalog-manage`, and `katalog-manager-api` (the neutral management/write
+  API) at `/api/manage`;
+- `katalog-api` (the neutral catalog read API) and `chino-stream` (the
+  HLS/CMAF origin), inside the cluster;
+- Keycloak (realm `zaentrum`) at `/auth/realms` and `/auth/resources`,
+  Postgres, Valkey, and a single-node KRaft Kafka broker for the internal event
+  stream.
+
+The media pipeline (analyzer, packager, transcoder, katalog-ingest) does not
+run: the appliance's `Zaentrum` leaves `features.pipeline` off.
+
+Inspect it like any cluster — the k3s image ships `kubectl`:
 
 ```bash
-docker exec -it zaentrum kubectl -n zaentrum get pods
-docker exec -it zaentrum kubectl -n zaentrum logs deploy/katalog-manager-api
+docker exec zaentrum kubectl -n zaentrum get zaentrum      # PHASE Ready once it is up
+docker exec zaentrum kubectl -n zaentrum get pods
+docker exec zaentrum kubectl -n zaentrum logs deploy/katalog-manager-api
 ```
 
 ## Where the images come from
@@ -149,14 +180,23 @@ registry traffic.
 ## Build
 
 ```bash
-./deploy/allinone/build.sh            # render deploy/base -> manifests/, then docker build
+./deploy/allinone/build.sh            # write manifests/, then docker build :latest
 IMAGE=ghcr.io/zaentrum/appliance:v1 ./deploy/allinone/build.sh
-./deploy/allinone/build.sh render     # just re-render manifests/zaentrum.yaml
+./deploy/allinone/build.sh render     # just re-write manifests/
 ```
 
-`build.sh` renders `deploy/base` with kustomize into `manifests/zaentrum.yaml`,
-which the Dockerfile copies into the k3s auto-apply directory. Re-run it
-whenever `deploy/base` changes so the bundled manifest stays in sync.
+`build.sh` writes the three manifests the Dockerfile copies into k3s's
+auto-apply directory: `00-namespace.yaml`; `10-operator.yaml`, the CRDs, the
+RBAC and the manager (its namespace and Deployment) of `operator/config`, the
+manager stamped `ZAENTRUM_INSTALL_SOURCE=appliance`; and `20-zaentrum.yaml`, a
+copy of `operator/config/samples/zaentrum_v1alpha1_zaentrum.yaml`. Nothing in
+it comes from `deploy/base`.
+
+CI ([`all-in-one.yml`](../../.github/workflows/all-in-one.yml)) builds and
+pushes `ghcr.io/zaentrum/appliance:latest` and `:sha-<commit>` from `main`.
+The runs that follow the component images' build then boot it as a user would
+— `docker run --privileged -p 80:80` — and wait for the platform to be Ready
+and to pass its own verification.
 
 ## Stop / remove
 

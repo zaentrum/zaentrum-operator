@@ -9,7 +9,8 @@ web, your phone/tablet, and your TV.
 ## Try it in one command
 
 ```bash
-docker run -d --privileged -p 80:80 --name zaentrum ghcr.io/zaentrum/appliance:latest
+docker run -d --privileged --restart unless-stopped -p 80:80 --name zaentrum \
+  ghcr.io/zaentrum/appliance:latest
 open http://zaentrum.localhost
 ```
 
@@ -24,10 +25,17 @@ docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
   -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
 ```
 
-That single container is the whole product. It runs a full Kubernetes (k3s) **in-process**
-alongside the web app, the admin UI, the catalog, transcode/package, and streaming — plus
-bundled **Postgres**, **Valkey**, and **Kafka**, so there are no external dependencies to
-install. One image, one port, a complete media server.
+That single container runs the whole platform: a full Kubernetes (k3s) in-process, the
+**operator**, and everything the operator brings up — the portal, the web app, the catalog and
+its consoles, streaming, and bundled **Keycloak**, **Postgres**, **Valkey** and **Kafka**. One
+image, one port, nothing else to install; the first boot pulls the platform's images from
+`ghcr.io` and takes a few minutes.
+
+- **Port 80, and the name `zaentrum.localhost`.** The platform's Ingress answers that host
+  only, and its sign-in is bound to `http://zaentrum.localhost` — no other name, no other port.
+- **linux/amd64 only.** No arm64 image is published yet.
+
+The appliance in detail: [deploy/allinone/README.md](deploy/allinone/README.md).
 
 **Scale out:** the exact same manifests run on any real Kubernetes cluster —
 `kubectl apply -k deploy/base`.
