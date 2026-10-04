@@ -487,7 +487,7 @@
     {
       "clientId": "zae",
       "name": "zae CLI",
-      "description": "The command-line client. 'zae login' uses the device grant: the terminal shows a code, a browser approves it. Public client, no secret, no password grant. Its tokens carry realm roles, so an administrator's role reaches the API.",
+      "description": "The command-line client. 'zae login' uses the device grant: the terminal shows a code, a browser approves it. Public client, no secret, no password grant. Its tokens carry realm roles and aud=chino, so chino-api takes them, with the rating cap.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
@@ -507,6 +507,38 @@
         "email",
         "roles",
         "web-origins"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-chino",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "chino",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "max-rating",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "max_rating",
+            "claim.name": "max_rating",
+            "jsonType.label": "int",
+            "multivalued": "false",
+            "aggregate.attrs": "false",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
       ]
     },
     {

@@ -3,6 +3,7 @@ package templates
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -90,9 +91,10 @@ func strs(v any) []string {
 	return out
 }
 
-// The viewers watch through these clients: every token chino-api takes
-// (audience chino) comes from one of them, so each carries the rating cap.
-var viewerClients = []string{"chino-mobile", "chino-tv", "chino-web", "zaentrum-web"}
+// Every token chino-api takes (audience chino) comes from one of these
+// clients — the ones people watch through, the portal's, and the CLI's, whose
+// requests portal-api forwards to chino-api — so each carries the rating cap.
+var chinoClients = []string{"chino-mobile", "chino-tv", "chino-web", "zae", "zaentrum-web"}
 
 // The people client: confidential, the client credentials grant and no other
 // way in, no redirect, no secret in the import — the realm Job sets the one in
@@ -135,8 +137,8 @@ func TestRealmImportHasThePeopleClient(t *testing.T) {
 // A person's rating cap: the user attribute max_rating, an age from 0 to 21,
 // declared so that only an admin sees or changes it — a cap the person could
 // change would cap nothing — and mapped into the access tokens of every
-// client people watch through as the integer claim max_rating. No attribute,
-// no claim: no cap.
+// client whose tokens chino-api takes as the integer claim max_rating. No
+// attribute, no claim: no cap.
 func TestRealmImportMapsTheRatingCap(t *testing.T) {
 	objs := renderCR(t, base("zaentrum"))
 	realm := realmImport(t, objs)
@@ -157,8 +159,8 @@ func TestRealmImportMapsTheRatingCap(t *testing.T) {
 		cm := c.(map[string]any)
 		id := cm["clientId"].(string)
 		mappers := mappersNamed(cm, "max-rating")
-		if !contains(viewerClients, id) {
-			assert.Empty(t, mappers, "%s: no viewer's token", id)
+		if !contains(chinoClients, id) {
+			assert.Empty(t, mappers, "%s: no token chino-api takes", id)
 			continue
 		}
 		require.Len(t, mappers, 1, id)
@@ -232,7 +234,7 @@ func TestRealmJobKeepsThePeopleClientAndTheRatingCap(t *testing.T) {
 			}
 		}
 		sort.Strings(rated)
-		assert.Equal(t, viewerClients, rated, name)
+		assert.Equal(t, chinoClients, rated, name)
 		assert.Equal(t, rated, strings.Fields(env["RATING_CLIENTS"].Value), name)
 		var jobMapper map[string]any
 		require.NoError(t, json.Unmarshal([]byte(env["RATING_MAPPER_JSON"].Value), &jobMapper), name)
@@ -259,6 +261,69 @@ func TestRealmJobKeepsThePeopleClientAndTheRatingCap(t *testing.T) {
 			"%s: in Keycloak's order: %s", name, check)
 		assert.Equal(t, realm["passwordPolicy"], env["PASSWORD_POLICY"].Value, name)
 	}
+}
+
+// chino-api takes a token for its audience, chino, and caps its person by the
+// claim max_rating alone. So the clients whose tokens carry that audience — the
+// apps', the portal's, and the CLI's, whose requests portal-api forwards to
+// chino-api (an admin deleting someone's data) — are exactly those that carry
+// the rating cap, in a new realm as the import makes it and in one that
+// exists, as the realm Job keeps it: the same mapper, from the import, on
+// exactly those clients, and the cap kept first.
+func TestRealmTokensChinoAPITakesCarryTheRatingCap(t *testing.T) {
+	for name, p := range redirectProfiles() {
+		objs := renderCR(t, p.cr)
+		realm := realmImport(t, objs)
+
+		var audienced []string
+		var mapper map[string]any
+		for _, c := range realm["clients"].([]any) {
+			cm := c.(map[string]any)
+			id := cm["clientId"].(string)
+			m := mappersNamed(cm, "audience-chino")
+			if len(m) == 0 {
+				continue
+			}
+			require.Len(t, m, 1, "%s: %s", name, id)
+			audienced = append(audienced, id)
+			if mapper != nil {
+				assert.Equal(t, mapper, m[0], "%s: %s's audience mapper is everyone's", name, id)
+			}
+			mapper = m[0]
+			assert.Len(t, mappersNamed(cm, "max-rating"), 1, "%s: %s's tokens are chino-api's, and carry no cap", name, id)
+		}
+		sort.Strings(audienced)
+		assert.Equal(t, chinoClients, audienced, "%s: the clients whose tokens chino-api takes", name)
+		require.NotNil(t, mapper, name)
+		assert.Equal(t, "oidc-audience-mapper", mapper["protocolMapper"], name)
+		config := map[string]string{}
+		for k, v := range mapper["config"].(map[string]any) {
+			config[k] = v.(string)
+		}
+		assert.Equal(t, "chino", config["included.custom.audience"], "%s: chino-api's OIDC_AUDIENCE", name)
+		assert.Equal(t, "true", config["access.token.claim"], "%s: chino-api reads the access token", name)
+		assert.Equal(t, "false", config["id.token.claim"], name)
+
+		// The realm Job keeps an existing realm so, from the same import.
+		env := envByName(realmJob(t, p.cr).Spec.Template.Spec.Containers[0])
+		assert.Equal(t, audienced, strings.Fields(env["AUDIENCE_CLIENTS"].Value), name)
+		assert.Equal(t, strings.Fields(env["RATING_CLIENTS"].Value), strings.Fields(env["AUDIENCE_CLIENTS"].Value),
+			"%s: the Job caps every client it gives the audience", name)
+		var jobMapper map[string]any
+		require.NoError(t, json.Unmarshal([]byte(env["AUDIENCE_MAPPER_JSON"].Value), &jobMapper), name)
+		assert.Equal(t, mapper, jobMapper, "%s: the mapper is made as the import makes it", name)
+		assert.Equal(t, config, settingsOf(t, env["AUDIENCE_MAPPER_CONFIG"].Value), "%s: the config the Job checks is the mapper's", name)
+	}
+
+	// The cap first, then the audience: a run that stops on the way never
+	// leaves a client with the audience and without the cap.
+	script, err := os.ReadFile("../../platform/chart/files/realm-config.sh")
+	require.NoError(t, err)
+	capped := strings.Index(string(script), `keep_mapper "$RATING_MAPPER_JSON"`)
+	audience := strings.Index(string(script), `keep_mapper "$AUDIENCE_MAPPER_JSON"`)
+	require.Positive(t, capped, "the realm Job keeps the rating cap")
+	require.Positive(t, audience, "the realm Job keeps the audience")
+	assert.Less(t, capped, audience, "the rating cap is kept before the audience")
 }
 
 // container is a Deployment's first container, typed.

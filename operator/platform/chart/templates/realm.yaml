@@ -7,8 +7,9 @@
 # clients allows (z.realmSettings) into it, makes one of them the realm lacks
 # as the import has it (z.realmImport), keeps the client the People page
 # manages people with to its secret and its three roles (z.peopleClient), and
-# a person's rating cap declared and mapped into the viewers' tokens
-# (z.ratingMapper), and writes where the admin console signs in
+# a person's rating cap declared and mapped into the tokens chino-api takes
+# (z.ratingMapper), then the audience chino on the clients whose tokens those
+# are (z.audienceMapper), and writes where the admin console signs in
 # (z.adminConsoleURL) into the master realm, through the in-cluster admin API,
 # from the very image the platform's Keycloak runs. See files/realm-config.sh.
 # It changes nothing else, and leaves alone what is already so.
@@ -99,7 +100,8 @@ spec:
             # A person's rating cap (z.ratingMapper): the user attribute
             # max_rating, declared in the realm's user profile so that only an
             # admin sees or changes it, and the protocol mapper that puts it into
-            # the access tokens of these clients as the claim max_rating.
+            # the access tokens of these clients as the claim max_rating — every
+            # client whose tokens chino-api takes.
             - name: RATING_CLIENTS
               value: {{ $rating.clients | quote }}
             - name: RATING_MAPPER_JSON
@@ -110,6 +112,17 @@ spec:
               value: {{ $rating.attribute | toJson | quote }}
             - name: PROFILE_ATTRIBUTE_CHECK
               value: {{ $rating.check | quote }}
+{{- $audience := include "z.audienceMapper" $import | fromJson }}
+            # The audience chino (z.audienceMapper): the protocol mapper that
+            # makes the access tokens of these clients ones chino-api takes —
+            # the portal's and the CLI's, which portal-api forwards to chino-api,
+            # as much as the apps'. Kept after the rating cap, never before it.
+            - name: AUDIENCE_CLIENTS
+              value: {{ $audience.clients | quote }}
+            - name: AUDIENCE_MAPPER_JSON
+              value: {{ $audience.mapper | toJson | quote }}
+            - name: AUDIENCE_MAPPER_CONFIG
+              value: {{ $audience.config | quote }}
             # The realm's password policy, where it has none.
             - name: PASSWORD_POLICY
               value: {{ $import.passwordPolicy | quote }}

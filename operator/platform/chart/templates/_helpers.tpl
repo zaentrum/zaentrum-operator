@@ -213,34 +213,57 @@ realm import (z.realmImport, parsed).
 {{- end -}}
 
 {{/*
-z.ratingMapper — the protocol mapper that puts a person's rating cap, the user
-attribute max_rating (an age), into the access tokens of the clients people
-watch through, as the claim max_rating (an integer; no claim, no cap): the
-clients of the realm import that carry it, its representation there, and its
-config as the realm Job checks it (name=value). And the attribute itself, as
-the realm's user profile declares it (files/user-profile.json): its
-representation, and the part of it the realm Job checks — who may see and
-change it, the range it takes, whether it is required, single-valued — in the
-order Keycloak answers a projection of it. Pass the realm import
-(z.realmImport, parsed).
+z.importMapper — one protocol mapper of the realm import's clients, by name,
+as the realm Job keeps it, as JSON: the clients that carry it (sorted, space-
+separated), its representation there, and its config as the realm Job checks
+it (name=value). Pass (dict "import" <the realm import, parsed> "name" <the
+mapper's name>).
 */}}
-{{- define "z.ratingMapper" -}}
-{{- $import := . -}}
+{{- define "z.importMapper" -}}
 {{- $clients := list -}}
 {{- $mapper := dict -}}
-{{- range $c := $import.clients -}}
+{{- range $c := .import.clients -}}
 {{- range $m := $c.protocolMappers | default list -}}
-{{- if eq $m.name "max-rating" -}}{{ $clients = append $clients $c.clientId }}{{ $mapper = $m }}{{- end -}}
+{{- if eq $m.name $.name -}}{{ $clients = append $clients $c.clientId }}{{ $mapper = $m }}{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $config := list -}}
 {{- range $k, $v := $mapper.config }}{{ $config = append $config (printf "%s=%s" $k $v) }}{{ end -}}
+{{- dict "clients" (join " " (sortAlpha $clients)) "mapper" $mapper "config" (join " " $config) | toJson -}}
+{{- end -}}
+
+{{/*
+z.ratingMapper — the protocol mapper that puts a person's rating cap, the user
+attribute max_rating (an age), into the access tokens of every client whose
+tokens chino-api takes, as the claim max_rating (an integer; no claim, no cap):
+the clients of the realm import that carry it, its representation there, and
+its config as the realm Job checks it (name=value; z.importMapper). And the
+attribute itself, as the realm's user profile declares it
+(files/user-profile.json): its representation, and the part of it the realm
+Job checks — who may see and change it, the range it takes, whether it is
+required, single-valued — in the order Keycloak answers a projection of it.
+Pass the realm import (z.realmImport, parsed).
+*/}}
+{{- define "z.ratingMapper" -}}
+{{- $import := . -}}
+{{- $m := include "z.importMapper" (dict "import" $import "name" "max-rating") | fromJson -}}
 {{- $attribute := dict -}}
 {{- $profile := index (index $import.components "org.keycloak.userprofile.UserProfileProvider") 0 -}}
 {{- range (index $profile.config "kc.user.profile.config" | first | fromJson).attributes }}{{ if eq .name "max_rating" }}{{ $attribute = . }}{{ end }}{{ end -}}
 {{- $check := printf "{\"name\":%s,\"validations\":%s,\"permissions\":{\"view\":%s,\"edit\":%s},\"multivalued\":%v}"
       (toJson $attribute.name) (toJson $attribute.validations) (toJson $attribute.permissions.view) (toJson $attribute.permissions.edit) $attribute.multivalued -}}
-{{- dict "clients" (join " " (sortAlpha $clients)) "mapper" $mapper "config" (join " " $config) "attribute" $attribute "check" $check | toJson -}}
+{{- dict "clients" $m.clients "mapper" $m.mapper "config" $m.config "attribute" $attribute "check" $check | toJson -}}
+{{- end -}}
+
+{{/*
+z.audienceMapper — the protocol mapper that makes a client's access tokens
+ones chino-api takes, the audience chino (z.importMapper of audience-chino).
+Every client that carries it carries the rating cap too (z.ratingMapper): a
+token chino-api takes without the claim would not cap its person. Pass the
+realm import (z.realmImport, parsed).
+*/}}
+{{- define "z.audienceMapper" -}}
+{{- include "z.importMapper" (dict "import" . "name" "audience-chino") -}}
 {{- end -}}
 
 {{/*

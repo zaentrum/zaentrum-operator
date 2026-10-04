@@ -29,8 +29,11 @@
 # its profile does not declare — so that only an admin sees or changes it; and
 # on each client of RATING_CLIENTS the protocol mapper RATING_MAPPER_JSON that
 # puts it into the access token as the claim max_rating. A mapper of that name
-# whose config is not RATING_MAPPER_CONFIG is made anew. The realm stops asking
-# people at sign-in to complete their profile (the required action
+# whose config is not RATING_MAPPER_CONFIG is made anew. Then, the same way, on
+# each client of AUDIENCE_CLIENTS the mapper AUDIENCE_MAPPER_JSON that makes its
+# access tokens ones chino-api takes (the audience chino) — after the rating
+# cap, so that no run gives a client that audience before the cap. The realm
+# stops asking people at sign-in to complete their profile (the required action
 # VERIFY_PROFILE): a person here may have no email, and a child no last name.
 # And a realm without a password policy gets PASSWORD_POLICY.
 #
@@ -72,6 +75,9 @@
 #   RATING_CLIENTS   the clients whose access tokens carry the rating cap
 #   RATING_MAPPER_JSON    the protocol mapper that puts it there
 #   RATING_MAPPER_CONFIG  its config, space-separated name=value
+#   AUDIENCE_CLIENTS the clients whose access tokens chino-api takes
+#   AUDIENCE_MAPPER_JSON    the protocol mapper that gives them its audience
+#   AUDIENCE_MAPPER_CONFIG  its config, space-separated name=value
 #   PROFILE_ATTRIBUTE     the user attribute max_rating, as the realm's user
 #                    profile declares it
 #   PROFILE_ATTRIBUTE_CHECK  the part of it that must be so: a projection of
@@ -188,6 +194,51 @@ keep_settings() {
 client_id() {
 	kc get clients -r "$realm" -q "clientId=$1" --fields id --format csv --noquotes ||
 		fail "cannot look up the client $1 in realm $realm: $(why)"
+}
+
+# keep_mapper gives each client of $3 the protocol mapper $1 — its
+# representation, as the realm import has it — and makes anew one of that name
+# whose kind or config is not $2 (space-separated name=value); a mapper that is
+# so already is left alone. $4 says what the mapper does, for the log, and $5
+# names where $1 came from. The clients it gave the mapper are left in
+# $mapped, those the realm lacks in $unmapped.
+keep_mapper() {
+	local json=$1 config=$2 clients=$3 what=$4 from=$5 mapper kind client id models mid have as_wanted pair
+	mapped=() unmapped=()
+	[[ $json =~ \"name\":\"([^\"]+)\" ]] ||
+		fail "$from names no mapper"
+	mapper=${BASH_REMATCH[1]}
+	[[ $json =~ \"protocolMapper\":\"([^\"]+)\" ]] ||
+		fail "$from names no kind of mapper"
+	kind=${BASH_REMATCH[1]}
+	for client in $clients; do
+		id=$(client_id "$client")
+		if [ -z "$id" ]; then
+			unmapped+=("$client")
+			continue
+		fi
+		models=$(kc get "clients/$id/protocol-mappers/models" -r "$realm" --fields id,name --format csv --noquotes) ||
+			fail "cannot read the protocol mappers of the client $client: $(why)"
+		mid=$(printf '%s\n' "$models" | sed -n "s/^\([^,]*\),$mapper\$/\1/p" | head -n 1)
+		if [ -n "$mid" ]; then
+			have=$(kc get "clients/$id/protocol-mappers/models/$mid" -r "$realm") ||
+				fail "cannot read the mapper $mapper of the client $client: $(why)"
+			as_wanted=true
+			grep -qF "\"protocolMapper\" : \"$kind\"" <<<"$have" || as_wanted=false
+			for pair in $config; do
+				grep -qF "\"${pair%%=*}\" : \"${pair#*=}\"" <<<"$have" || as_wanted=false
+			done
+			if $as_wanted; then
+				continue
+			fi
+			kc delete "clients/$id/protocol-mappers/models/$mid" -r "$realm" ||
+				fail "cannot remove the mapper $mapper of the client $client: $(why)"
+		fi
+		printf '%s' "$json" | kc create "clients/$id/protocol-mappers/models" -r "$realm" -f - >/dev/null ||
+			fail "cannot give the client $client the mapper $mapper: $(why)"
+		echo "realm-config: $client: the mapper $mapper $what"
+		mapped+=("$client")
+	done
 }
 
 # imported prints the realm import's representation of a client, or fails.
@@ -408,44 +459,28 @@ if [ -n "${PROFILE_ATTRIBUTE:-}" ]; then
 	fi
 fi
 
-# Then the mapper on each client people watch through. A client the realm
-# lacks was made above, mapper and all, or is not the import's.
+# Then the mapper on each client whose tokens chino-api takes: the clients
+# people watch through, the portal's and the CLI's. A client the realm lacks
+# was made above, mapper and all, or is not the import's.
 rated=() unrated=()
 if [ -n "${RATING_MAPPER_JSON:-}" ]; then
-	[[ $RATING_MAPPER_JSON =~ \"name\":\"([^\"]+)\" ]] ||
-		fail "RATING_MAPPER_JSON names no mapper"
-	mapper=${BASH_REMATCH[1]}
-	[[ $RATING_MAPPER_JSON =~ \"protocolMapper\":\"([^\"]+)\" ]] ||
-		fail "RATING_MAPPER_JSON names no kind of mapper"
-	kind=${BASH_REMATCH[1]}
-	for client in ${RATING_CLIENTS:-}; do
-		id=$(client_id "$client")
-		if [ -z "$id" ]; then
-			unrated+=("$client")
-			continue
-		fi
-		models=$(kc get "clients/$id/protocol-mappers/models" -r "$realm" --fields id,name --format csv --noquotes) ||
-			fail "cannot read the protocol mappers of the client $client: $(why)"
-		mid=$(printf '%s\n' "$models" | sed -n "s/^\([^,]*\),$mapper\$/\1/p" | head -n 1)
-		if [ -n "$mid" ]; then
-			have=$(kc get "clients/$id/protocol-mappers/models/$mid" -r "$realm") ||
-				fail "cannot read the mapper $mapper of the client $client: $(why)"
-			as_wanted=true
-			grep -qF "\"protocolMapper\" : \"$kind\"" <<<"$have" || as_wanted=false
-			for pair in ${RATING_MAPPER_CONFIG:-}; do
-				grep -qF "\"${pair%%=*}\" : \"${pair#*=}\"" <<<"$have" || as_wanted=false
-			done
-			if $as_wanted; then
-				continue
-			fi
-			kc delete "clients/$id/protocol-mappers/models/$mid" -r "$realm" ||
-				fail "cannot remove the mapper $mapper of the client $client: $(why)"
-		fi
-		printf '%s' "$RATING_MAPPER_JSON" | kc create "clients/$id/protocol-mappers/models" -r "$realm" -f - >/dev/null ||
-			fail "cannot give the client $client the mapper $mapper: $(why)"
-		echo "realm-config: $client: the mapper $mapper puts the rating cap into its access tokens"
-		rated+=("$client")
-	done
+	keep_mapper "$RATING_MAPPER_JSON" "${RATING_MAPPER_CONFIG:-}" "${RATING_CLIENTS:-}" \
+		"puts the rating cap into its access tokens" RATING_MAPPER_JSON
+	rated=(${mapped[@]+"${mapped[@]}"}) unrated=(${unmapped[@]+"${unmapped[@]}"})
+fi
+
+# Then the audience that makes those clients' tokens ones chino-api takes —
+# after the cap, never before it: chino-api caps a person by the claim alone,
+# and a token it takes without one would cap nobody. A run that failed above
+# has stopped before it gave a client the audience.
+audience="" audienced=() unaudienced=()
+if [ -n "${AUDIENCE_MAPPER_JSON:-}" ]; then
+	[[ " ${AUDIENCE_MAPPER_CONFIG:-} " =~ \ included\.custom\.audience=([^ ]+)\  ]] ||
+		fail "AUDIENCE_MAPPER_CONFIG names no audience"
+	audience=${BASH_REMATCH[1]}
+	keep_mapper "$AUDIENCE_MAPPER_JSON" "${AUDIENCE_MAPPER_CONFIG:-}" "${AUDIENCE_CLIENTS:-}" \
+		"makes its access tokens for the audience $audience" AUDIENCE_MAPPER_JSON
+	audienced=(${mapped[@]+"${mapped[@]}"}) unaudienced=(${unmapped[@]+"${unmapped[@]}"})
 fi
 
 # A person here may have no email and a child no last name: the realm does
@@ -522,6 +557,8 @@ fi
 [ -z "$profile" ] || summary+="${summary:+; }$profile"
 [ ${#rated[@]} -eq 0 ] || summary+="${summary:+; }mapped the rating cap for ${rated[*]}"
 [ ${#unrated[@]} -eq 0 ] || summary+="${summary:+; }no client to map the rating cap for: ${unrated[*]}"
+[ ${#audienced[@]} -eq 0 ] || summary+="${summary:+; }mapped the audience $audience for ${audienced[*]}"
+[ ${#unaudienced[@]} -eq 0 ] || summary+="${summary:+; }no client to map the audience $audience for: ${unaudienced[*]}"
 [ -z "$verify" ] || summary+="${summary:+; }$verify"
 [ -z "$policy" ] || summary+="${summary:+; }$policy"
 [ -z "$demo" ] || summary+="${summary:+; }$demo"
