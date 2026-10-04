@@ -4,6 +4,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -420,8 +423,19 @@ func (r *ZaentrumReconciler) resolveUpdate(ctx context.Context, z *zaentrumv1alp
 // but no longer do. It is idempotent — re-applying identical objects is a
 // no-op — and avoids read-modify-write conflicts. We set Force so the operator
 // reclaims ownership of fields a prior manager (e.g. kubectl) touched.
+//
+// Every object is labelled templates.LabelPlatform with the Zaentrum it is
+// applied for (platformLabel), in its metadata only: no pod template, no
+// selector, so nothing rolls for it.
 func (r *ZaentrumReconciler) applyAll(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, objs []*unstructured.Unstructured) error {
+	platform := platformLabel(z)
 	for _, obj := range objs {
+		labels := obj.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels[templates.LabelPlatform] = platform
+		obj.SetLabels(labels)
 		// Own namespaced resources so they cascade-delete with the CR — but
 		// what the chart marks to be kept when the platform goes (the claim
 		// with the backups), which Helm keeps on an uninstall too.
@@ -438,6 +452,22 @@ func (r *ZaentrumReconciler) applyAll(ctx context.Context, z *zaentrumv1alpha1.Z
 		}
 	}
 	return nil
+}
+
+// platformLabel is the value of templates.LabelPlatform on what the operator
+// applies for z: its name — or, for a name longer than a label value may be,
+// its first 54 characters and 8 hex characters of the name's sha256, which
+// tell two such names apart.
+func platformLabel(z *zaentrumv1alpha1.Zaentrum) string {
+	if len(validation.IsValidLabelValue(z.Name)) == 0 {
+		return z.Name
+	}
+	head := z.Name
+	if len(head) > 54 {
+		head = head[:54]
+	}
+	sum := sha256.Sum256([]byte(z.Name))
+	return head + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 // refreshComponents reads each managed Deployment and records its readiness +

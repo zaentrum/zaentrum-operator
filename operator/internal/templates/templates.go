@@ -32,6 +32,12 @@ import (
 // FieldManager is the server-side-apply field manager the operator owns.
 const FieldManager = "zaentrum-operator"
 
+// LabelPlatform names, on every object the operator applies for the
+// platform, the Zaentrum it applies it for: what the operator applied, told
+// apart from whatever else the namespace holds — an addon's objects, a
+// person's, what an earlier operator applied before it labelled.
+const LabelPlatform = "zaentrum.io/platform"
+
 // Values is the minimal render context the controller manipulates: the CR plus
 // the version to render (the controller overrides Version with the channel
 // decision's tag). Render() maps it onto the chart's values.yaml.
