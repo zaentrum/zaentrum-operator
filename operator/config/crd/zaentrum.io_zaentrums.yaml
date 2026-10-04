@@ -223,6 +223,7 @@ spec:
                     description: |-
                       IssuerScheme is http or https — the scheme of the derived issuer + the
                       bundled Keycloak KC_HOSTNAME. Use https when TLS is terminated at the edge.
+                      With spec.tls it is https whatever this says.
                     enum:
                     - http
                     - https
@@ -473,6 +474,46 @@ spec:
                       ProvisionMedia controls whether the chart creates the media PVC. Set false
                       when an external PV backs it (e.g. the demo's NFS export). Default true.
                     type: boolean
+                type: object
+              tls:
+                description: |-
+                  TLS serves the hosts over https with a certificate of the platform's own:
+                  a Secret, or one cert-manager issues. Unset: the platform serves plain
+                  http, unless TLS is terminated in front of it (identity.issuerScheme
+                  https) or by the OpenShift router (routing.provisionRoutes).
+                properties:
+                  issuerRef:
+                    description: |-
+                      IssuerRef names the cert-manager Issuer or ClusterIssuer that signs a
+                      Certificate for those hosts into SecretName. It takes cert-manager's CRDs
+                      in the cluster; without them nothing is issued, and the TLS condition says
+                      so.
+                    properties:
+                      group:
+                        description: |-
+                          Group is the issuer's API group, for an external issuer. Default
+                          cert-manager.io.
+                        type: string
+                      kind:
+                        description: Kind is Issuer or ClusterIssuer. Default Issuer.
+                        enum:
+                        - Issuer
+                        - ClusterIssuer
+                        type: string
+                      name:
+                        description: Name of the Issuer (in the platform's namespace)
+                          or ClusterIssuer.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  secretName:
+                    description: |-
+                      SecretName is a kubernetes.io/tls Secret in the platform's namespace, with
+                      tls.crt (the certificate and its chain) and tls.key, for hostname and, in
+                      subdomains routing, routing.hosts.chino. Bring it, or let cert-manager
+                      write it (IssuerRef). Default zaentrum-tls.
+                    type: string
                 type: object
               update:
                 description: Update configures Stage-2 auto-update.

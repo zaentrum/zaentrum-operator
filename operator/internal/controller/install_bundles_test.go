@@ -44,6 +44,7 @@ var sinceThePin = []string{
 	"spec.identity.tvClientId",
 	"spec.backup",
 	"spec.pipeline",
+	"spec.tls",
 	"status.backup",
 }
 

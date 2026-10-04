@@ -80,6 +80,7 @@ type IdentitySpec struct {
 
 	// IssuerScheme is http or https — the scheme of the derived issuer + the
 	// bundled Keycloak KC_HOSTNAME. Use https when TLS is terminated at the edge.
+	// With spec.tls it is https whatever this says.
 	// +kubebuilder:validation:Enum=http;https
 	// +kubebuilder:default=http
 	// +optional
@@ -169,6 +170,42 @@ type PostgresStorageSpec struct {
 	// since a Postgres started on a new volume starts empty.
 	// +optional
 	Migrate bool `json:"migrate,omitempty"`
+}
+
+// TLSSpec serves the platform's hosts over https with a certificate of its
+// own: the Ingress's tls, or on OpenShift the Routes' edge termination. With
+// it the platform's scheme is https — the issuer, Keycloak's hostname, the
+// public URL the checks use — whatever identity.issuerScheme says.
+type TLSSpec struct {
+	// SecretName is a kubernetes.io/tls Secret in the platform's namespace, with
+	// tls.crt (the certificate and its chain) and tls.key, for hostname and, in
+	// subdomains routing, routing.hosts.chino. Bring it, or let cert-manager
+	// write it (IssuerRef). Default zaentrum-tls.
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
+
+	// IssuerRef names the cert-manager Issuer or ClusterIssuer that signs a
+	// Certificate for those hosts into SecretName. It takes cert-manager's CRDs
+	// in the cluster; without them nothing is issued, and the TLS condition says
+	// so.
+	// +optional
+	IssuerRef *TLSIssuerRef `json:"issuerRef,omitempty"`
+}
+
+// TLSIssuerRef names a cert-manager issuer.
+type TLSIssuerRef struct {
+	// Name of the Issuer (in the platform's namespace) or ClusterIssuer.
+	Name string `json:"name"`
+
+	// Kind is Issuer or ClusterIssuer. Default Issuer.
+	// +kubebuilder:validation:Enum=Issuer;ClusterIssuer
+	// +optional
+	Kind string `json:"kind,omitempty"`
+
+	// Group is the issuer's API group, for an external issuer. Default
+	// cert-manager.io.
+	// +optional
+	Group string `json:"group,omitempty"`
 }
 
 // RestoreRequestAnnotation asks for the bundled Postgres to be restored from a
@@ -451,6 +488,13 @@ type ZaentrumSpec struct {
 	// +kubebuilder:default=zaentrum.localhost
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
+
+	// TLS serves the hosts over https with a certificate of the platform's own:
+	// a Secret, or one cert-manager issues. Unset: the platform serves plain
+	// http, unless TLS is terminated in front of it (identity.issuerScheme
+	// https) or by the OpenShift router (routing.provisionRoutes).
+	// +optional
+	TLS *TLSSpec `json:"tls,omitempty"`
 
 	// Identity configures the OIDC provider.
 	// +optional
