@@ -73,9 +73,14 @@ const (
 	verificationRun     = "run"
 	verificationAccount = "account"
 
-	// The Job carries what started it, for whoever reads it with kubectl.
+	// The Job carries what started it, for whoever reads it with kubectl, and
+	// so that status can follow it from the Job alone (adopt).
 	annotationVerifyTrigger     = "zaentrum.io/verify-trigger"
 	annotationVerifyFingerprint = "zaentrum.io/verify-fingerprint"
+	// annotationVerifyRequest is the request a request-triggered run answers;
+	// annotationVerifyVersion is status.currentVersion when the run started.
+	annotationVerifyRequest = "zaentrum.io/verify-request"
+	annotationVerifyVersion = "zaentrum.io/verify-version"
 	// annotationVerifyCheckerFallback marks a run that checks with zae:latest
 	// because no zae image carries the platform's own tag; its value is that tag.
 	annotationVerifyCheckerFallback = "zaentrum.io/verify-checker-fallback"
@@ -272,6 +277,24 @@ func (r *ZaentrumReconciler) startRun(
 		return v
 	}
 
+	// One run at a time, held against the API server rather than against the
+	// status this pass started from. A reconcile that worked from a stale read
+	// of the Zaentrum — its status not yet showing the run the pass before had
+	// started — once replaced that run with a second one, and the first was then
+	// reported lost while the second's result was never read. A run in flight
+	// that status does not name is followed instead of replaced; the update or
+	// request that would have started another waits for it, as any does.
+	runs, err := r.runs(ctx, z)
+	if err != nil {
+		return failed("could not list the previous verification Jobs: " + err.Error())
+	}
+	for i := range runs {
+		if done, _ := jobFinished(&runs[i]); !done {
+			log.FromContext(ctx).Info("verification: a run is already in flight; following it instead of starting another",
+				"job", runs[i].Name)
+			return adopt(&runs[i], lastAnswered)
+		}
+	}
 	// At most one run, ever: the previous Job goes before the next one comes.
 	if err := r.deleteRuns(ctx, z); err != nil {
 		return failed("could not remove the previous verification Job: " + err.Error())
@@ -315,6 +338,10 @@ func (r *ZaentrumReconciler) runJob(
 	}
 	annotations[annotationVerifyTrigger] = string(v.Trigger)
 	annotations[annotationVerifyFingerprint] = v.Fingerprint
+	annotations[annotationVerifyVersion] = v.Version
+	if v.Trigger == zaentrumv1alpha1.VerificationTriggerRequest {
+		annotations[annotationVerifyRequest] = v.Request
+	}
 	job.SetAnnotations(annotations)
 
 	lbls := job.GetLabels()
@@ -328,6 +355,54 @@ func (r *ZaentrumReconciler) runJob(
 		return nil, err
 	}
 	return job, nil
+}
+
+// runs lists the verification runs this Zaentrum owns, read from the API
+// server, newest first. A Job being deleted is no run any more.
+func (r *ZaentrumReconciler) runs(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) ([]batchv1.Job, error) {
+	var jobs batchv1.JobList
+	if err := r.reader().List(ctx, &jobs, client.InNamespace(z.Namespace),
+		client.MatchingLabels{labelVerification: verificationRun}); err != nil {
+		return nil, err
+	}
+	var out []batchv1.Job
+	for _, j := range jobs.Items {
+		if metav1.IsControlledBy(&j, z) && j.DeletionTimestamp == nil {
+			out = append(out, j)
+		}
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		return out[b].CreationTimestamp.Before(&out[a].CreationTimestamp)
+	})
+	return out, nil
+}
+
+// adopt is the status of a run read from its Job alone: what started it, the
+// platform it verifies and the request it answers, as runJob wrote them on it.
+// lastAnswered is the last request answered before it, which a run an update
+// started keeps.
+func adopt(job *batchv1.Job, lastAnswered string) *zaentrumv1alpha1.VerificationStatus {
+	v := &zaentrumv1alpha1.VerificationStatus{
+		Result:      zaentrumv1alpha1.VerificationRunning,
+		Request:     lastAnswered,
+		Fingerprint: job.Annotations[annotationVerifyFingerprint],
+		Version:     job.Annotations[annotationVerifyVersion],
+		Job:         job.Name,
+	}
+	switch trigger := zaentrumv1alpha1.VerificationTrigger(job.Annotations[annotationVerifyTrigger]); trigger {
+	case zaentrumv1alpha1.VerificationTriggerRequest:
+		v.Trigger = trigger
+		if q := job.Annotations[annotationVerifyRequest]; q != "" {
+			v.Request = q
+		}
+	case zaentrumv1alpha1.VerificationTriggerUpdate:
+		v.Trigger = trigger
+	}
+	if !job.CreationTimestamp.IsZero() {
+		started := job.CreationTimestamp
+		v.StartedAt = &started
+	}
+	return v
 }
 
 // deleteRuns removes every verification Job this Zaentrum owns, with background
@@ -547,18 +622,32 @@ func checkerFallback(ctx context.Context, rv imageResolver, objs []*unstructured
 // ── the run's result ────────────────────────────────────────────────────────
 
 // collect reads the in-flight run's Job and, once it has finished, the verdict.
-// A read that fails is tried again next pass; a Job that is gone is an Error.
+// A read that fails is tried again next pass. A Job that is gone was replaced
+// by the run that is there now, which is followed to its end; one that left no
+// run behind is an Error.
 func (r *ZaentrumReconciler) collect(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, v *zaentrumv1alpha1.VerificationStatus) {
 	logger := log.FromContext(ctx)
-	if v.Job == "" {
-		r.lost(v)
-		return
-	}
 	var job batchv1.Job
-	err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: v.Job}, &job)
+	var err error = apierrors.NewNotFound(batchv1.Resource("jobs"), v.Job)
+	if v.Job != "" {
+		err = r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: v.Job}, &job)
+	}
 	if apierrors.IsNotFound(err) {
-		r.lost(v)
-		return
+		runs, lerr := r.runs(ctx, z)
+		if lerr != nil {
+			logger.Info("verification: the runs could not be listed; trying again", "error", lerr.Error())
+			return
+		}
+		if len(runs) == 0 {
+			r.lost(v)
+			return
+		}
+		// Only one run is ever kept, so the one there is the latest: a run
+		// that replaced this one. Its own Job says what it verifies.
+		logger.Info("verification: the run's Job is gone; following the run that replaced it",
+			"gone", v.Job, "job", runs[0].Name)
+		*v = *adopt(&runs[0], v.Request)
+		job, err = runs[0], nil
 	}
 	if err != nil {
 		logger.Info("verification: the run's Job could not be read; trying again", "job", v.Job, "error", err.Error())

@@ -141,7 +141,13 @@ func (e *verifyEnv) request(token string) {
 // terminated state — exit code, reason and termination message.
 func (e *verifyEnv) end(exit int32, reason, report string) {
 	e.t.Helper()
-	job := e.job(e.v().Job)
+	e.endJob(e.v().Job, exit, reason, report)
+}
+
+// endJob finishes the run Job of that name, as end does the current run's.
+func (e *verifyEnv) endJob(name string, exit int32, reason, report string) {
+	e.t.Helper()
+	job := e.job(name)
 	cond := batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}
 	if exit != 0 {
 		cond = batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
@@ -475,6 +481,154 @@ func TestVerifyUpdateQueuesBehindARunInFlight(t *testing.T) {
 	require.True(t, e.pass(true))
 	assert.Equal(t, platformFingerprint(e.platform), e.v().Fingerprint)
 	assert.Equal(t, zaentrumv1alpha1.VerificationRunning, e.v().Result)
+}
+
+// ── a run is never replaced, and a replaced one is followed ────────────────
+
+// noError fails the test if status reads Error at this step: a run the operator
+// itself replaced is no failure of the platform.
+func (e *verifyEnv) noError(step string) {
+	e.t.Helper()
+	if v := e.z.Status.Verification; v != nil {
+		assert.NotEqual(e.t, zaentrumv1alpha1.VerificationError, v.Result, "%s: %s", step, v.Message)
+	}
+	if c := cond(e.z); c != nil {
+		assert.NotEqual(e.t, "Error", c.Reason, "%s: %s", step, c.Message)
+	}
+}
+
+// Two image sets in consecutive reconciles, as one push rolled the portal and
+// then portal-api a second apart on the demo: the second reconcile worked from
+// a stale read of the Zaentrum — its status not yet showing the run the first
+// had started — and its status write was then refused on the stale
+// resourceVersion. It must not replace the run in flight. That run ends, its
+// verdict is written, and the next run verifies the second image set; at no
+// point is anything an Error.
+func TestVerifyTwoImageSetsInConsecutiveReconciles(t *testing.T) {
+	e := newVerifyEnv(t, verifyCR(), nil)
+	require.True(t, e.pass(true))
+	e.end(0, "Completed", report(healthy...))
+	require.False(t, e.pass(true))
+	before := e.z.DeepCopy() // what a cache still serves after the next pass wrote its status
+
+	// Reconcile 1: the portal's image moved.
+	e.setImage("zaentrum-portal", "ghcr.io/zaentrum/zaentrum-portal@sha256:"+strings.Repeat("a1", 32))
+	require.True(t, e.pass(true))
+	first := e.v().DeepCopy()
+	require.Equal(t, zaentrumv1alpha1.VerificationRunning, first.Result)
+	e.noError("reconcile 1")
+
+	// Reconcile 2: portal-api's image moved too, and the Zaentrum it read was
+	// the stale one.
+	e.setImage("portal-api", "ghcr.io/zaentrum/portal-api@sha256:"+strings.Repeat("b2", 32))
+	e.clock = e.clock.Add(time.Second)
+	assert.True(t, e.r.verify(context.Background(), before, "latest", e.platform, e.tests, true))
+	jobs := e.jobs()
+	require.Len(t, jobs, 1, "no second run beside the one in flight")
+	assert.Equal(t, first.Job, jobs[0].Name, "the run in flight was not replaced")
+	assert.Equal(t, first.Job, before.Status.Verification.Job, "the stale pass follows the run in flight")
+	assert.Equal(t, zaentrumv1alpha1.VerificationRunning, before.Status.Verification.Result)
+	// Its status write is refused (the stale resourceVersion): nothing of it stays.
+
+	// Reconcile 3, from the Zaentrum as the first one wrote it.
+	require.True(t, e.pass(true), "a run in flight, and a newer image set waiting for it")
+	assert.Equal(t, first.Job, e.v().Job)
+	e.noError("reconcile 3")
+
+	e.end(0, "Completed", report(healthy...))
+	require.True(t, e.pass(true), "the second image set waits for the next pass")
+	assert.Equal(t, zaentrumv1alpha1.VerificationPassed, e.v().Result)
+	assert.Equal(t, first.Fingerprint, e.v().Fingerprint, "the verdict names the image set it verified")
+	e.noError("the first run's verdict")
+
+	require.True(t, e.pass(true))
+	second := e.v().DeepCopy()
+	assert.Equal(t, zaentrumv1alpha1.VerificationRunning, second.Result)
+	assert.Equal(t, platformFingerprint(e.platform), second.Fingerprint)
+	assert.NotEqual(t, first.Job, second.Job)
+	e.end(0, "Completed", report(healthy...))
+	require.False(t, e.pass(true))
+	assert.Equal(t, zaentrumv1alpha1.VerificationPassed, e.v().Result)
+	assert.Equal(t, platformFingerprint(e.platform), e.v().Fingerprint)
+	c := cond(e.z)
+	require.NotNil(t, c)
+	assert.Equal(t, metav1.ConditionTrue, c.Status)
+	assert.Equal(t, "Passed", c.Reason)
+}
+
+// The same two image sets as an operator before this fix met them: the stale
+// second reconcile deleted the first run's Job and started a second, and its
+// status write failed, so status still named the first. The second run is
+// followed and its result read — it completes, and Verified is True — where it
+// once was never read and status stayed on Error until the next image change.
+func TestVerifyFollowsTheRunThatReplacedIt(t *testing.T) {
+	e := newVerifyEnv(t, verifyCR(), nil)
+	require.True(t, e.pass(true))
+	e.end(0, "Completed", report(healthy...))
+	require.False(t, e.pass(true))
+
+	e.setImage("zaentrum-portal", "ghcr.io/zaentrum/zaentrum-portal@sha256:"+strings.Repeat("a1", 32))
+	require.True(t, e.pass(true))
+	first := e.v().Job
+
+	// The stale reconcile, as it ran then: the first Job deleted, a second one
+	// started for the newer image set, nothing written to status.
+	e.setImage("portal-api", "ghcr.io/zaentrum/portal-api@sha256:"+strings.Repeat("b2", 32))
+	require.NoError(t, e.c.Delete(context.Background(), e.job(first)))
+	replaced := &zaentrumv1alpha1.VerificationStatus{
+		Trigger: zaentrumv1alpha1.VerificationTriggerUpdate, Fingerprint: platformFingerprint(e.platform), Version: "latest",
+	}
+	u, err := e.r.runJob(e.z, templates.VerifyJob(e.tests), replaced)
+	require.NoError(t, err)
+	require.NoError(t, e.c.Create(context.Background(), u))
+	second := u.GetName()
+
+	require.True(t, e.pass(true))
+	v := e.v()
+	assert.Equal(t, second, v.Job, "status follows the run that replaced the first")
+	assert.Equal(t, zaentrumv1alpha1.VerificationRunning, v.Result)
+	assert.Equal(t, zaentrumv1alpha1.VerificationTriggerUpdate, v.Trigger)
+	assert.Equal(t, replaced.Fingerprint, v.Fingerprint)
+	assert.Equal(t, "latest", v.Version)
+	e.noError("the first run's Job is gone")
+
+	e.end(0, "Completed", report(healthy...))
+	assert.False(t, e.pass(true), "the run verified the platform as it stands: nothing waits")
+	v = e.v()
+	assert.Equal(t, zaentrumv1alpha1.VerificationPassed, v.Result)
+	assert.Equal(t, second, v.Job)
+	assert.Equal(t, platformFingerprint(e.platform), v.Fingerprint)
+	c := cond(e.z)
+	require.NotNil(t, c)
+	assert.Equal(t, metav1.ConditionTrue, c.Status)
+	assert.Equal(t, "Passed", c.Reason)
+	assert.Len(t, e.jobs(), 1)
+}
+
+// A run that replaced the one status names and has already finished is read
+// all the same: its verdict is the status.
+func TestVerifyReadsTheVerdictOfAFinishedReplacement(t *testing.T) {
+	e := newVerifyEnv(t, verifyCR(), nil)
+	e.request("tok-1")
+	require.True(t, e.pass(true))
+	first := e.v().Job
+
+	require.NoError(t, e.c.Delete(context.Background(), e.job(first)))
+	u, err := e.r.runJob(e.z, templates.VerifyJob(e.tests), &zaentrumv1alpha1.VerificationStatus{
+		Trigger: zaentrumv1alpha1.VerificationTriggerRequest, Request: "tok-1",
+		Fingerprint: platformFingerprint(e.platform), Version: "latest",
+	})
+	require.NoError(t, err)
+	require.NoError(t, e.c.Create(context.Background(), u))
+	e.endJob(u.GetName(), 0, "Completed", report(healthy...))
+
+	assert.False(t, e.pass(true))
+	v := e.v()
+	assert.Equal(t, zaentrumv1alpha1.VerificationPassed, v.Result)
+	assert.Equal(t, u.GetName(), v.Job)
+	assert.Equal(t, zaentrumv1alpha1.VerificationTriggerRequest, v.Trigger)
+	assert.Equal(t, "tok-1", v.Request, "the request it answered, from its Job")
+	assert.False(t, e.pass(true), "the answered request asks nothing more")
 }
 
 // ── no verdict ──────────────────────────────────────────────────────────────

@@ -225,7 +225,13 @@ seccomp, a read-only root filesystem, no service account token, one attempt
   next run starts on the next pass. The previous run's Job is deleted when the
   next one starts, so at most the latest is kept, for its logs
   (`kubectl logs job/zaentrum-verify-…`); `ttlSecondsAfterFinished` (one day)
-  is the backstop.
+  is the backstop. "In flight" is what the API server holds, not what status
+  says: a run Job that has not finished is never replaced, even by a pass whose
+  status does not name it, and a run whose Job is gone while another run's Job
+  is there is followed to that one, whose verdict is read. (A push that moved
+  two images a second apart once had a pass, working from a stale read of the
+  Zaentrum, replace the run in flight; the first was reported as an Error and
+  the second's result never read.)
 - *Never again by itself.* A failed run, or one that could not start, is not
   retried for the same fingerprint — a broken platform is not mended by asking
   again every 30 seconds. A new update or a new request starts the next run.
