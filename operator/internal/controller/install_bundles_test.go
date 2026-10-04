@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -41,6 +42,7 @@ const pinnedInstall = "../../../deploy/operator-install.yaml"
 var sinceThePin = []string{
 	"spec.identity.mobileClientId",
 	"spec.identity.tvClientId",
+	"spec.pipeline",
 }
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted
@@ -218,5 +220,25 @@ func TestEveryClusterRoleHoldsWhatVerificationUses(t *testing.T) {
 		for _, n := range needs {
 			assert.True(t, ruleHolds(rules, n.group, n.resource, n.verb), "%s: no %s on %q %s", file, n.verb, n.group, n.resource)
 		}
+	}
+}
+
+// spec.pipeline.ladder is checked where it is written: the CRD's pattern takes
+// the ladders the transcoder parses — rungs source or NNNp, each with an
+// optional codec and maxrate in either order — and refuses what the transcoder
+// would refuse at its start, where a typo becomes a crash loop.
+func TestLadderPatternTakesWhatTheTranscoderTakes(t *testing.T) {
+	versions, _ := dig(zaentrumCRDSpec(t, canonicalCRD), "versions").([]any)
+	pattern, _ := dig(versions[0], "schema", "openAPIV3Schema", "properties", "spec", "properties",
+		"pipeline", "properties", "ladder", "pattern").(string)
+	require.NotEmpty(t, pattern)
+	re := regexp.MustCompile(pattern)
+	for _, ok := range []string{"source", "source,720p", "source, 720p", "source,720p,480p",
+		"720p:h264:2500k", "source:hevc", "1080p:3M:h264", "source,720p:h264:2.5M", "2160p:hevc:14m"} {
+		assert.True(t, re.MatchString(ok), "the CRD refuses a ladder the transcoder takes: %q", ok)
+	}
+	for _, bad := range []string{"720", "1080i", "source,,720p", "source;720p", "720p:av1", "720p:", "source,",
+		"src", "720p:2.5"} {
+		assert.False(t, re.MatchString(bad), "the CRD takes a ladder the transcoder refuses: %q", bad)
 	}
 }

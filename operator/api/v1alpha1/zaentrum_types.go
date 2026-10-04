@@ -189,6 +189,56 @@ type FeaturesSpec struct {
 	Pipeline bool `json:"pipeline,omitempty"`
 }
 
+// PipelineSpec configures the media pipeline that features.pipeline turns on:
+// how the transcoder encodes and how the packager packages. An empty field
+// leaves the worker's own default.
+type PipelineSpec struct {
+	// Encoder is where the transcoder encodes. gpu, the default: NVENC, so the
+	// transcoder asks for an NVIDIA GPU (nvidia.com/gpu) and is placed on a node
+	// that has one. cpu: libx264 and libx265 on any node, no GPU asked for. A
+	// source the clients play as it is — HEVC, or H.264 a browser decodes
+	// (8-bit 4:2:0, up to High) — is passed through either way; on the CPU
+	// anything else costs an x265 encode, which takes hours a title.
+	// +kubebuilder:validation:Enum=gpu;cpu
+	// +optional
+	Encoder string `json:"encoder,omitempty"`
+
+	// Ladder adds renditions per title (the transcoder's LADDER): rungs
+	// separated by commas, each source or a height such as 720p, optionally
+	// with a codec (hevc, h264) and a maxrate (2500k, 3M), e.g. "source,720p".
+	// Every rung is stored beside the library. Empty: one rendition a title.
+	// +kubebuilder:validation:Pattern=`^(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*(, ?(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*)*$`
+	// +optional
+	Ladder string `json:"ladder,omitempty"`
+
+	// SegmentSeconds is the length of an HLS segment, and so the transcoder's
+	// keyframe interval: SEGMENT_SECONDS of both workers. Empty: theirs, 6.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=30
+	// +optional
+	SegmentSeconds int32 `json:"segmentSeconds,omitempty"`
+
+	// SurroundAudio adds a 5.1 rendition of each surround track beside its
+	// stereo one (the packager's SURROUND_AUDIO): off, eac3 or ac3. Empty: off.
+	// Leave it off until chino-stream keeps it from players that cannot decode
+	// it.
+	// +kubebuilder:validation:Enum=off;eac3;ac3
+	// +optional
+	SurroundAudio string `json:"surroundAudio,omitempty"`
+
+	// HLSSubtitles names the WebVTT subtitle renditions in the HLS master
+	// playlist (the packager's HLS_SUBTITLES). Default false: the clients draw
+	// the subtitle sidecars themselves.
+	// +optional
+	HLSSubtitles bool `json:"hlsSubtitles,omitempty"`
+
+	// PreferredLanguages orders which audio language is the default, e.g.
+	// [de, en] (the packager's PREFERRED_LANGUAGES). Empty: the order of the
+	// catalog's language list.
+	// +optional
+	PreferredLanguages []string `json:"preferredLanguages,omitempty"`
+}
+
 // NetworkSpec configures network-level platform behaviour.
 type NetworkSpec struct {
 	// IssuerHostAliasIP adds a hostAliases entry (this IP → the public host) to
@@ -371,6 +421,10 @@ type ZaentrumSpec struct {
 	// Features toggles optional capabilities.
 	// +optional
 	Features FeaturesSpec `json:"features,omitempty"`
+
+	// Pipeline configures the media pipeline features.pipeline turns on.
+	// +optional
+	Pipeline PipelineSpec `json:"pipeline,omitempty"`
 
 	// Update configures Stage-2 auto-update.
 	// +optional
