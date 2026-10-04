@@ -173,6 +173,18 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	// A copy of the bundled Postgres has succeeded: move it onto its claim,
+	// which the apply below could not do alone where kubectl co-owns the
+	// emptyDir (database.go).
+	if db.switching {
+		if err := r.switchPostgres(ctx, &z, vals.PostgresVolume); err != nil {
+			r.setApplied(&z, metav1.ConditionFalse, "ApplyFailed", "switch the bundled Postgres onto its claim: "+err.Error())
+			z.Status.Phase = "Error"
+			_ = r.patchStatus(ctx, &z)
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Apply each object via server-side apply with our field manager. Set the
 	// Zaentrum as owner on namespaced resources so they GC with the CR (the
 	// cluster-scoped Namespace cannot carry a namespaced owner ref, so skip it).

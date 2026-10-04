@@ -53,6 +53,8 @@ type dbEnv struct {
 	r       *ZaentrumReconciler
 	clock   time.Time
 	applied []string
+	// patches records every patch that is not an apply, in order.
+	patches []string
 }
 
 func newDBEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum, funcs *interceptor.Funcs, objs ...client.Object) *dbEnv {
@@ -60,7 +62,11 @@ func newDBEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum, funcs *interceptor.Fun
 	s := selfScheme(t)
 	e := &dbEnv{t: t, clock: time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)}
 	f := interceptor.Funcs{Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-		e.applied = append(e.applied, obj.GetObjectKind().GroupVersionKind().Kind+"/"+obj.GetName())
+		if patch.Type() == types.JSONPatchType {
+			e.patches = append(e.patches, "json-patch Deployment/"+obj.GetName())
+		} else {
+			e.applied = append(e.applied, obj.GetObjectKind().GroupVersionKind().Kind+"/"+obj.GetName())
+		}
 		return applyAsCreateOrUpdate(ctx, cl, obj, patch, opts...)
 	}}
 	if funcs != nil && funcs.Get != nil {
@@ -269,9 +275,15 @@ func TestDatabaseMigratesByACopy(t *testing.T) {
 	assert.Equal(t, "Waiting", meta.FindStatusCondition(e.z().Status.Conditions, condTypeRealmConfigured).Reason)
 
 	e.end(e.copies()[0], true, "copied 5 databases (12 MiB) onto postgres-data: chino (4 tables, 120 rows)")
+	e.patches = nil
 	_, err = e.reconcile()
 	require.NoError(t, err)
 	assert.Equal(t, "postgres-data", e.volume(), "switched once the copy succeeded")
+	require.NotEmpty(t, e.patches)
+	assert.Equal(t, "json-patch Deployment/postgres", e.patches[0],
+		"the volume entry is replaced whole first: an apply alone keeps an emptyDir another manager co-owns")
+	data := e.postgres().Spec.Template.Spec.Volumes[0]
+	assert.Nil(t, data.EmptyDir, "no emptyDir left beside the claim")
 	c := e.cond()
 	assert.Equal(t, metav1.ConditionTrue, c.Status)
 	assert.Equal(t, "Migrated", c.Reason)

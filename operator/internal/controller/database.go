@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -73,6 +74,8 @@ type databasePlan struct {
 	migrate, start bool
 	// copying is a copy in flight, or about to be.
 	copying bool
+	// switching moves the running Postgres onto its claim this pass.
+	switching bool
 }
 
 // planDatabase decides where the bundled Postgres's data is this pass and
@@ -156,7 +159,7 @@ func (r *ZaentrumReconciler) planDatabase(ctx context.Context, z *zaentrumv1alph
 			setCondition(z, condTypeDatabasePersistent, metav1.ConditionTrue, "Migrated",
 				clip(fmt.Sprintf("the bundled Postgres moves from %s onto claim %s: %s", where, want,
 					r.migrationReport(ctx, latest, "copied")), maxVerifyMessage))
-			return databasePlan{volume: want, copying: true}, nil
+			return databasePlan{volume: want, copying: true, switching: true}, nil
 		default:
 			// A copy that was never switched to has missed what was written
 			// since it ended: take it again.
@@ -190,6 +193,44 @@ func (r *ZaentrumReconciler) persistent(ctx context.Context, z *zaentrumv1alpha1
 		}
 	}
 	setCondition(z, condTypeDatabasePersistent, metav1.ConditionTrue, "OnClaim", clip(msg, maxVerifyMessage))
+}
+
+// switchPostgres moves the running Postgres's data volume onto claim with one
+// JSON patch, just before the platform is applied. Server-side apply alone
+// cannot: where another field manager co-owns the emptyDir — kubectl did, on
+// every install it applied before the operator, the demo's among them — the
+// apply keeps that emptyDir beside the claim, and the API server refuses a
+// volume with two sources ("may not specify more than 1 volume type"),
+// failing the whole apply. Replacing the entry drops every manager's emptyDir
+// with it; the apply that follows owns the claim as it owns the rest.
+func (r *ZaentrumReconciler) switchPostgres(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, claim string) error {
+	var dep appsv1.Deployment
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: postgresDeployment}, &dep); err != nil {
+		return err
+	}
+	for i, v := range dep.Spec.Template.Spec.Volumes {
+		if v.Name != postgresDataVolume {
+			continue
+		}
+		if v.EmptyDir == nil && v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == claim {
+			return nil
+		}
+		at := fmt.Sprintf("/spec/template/spec/volumes/%d", i)
+		patch, err := json.Marshal([]map[string]any{
+			{"op": "test", "path": at + "/name", "value": postgresDataVolume},
+			{"op": "replace", "path": at, "value": map[string]any{
+				"name": postgresDataVolume, "persistentVolumeClaim": map[string]any{"claimName": claim}}},
+		})
+		if err != nil {
+			return err
+		}
+		if err := r.Patch(ctx, &dep, client.RawPatch(types.JSONPatchType, patch), client.FieldOwner(templates.FieldManager)); err != nil {
+			return err
+		}
+		log.FromContext(ctx).Info("database: the bundled Postgres switched onto its claim", "claim", claim)
+		return nil
+	}
+	return fmt.Errorf("the running Postgres has no data volume")
 }
 
 // startMigration starts the copy the render carries, as a Job of its own. The
