@@ -9,6 +9,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 )
 
 // The People page (zaentrum-portal: the People page, its invites and account
@@ -252,5 +258,63 @@ func TestRealmJobKeepsThePeopleClientAndTheRatingCap(t *testing.T) {
 		assert.True(t, strings.HasPrefix(check, `{"name":"max_rating","validations":{"integer":{"max":21,"min":0}},"permissions":{"view":["admin"],"edit":["admin"]}`),
 			"%s: in Keycloak's order: %s", name, check)
 		assert.Equal(t, realm["passwordPolicy"], env["PASSWORD_POLICY"].Value, name)
+	}
+}
+
+// container is a Deployment's first container, typed.
+func container(t *testing.T, objs []*unstructured.Unstructured, name string) corev1.Container {
+	t.Helper()
+	u := find(t, objs, "Deployment", name)
+	require.NotNil(t, u, "Deployment %s", name)
+	var d appsv1.Deployment
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &d))
+	require.NotEmpty(t, d.Spec.Template.Spec.Containers)
+	return d.Spec.Template.Spec.Containers[0]
+}
+
+// Bundled, portal-api manages people through the in-cluster Keycloak with the
+// people client, its secret from Secret zaentrum-people — optional, so that a
+// platform whose Secrets someone else makes starts without it, and the page
+// says it is not set up — and portal-api and chino-api share the account
+// deletion token. With an external provider none of it is there, and nothing
+// refers to Secret zaentrum-people.
+func TestPeopleAreManagedOnlyWithBundledIdentity(t *testing.T) {
+	bundled := map[string][]*unstructured.Unstructured{
+		"operator":     renderCR(t, base("zaentrum")),
+		"demo":         renderCR(t, demoCR("zaentrum-demo")),
+		"helm install": helmRender(t, nil),
+	}
+	for name, objs := range bundled {
+		portal := envByName(container(t, objs, "portal-api"))
+		assert.Equal(t, "http://keycloak:80/auth", portal["PORTAL_PEOPLE_KEYCLOAK_URL"].Value, "%s: the in-cluster Keycloak", name)
+		assert.Equal(t, "zaentrum", portal["PORTAL_PEOPLE_REALM"].Value, name)
+		assert.Equal(t, "zaentrum-people", portal["PORTAL_PEOPLE_CLIENT_ID"].Value, name)
+		secretRef(t, portal, "PORTAL_PEOPLE_CLIENT_SECRET", "zaentrum-people", "client-secret")
+		secretRef(t, portal, "PORTAL_ACCOUNT_DELETION_TOKEN", "zaentrum-people", "deletion-token")
+		assert.Equal(t, "http://chino-api", portal["PORTAL_CHINO_API_URL"].Value, name)
+		assert.Equal(t, realmImport(t, objs)["passwordPolicy"], portal["PORTAL_PASSWORD_POLICY"].Value, name)
+
+		chino := envByName(container(t, objs, "chino-api"))
+		secretRef(t, chino, "ACCOUNT_DELETION_TOKEN", "zaentrum-people", "deletion-token")
+	}
+
+	ext := base("zaentrum-beta")
+	ext.Spec.Identity.Mode = zaentrumv1alpha1.IdentityExternal
+	ext.Spec.Identity.Issuer = "https://sso.example.org/realms/example"
+	ext.Spec.Identity.ClientID = "media-web"
+	external := map[string][]*unstructured.Unstructured{
+		"operator": renderCR(t, ext),
+		"helm install": helmRender(t, map[string]interface{}{"identity": map[string]interface{}{
+			"mode": "external", "issuer": "https://sso.example.org/realms/example",
+		}}),
+	}
+	for name, objs := range external {
+		for _, d := range []string{"portal-api", "chino-api"} {
+			for _, e := range container(t, objs, d).Env {
+				assert.False(t, strings.HasPrefix(e.Name, "PORTAL_PEOPLE_") || strings.Contains(e.Name, "DELETION") ||
+					e.Name == "PORTAL_PASSWORD_POLICY" || e.Name == "PORTAL_CHINO_API_URL", "%s: %s sets %s", name, d, e.Name)
+			}
+		}
+		assert.NotContains(t, fmt.Sprintf("%v", objs), "zaentrum-people", "%s: no reference to the bundled realm's people", name)
 	}
 }

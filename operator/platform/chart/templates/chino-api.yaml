@@ -95,6 +95,15 @@ spec:
         # Neutral: empty registry => no extra UI.
         - name: PORTAL_BASE_URL
           value: http://portal-api
+{{- if eq .Values.identity.mode "bundled" }}
+        # Account deletion (DELETE /api/v1/me): chino-api deletes the person's
+        # data and asks portal-api, with this token and their bearer, to delete
+        # their account in the bundled realm; portal-api asks chino-api the
+        # same way for the data of someone an admin deletes. With an external
+        # provider accounts are not the platform's to delete.
+        - name: ACCOUNT_DELETION_TOKEN
+          valueFrom: { secretKeyRef: { name: zaentrum-people, key: deletion-token, optional: true } }
+{{- end }}
         - name: ADMIN_SUBJECTS
           value: ""
         - name: DB_USER

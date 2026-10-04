@@ -86,6 +86,36 @@ spec:
         - name: PORTAL_ADMIN_CLIENTS
           value: {{ printf "%s,zae" .Values.identity.clientId | quote }}
 {{- end }}
+{{- if eq .Values.identity.mode "bundled" }}
+{{- $import := include "z.realmImport" . | fromJson }}
+        # The People page: admins add, change and remove the realm's people
+        # and invite them, through the bundled realm's zaentrum-people client —
+        # a confidential client whose service account may view, query and
+        # manage users, nothing else (the realm Job keeps it so). portal-api
+        # reaches Keycloak in-cluster. Without the Secret, the page says it is
+        # not set up. With an external provider none of this is set, and the
+        # page says people live in that provider.
+        - name: PORTAL_PEOPLE_KEYCLOAK_URL
+          value: http://keycloak:80/auth
+        - name: PORTAL_PEOPLE_REALM
+          value: {{ $import.realm }}
+        - name: PORTAL_PEOPLE_CLIENT_ID
+          value: {{ (include "z.peopleClient" $import | fromJson).clientId }}
+        - name: PORTAL_PEOPLE_CLIENT_SECRET
+          valueFrom: { secretKeyRef: { name: zaentrum-people, key: client-secret, optional: true } }
+        # The realm's password policy, for the invite page's hint; Keycloak
+        # enforces the one the realm has.
+        - name: PORTAL_PASSWORD_POLICY
+          value: {{ $import.passwordPolicy | quote }}
+        # A person deleting their own account: chino-api deletes their data and
+        # asks for the account with this token and the person's bearer. An
+        # admin deleting someone: portal-api asks chino-api to delete their
+        # data first, with it and the admin's bearer.
+        - name: PORTAL_ACCOUNT_DELETION_TOKEN
+          valueFrom: { secretKeyRef: { name: zaentrum-people, key: deletion-token, optional: true } }
+        - name: PORTAL_CHINO_API_URL
+          value: http://chino-api
+{{- end }}
         - name: DB_USER
           valueFrom:
             secretKeyRef:
