@@ -14,12 +14,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/templates"
@@ -187,4 +191,37 @@ func TestTheCertificateReachesTheRender(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got, "no spec.tls, no Secret read")
 	assert.False(t, issuing)
+}
+
+// A cert-manager lookup that fails is no answer: with an issuer named, the
+// pass renders nothing rather than a platform without its Certificate, which
+// would have the Certificate removed as no longer rendered. Without an issuer
+// nothing is asked.
+func TestACertManagerLookupThatFailsDefersTheRender(t *testing.T) {
+	z := verifyCR()
+	z.Spec.TLS = &zaentrumv1alpha1.TLSSpec{IssuerRef: &zaentrumv1alpha1.TLSIssuerRef{Name: "letsencrypt"}}
+	m := &failingMapper{RESTMapper: meta.NewDefaultRESTMapper(nil)}
+	s := selfScheme(t)
+	applied := 0
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(z).WithRESTMapper(m).
+		WithStatusSubresource(&zaentrumv1alpha1.Zaentrum{}, &appsv1.Deployment{}).
+		WithInterceptorFuncs(interceptor.Funcs{Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			applied++
+			return applyAsCreateOrUpdate(ctx, cl, obj, patch, opts...)
+		}}).Build()
+	no := false
+	r := &ZaentrumReconciler{Client: c, Scheme: s, OpenShift: &no, Now: func() time.Time { return tlsNow }}
+
+	_, _, err := r.platformCertificate(context.Background(), z)
+	require.Error(t, err, "no answer is not a no")
+	_, err = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: verifyNS, Name: z.Name}})
+	require.Error(t, err)
+	assert.Zero(t, applied, "nothing rendered, nothing applied")
+
+	z.Spec.TLS.IssuerRef = nil
+	calls := m.calls
+	_, issuing, err := r.platformCertificate(context.Background(), z)
+	require.NoError(t, err)
+	assert.False(t, issuing)
+	assert.Equal(t, calls, m.calls, "no issuer named: cert-manager is not asked")
 }

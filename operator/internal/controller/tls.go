@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -42,10 +43,20 @@ const (
 
 // certificateCluster says whether the cluster serves cert-manager's
 // Certificate API. Asked on every pass that needs it, as cert-manager may come
-// after the platform.
-func (r *ZaentrumReconciler) certificateCluster() bool {
+// after the platform. A lookup that fails for any reason but "no such API" is
+// no answer, and the render waits for one, as it waits for OpenShift's
+// (openshift.go): a render without the platform's Certificate would have it
+// removed as no longer rendered (prune.go) — and where cert-manager owns the
+// certificate's Secret, the certificate with it.
+func (r *ZaentrumReconciler) certificateCluster() (bool, error) {
 	_, err := r.RESTMapper().RESTMapping(schema.GroupKind{Group: "cert-manager.io", Kind: "Certificate"}, "v1")
-	return err == nil
+	switch {
+	case err == nil:
+		return true, nil
+	case meta.IsNoMatchError(err):
+		return false, nil
+	}
+	return false, fmt.Errorf("could not tell whether the cluster serves cert-manager: %w", err)
 }
 
 // tlsSecretName is the Secret spec.tls names.
@@ -64,7 +75,13 @@ func (r *ZaentrumReconciler) platformCertificate(ctx context.Context, z *zaentru
 	if t == nil {
 		return nil, false, nil
 	}
-	issuing := t.IssuerRef != nil && t.IssuerRef.Name != "" && r.certificateCluster()
+	issuing := false
+	if t.IssuerRef != nil && t.IssuerRef.Name != "" {
+		var err error
+		if issuing, err = r.certificateCluster(); err != nil {
+			return nil, false, err
+		}
+	}
 	var sec corev1.Secret
 	err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: tlsSecretName(z)}, &sec)
 	switch {
