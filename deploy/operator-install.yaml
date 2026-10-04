@@ -1304,7 +1304,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: ghcr.io/zaentrum/operator:sha-667884200732847d52dfdd4ad5db19f6ebc7f880
+        image: ghcr.io/zaentrum/operator:sha-25780b2c4eb2c153e99bbc09a2b6c93aa2ff6a19
         livenessProbe:
           httpGet:
             path: /healthz
