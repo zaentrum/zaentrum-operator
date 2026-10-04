@@ -94,6 +94,13 @@ func TestTheTLSConditionSaysHowTheHostsAreServed(t *testing.T) {
 		}), status: metav1.ConditionTrue, reason: "Router"},
 		"Routes and an http issuer": {z: cr(func(z *zaentrumv1alpha1.Zaentrum) { z.Spec.Routing.ProvisionRoutes = &yes }),
 			status: metav1.ConditionFalse, reason: "IssuerSchemeHTTP", says: "identity.issuerScheme is http"},
+		// As beta: an external issuer named outright, issuerScheme left at its
+		// default, which then derives nothing.
+		"Routes and an issuer of its own": {z: cr(func(z *zaentrumv1alpha1.Zaentrum) {
+			z.Spec.Routing.ProvisionRoutes = &yes
+			z.Spec.Identity.Mode = zaentrumv1alpha1.IdentityExternal
+			z.Spec.Identity.Issuer = "https://sso.example.org/realms/example"
+		}), status: metav1.ConditionTrue, reason: "Router"},
 		"no Secret": {z: cr(withTLS), status: metav1.ConditionFalse, reason: "SecretMissing", says: "no Secret zaentrum-tls"},
 		"the platform's certificate": {z: cr(withTLS), secret: tlsSecretOf("zaentrum-tls", good, goodKey),
 			status: metav1.ConditionTrue, reason: "Certificate", says: "media.example.org served over https with the certificate in Secret zaentrum-tls, valid until 2026-12-03"},

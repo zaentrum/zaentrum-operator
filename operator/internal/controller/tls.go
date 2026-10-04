@@ -116,8 +116,11 @@ func (r *ZaentrumReconciler) reportTLS(ctx context.Context, z *zaentrumv1alpha1.
 	if t == nil {
 		routes := z.Spec.Routing.ProvisionRoutes != nil && *z.Spec.Routing.ProvisionRoutes
 		https := z.Spec.Identity.IssuerScheme == "https"
+		// identity.issuerScheme is the scheme of the issuer the platform
+		// derives from its host; an issuer named outright is its own.
+		derived := z.Spec.Identity.Issuer == ""
 		switch {
-		case routes && https:
+		case routes && (https || !derived):
 			set(metav1.ConditionTrue, "Router", "the OpenShift router serves "+host+" over https with its own certificate")
 		case routes:
 			set(metav1.ConditionFalse, "IssuerSchemeHTTP", "the Routes serve "+host+" over https, but identity.issuerScheme is http: "+
