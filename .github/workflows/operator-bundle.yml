@@ -5,16 +5,22 @@
 # the operator *controller* image (ghcr.io/zaentrum/operator) in its matrix.
 # Here we build the OLM *bundle* image:
 #   ghcr.io/zaentrum/operator-bundle:latest        (default branch)
-#   ghcr.io/zaentrum/operator-bundle:<git-sha>
-#   ghcr.io/zaentrum/operator-bundle:<git-tag>     (on tag pushes)
+#   ghcr.io/zaentrum/operator-bundle:sha-<git-sha> (default branch)
+#   ghcr.io/zaentrum/operator-bundle:vX.Y.Z, X.Y   (a release tag)
 # from operator/bundle/bundle.Dockerfile with context operator/bundle (the
 # Dockerfile COPYs ./manifests and ./metadata relative to that context).
 #
 # It also (best-effort, never required) assembles an opm-built catalog/index
 # image so a CatalogSource can point at the bundle:
 #   ghcr.io/zaentrum/operator-catalog:latest
-#   ghcr.io/zaentrum/operator-catalog:<git-sha>
-#   ghcr.io/zaentrum/operator-catalog:<git-tag>
+#   ghcr.io/zaentrum/operator-catalog:sha-<git-sha>
+#   ghcr.io/zaentrum/operator-catalog:vX.Y.Z, X.Y  (a release tag)
+#
+# A release tag stamps its version into the bundle first (operator/bundle/
+# stamp.sh): the CSV becomes zaentrum-operator.vX.Y.Z on operator:vX.Y.Z, and
+# the release's catalog serves it on the stable channel. main's bundle stays
+# the committed one, on operator:latest. A release never moves :latest or a
+# :sha- tag.
 #
 # NOTE: the bundle is still a Stage-3 WIP skeleton (see operator/bundle/README.md
 # and the `zaentrum.io/bundle-stage: wip-stage-3` marker). This CI publishes the
@@ -31,7 +37,7 @@ on:
       - 'operator/bundle/**'
       - 'operator/config/**'
       - '.github/workflows/operator-bundle.yml'
-    tags: ['v*']
+    tags: ['v*.*.*']
   # PRs that touch the bundle build (and validate) it, but never push.
   pull_request:
     paths:
@@ -68,6 +74,12 @@ jobs:
       pushed: ${{ steps.build.outcome == 'success' && github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
+
+      # A release's bundle is that release's: its CSV name and version, and its
+      # operator image, stamped in before it is validated and built.
+      - name: Stamp the release into the bundle
+        if: github.ref_type == 'tag'
+        run: ./operator/bundle/stamp.sh "$GITHUB_REF_NAME"
 
       # Validate the bundle metadata before building. operator-sdk's bundle
       # validator is the standard check; if it isn't installable on the runner
@@ -114,10 +126,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.BUNDLE_IMAGE }}
+          # latest=false: a tag would otherwise add :latest by itself.
+          flavor: |
+            latest=false
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=long
-            type=ref,event=tag
+            type=sha,format=long,enable=${{ github.ref_type != 'tag' }}
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push operator-bundle
         id: build
@@ -176,15 +192,21 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # latest (default branch only) + long sha, mirroring the bundle tags.
-          # Comma-separated: build-push-action reads its tags input as a list
-          # split on commas or newlines, never on spaces.
-          tags="${CATALOG_IMAGE}:sha-${SHA}"
+          # Mirroring the bundle tags: a release tag is vX.Y.Z and X.Y (no X.Y
+          # for a pre-release); anything else is the long sha, plus latest on
+          # main. Comma-separated: build-push-action reads its tags input as a
+          # list split on commas or newlines, never on spaces.
           if [ "$REF_TYPE" = "tag" ]; then
-            tags="${tags},${CATALOG_IMAGE}:${REF_NAME}"
-          fi
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            tags="${tags},${CATALOG_IMAGE}:latest"
+            tags="${CATALOG_IMAGE}:${REF_NAME}"
+            case "$REF_NAME" in
+              *-*) ;;
+              *) v="${REF_NAME#v}"; tags="${tags},${CATALOG_IMAGE}:${v%.*}" ;;
+            esac
+          else
+            tags="${CATALOG_IMAGE}:sha-${SHA}"
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              tags="${tags},${CATALOG_IMAGE}:latest"
+            fi
           fi
           echo "list=${tags}" >> "$GITHUB_OUTPUT"
           echo "primary=${CATALOG_IMAGE}:latest" >> "$GITHUB_OUTPUT"
