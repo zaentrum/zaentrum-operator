@@ -49,22 +49,31 @@ spec:
           value: chino
         - name: OIDC_ENABLED
           value: "true"
-        # Per-platform PUBLIC client ids the realm registers (chino-web/tv/mobile),
-        # surfaced to neutral clients via GET /api/config so they pick the right one.
-        # The WEB id is the CR's identity.clientId (e.g. chino-beta on the shared
-        # realm) — it drives BOTH SPAs (chino-web + the portal shell read /api/config).
-        # NO tv/mobile overrides. The code already defaults both to "chino"
-        # (config.go envDefault), which is a real client with the device grant
-        # enabled. Overriding them here advertised two ids that do not work:
-        #   chino-tv     -> invalid_client       (no such client in the realm)
-        #   chino-mobile -> unauthorized_client  (device grant not enabled)
-        # The clients read these from /api/config and only fall back to "chino"
-        # when the field is ABSENT — so setting them broke device sign-in on
-        # every phone and TV, and is the root cause of the long-standing Tizen
-        # invalid_client failure. Set one again only after creating the client
-        # AND enabling its device grant.
+        # The PUBLIC clients GET /api/config hands to each kind of client, which
+        # signs in through the one named for it — and only when none is named
+        # through chino-api's default, "chino". So every id here must be a
+        # client of the issuer above with the grant its apps use:
+        #   web     identity.clientId — both SPAs, chino-web and the portal
+        #           shell; the per-instance client on a shared realm.
+        #   tv      the device grant with PKCE (S256): the Android TV and Tizen
+        #           apps (z.tvClientId).
+        #   mobile  the authorization code with PKCE in the system browser,
+        #           returning to cloud.nalet.chino:/oauth/callback exactly: the
+        #           phone and tablet apps (z.mobileClientId).
+        # The bundled realm has no "chino": a bundled install names its realm's
+        # chino-tv and chino-mobile, which the realm import and the realm Job
+        # keep so. With an external provider, tv and mobile are named only when
+        # identity.tvClientId / mobileClientId say, else "chino" applies.
         - name: OIDC_CLIENT_ID_WEB
           value: {{ .Values.identity.clientId }}
+{{- with include "z.tvClientId" . }}
+        - name: OIDC_CLIENT_ID_TV
+          value: {{ . }}
+{{- end }}
+{{- with include "z.mobileClientId" . }}
+        - name: OIDC_CLIENT_ID_MOBILE
+          value: {{ . }}
+{{- end }}
         # The portal shell's client: its own zaentrum-web on the bundled realm;
         # on a shared realm it rides the per-instance client (same one as web —
         # its redirect URIs cover both hosts).

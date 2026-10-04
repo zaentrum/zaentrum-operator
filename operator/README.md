@@ -443,6 +443,18 @@ The clients people sign in through return only to the platform's own origins
 | `chino-tv` | none (device grant) | |
 | `zae` | `http://127.0.0.1/*`, `http://localhost/*` | its redirects |
 
+The apps learn which client is theirs from chino-api's `GET /api/config`
+(`oidcClientId.web`, `.tv`, `.mobile`, `.portal`) and use chino-api's default,
+`chino`, only where it names none. The bundled realm has no `chino`, so a
+bundled install names `chino-tv` and `chino-mobile` there
+(`spec.identity.tvClientId` / `mobileClientId` name others). With an external
+provider they are named only when those fields are set: give your provider a
+public client with the device grant and PKCE for the TV apps, and one with the
+authorization code, PKCE and the redirect `cloud.nalet.chino:/oauth/callback`
+— exactly that string; a wildcard does not cover it — for the phone apps, both
+with `offline_access` and an audience mapper for `identity.audience`; or one
+`chino` client that does all of it.
+
 `<origin>` is the public URL, plain `http` beside it where OpenShift Routes
 serve the host (they allow it), and for `chino-web` also `https://<hosts.chino>`
 in subdomains routing. Web origins are those origins. A new realm gets them

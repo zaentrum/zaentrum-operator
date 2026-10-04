@@ -105,6 +105,20 @@ gives a client that names none, and so what an import leaves.
 {{- end -}}
 
 {{/*
+z.tvClientId / z.mobileClientId — the public clients chino-api advertises in
+/api/config for the TV apps and for the phone and tablet apps: identity.
+tvClientId / mobileClientId, else, with bundled identity, the bundled realm's
+own (chino-tv, chino-mobile). Empty with an external provider and nothing
+set: chino-api's default applies.
+*/}}
+{{- define "z.tvClientId" -}}
+{{- .Values.identity.tvClientId | default (ternary "chino-tv" "" (eq .Values.identity.mode "bundled")) -}}
+{{- end -}}
+{{- define "z.mobileClientId" -}}
+{{- .Values.identity.mobileClientId | default (ternary "chino-mobile" "" (eq .Values.identity.mode "bundled")) -}}
+{{- end -}}
+
+{{/*
 z.adminConsoleURL — where the bundled Keycloak's admin console signs in and is
 served: the public host when identity.exposeAdminConsole, else only the
 port-forward `kubectl port-forward svc/keycloak 8080:80` makes, so that neither
