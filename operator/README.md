@@ -310,6 +310,7 @@ applied, and once:
 | `zaentrum-keycloak` | `client-secret` | the `zaentrum-manager` client (bundled identity) |
 | `zaentrum-keycloak-admin` | `username` (`admin`), `password`, `realm-admin-password` | the master realm's bootstrap admin; the first administrator's one-time password (bundled identity) |
 | `zaentrum-demo-user` | `password` | the realm import's `${DEMO_USER_PASSWORD}` (bundled identity) |
+| `zaentrum-people` | `client-secret`, `deletion-token` | the `zaentrum-people` client, which portal-api manages the realm's people with; the token chino-api and portal-api delete an account with ([below](#people-and-the-rating-cap)) (bundled identity) |
 
 Every value comes from `crypto/rand` and is alphanumeric. Each Secret is owned
 by the Zaentrum (it goes with the platform) and labelled
@@ -589,7 +590,9 @@ again.
 - *The platform's Secrets* — `zaentrum-db`, `zaentrum-keycloak` (the
   `zaentrum-manager` client's secret, which the restored realm also holds),
   `zaentrum-keycloak-admin` (the bootstrap admin, whose password the restored
-  master realm also holds), `zaentrum-demo-user` and `zaentrum-stream-signing`.
+  master realm also holds), `zaentrum-demo-user`, `zaentrum-people` (the
+  `zaentrum-people` client's secret, which the realm Job sets again, and the
+  account deletion token) and `zaentrum-stream-signing`.
   Restoring into the install that made the dump needs
   none of them; restoring into a new one — another cluster, a re-created
   appliance — needs those it had. Keep them once, somewhere safe, as you would
@@ -597,7 +600,7 @@ again.
 
   ```sh
   kubectl -n zaentrum get secret zaentrum-db zaentrum-keycloak zaentrum-keycloak-admin \
-    zaentrum-demo-user zaentrum-stream-signing -o yaml > zaentrum-secrets.yaml
+    zaentrum-demo-user zaentrum-people zaentrum-stream-signing -o yaml > zaentrum-secrets.yaml
   ```
 
   Into a new install: create the namespace, apply them (drop `ownerReferences`,
@@ -694,6 +697,52 @@ password `${DEMO_USER_PASSWORD}`, the placeholder itself. If `demo` still
 signs in with it, it gets the Secret's password (the operator makes the Secret
 unless secrets are external), or is disabled where there is none. A `demo`
 user with a password of its own is left alone.
+
+### People, and the rating cap
+
+One account per person: an admin adds people on the portal's People page and
+sends each an invite link, where they choose their own password (zaentrum-
+portal). portal-api does it through one client of the bundled realm,
+`zaentrum-people` — confidential, the client credentials grant and no other
+way in — whose service account holds `view-users`, `query-users` and
+`manage-users` of `realm-management`, and nothing else: never `realm-admin`,
+`manage-realm` or `manage-clients`. Its secret is `client-secret` in Secret
+`zaentrum-people`; the realm import carries none (Keycloak makes one nobody
+knows) and the realm Job sets the Secret's. portal-api reaches Keycloak
+in-cluster (`http://keycloak:80/auth`), never through the public host.
+
+The realm Job keeps it so in a realm that exists: it makes the client as the
+import makes it when the realm lacks it, sets how it signs in as the import
+says, sets the Secret's secret, and gives its service account exactly those
+three roles — a role granted by hand, `realm-admin` or a realm role, goes
+again with the next run. Without the Secret it says so in `RealmConfigured`,
+and the People page says it is not set up. `manage-users` may change any
+user of the realm, the realm's own administrators too; portal-api refuses to
+touch an account that holds a `realm-management` role (the first `admin`), so
+an admin of the platform cannot make themselves one of Keycloak's.
+
+A person's **rating cap** is the user attribute `max_rating`, an age from 0
+to 21. The realm's user profile declares it so that only an admin sees or
+changes it — Keycloak keeps no attribute its profile does not declare — and
+the clients people watch through (`chino-web`, `chino-tv`, `chino-mobile`,
+`zaentrum-web`) map it into the access token as the integer claim
+`max_rating`. No attribute, no claim: no cap. The realm Job declares the
+attribute, puts the mapper on each of those clients and makes anew one whose
+config differs. It also turns off the required action `VERIFY_PROFILE`, which
+would stop a person without an email or a last name at sign-in to ask for
+them, and gives a realm without a password policy the import's,
+`length(8) and notUsername and notEmail`.
+
+**Deleting an account.** chino-api's `DELETE /api/v1/me` deletes the
+signed-in person's data and asks portal-api to delete their account, with
+`deletion-token` and the person's own bearer; an admin deleting someone on
+the People page has portal-api ask chino-api for that person's data the same
+way, with the admin's bearer. Both read the token from Secret
+`zaentrum-people`, optionally.
+
+With `secrets.external` (the demo) whoever makes the Secrets makes
+`zaentrum-people` too, both keys random. With an external provider none of
+this exists: the People page says people live in that provider.
 
 ### The admin console
 
