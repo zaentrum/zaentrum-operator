@@ -52,9 +52,10 @@ a run is in flight:
    server prunes the ones it stopped setting, and an identical apply is a
    no-op. The Zaentrum is controller owner of every namespaced object — but
    what the chart marks `helm.sh/resource-policy: keep`, the claim with the
-   backups — so they go with the CR. An object the render no longer carries is
-   not removed; the backups' CronJob, once backups are off, is removed
-   explicitly.
+   backups — so they go with the CR, and every object is labelled
+   `zaentrum.io/platform: <the Zaentrum's name>`. Then what the operator
+   applied and the render no longer carries is removed — but never what holds
+   data ([below](#what-the-render-no-longer-carries)).
 7. Take the restore's step, read the backups and the certificate, refresh
    `status` — `phase`, `currentVersion`, `components[]`, the conditions,
    `status.controller` — and then keep the realm in step and verify the
@@ -69,6 +70,50 @@ the channel's tag, and a channel on `latest` is followed in both modes. When
 the document cannot be read, an install keeps what it runs. Digest pinning
 resolves the rendered tag — the release's, or `latest` push by push — so a push
 to `main` moves only installs that render `latest`.
+
+### What the render no longer carries
+
+Server-side apply owns what the operator applies, never what it stops
+applying: without more, the pipeline's workers would keep running after
+`features.pipeline` went off. So after every apply the operator removes each
+object (`internal/controller/prune.go`) that
+
+- is a Deployment, Service, ServiceAccount, Route, Ingress, CronJob, Role,
+  RoleBinding or cert-manager Certificate (`templates.PruneKinds`),
+- carries `zaentrum.io/platform` for this Zaentrum, in its namespace, and is
+  controlled by it,
+- and is not in the render,
+
+and logs each. It never removes an object without the label, nor one anything
+else controls — an addon's, say; nor a claim, a Secret, a ConfigMap or a Job:
+`postgres-data`, `backups`, the media library's claim, Kafka's, the generated
+Secrets and the runs all stay, rendered or not; nor what the chart marks
+`helm.sh/resource-policy: keep`; nor the bundled Postgres's Deployment, whose
+data on an emptyDir lives in its pod. A lookup the render needs that gives no
+answer — OpenShift, cert-manager, the running Postgres — defers the render, so
+no pass removes what the next would render again.
+
+The `Pruned` condition names what went, and when:
+
+| Reason | | |
+|---|---|---|
+| `Removed` | True | what the last removal took, kept until the next |
+| `NothingToRemove` | True | nothing the operator applied is left that the render no longer carries |
+| `Failed` | False | what could not be listed or removed, and why; tried again on the next pass |
+
+Only what carries the label can go, and an operator before this one labelled
+nothing: an object it applied and stopped rendering stays. Find such objects
+among those the Zaentrum owns, and remove them by hand (off OpenShift, leave
+out `route`):
+
+```sh
+kubectl -n zaentrum get deploy,svc,sa,route,ingress,cronjob,role,rolebinding -l '!zaentrum.io/platform' \
+  -o 'custom-columns=KIND:.kind,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].kind'
+```
+
+The backups' CronJob is removed once backups are off, labelled or not. RBAC
+needs nothing new: the ClusterRole holds `list` and `delete` on each of these
+kinds.
 
 ### The controller reports itself (`status.controller`)
 
@@ -678,7 +723,10 @@ public client with the device grant and PKCE for the TV apps, and one with the
 authorization code, PKCE and the redirect `cloud.nalet.chino:/oauth/callback`
 — exactly that string; a wildcard does not cover it — for the phone apps, both
 with `offline_access` and an audience mapper for `identity.audience`; or one
-`chino` client that does all of it.
+`chino` client that does all of it. The CLI's client, `zae`, needs that
+audience mapper too where it is there — portal-api forwards an admin's
+requests to chino-api with the admin's bearer — and, where your clients map a
+`max_rating` claim, that mapper with it.
 
 `<origin>` is the public URL, plain `http` beside it where OpenShift Routes
 serve the host (they allow it), and for `chino-web` also `https://<hosts.chino>`
@@ -729,14 +777,18 @@ an admin of the platform cannot make themselves one of Keycloak's.
 A person's **rating cap** is the user attribute `max_rating`, an age from 0
 to 21. The realm's user profile declares it so that only an admin sees or
 changes it — Keycloak keeps no attribute its profile does not declare — and
-the clients people watch through (`chino-web`, `chino-tv`, `chino-mobile`,
-`zaentrum-web`) map it into the access token as the integer claim
-`max_rating`. No attribute, no claim: no cap. The realm Job declares the
-attribute, puts the mapper on each of those clients and makes anew one whose
-config differs. It also turns off the required action `VERIFY_PROFILE`, which
-would stop a person without an email or a last name at sign-in to ask for
-them, and gives a realm without a password policy the import's,
-`length(8) and notUsername and notEmail`.
+every client whose tokens chino-api takes (`chino-web`, `chino-tv`,
+`chino-mobile`, `zaentrum-web` and `zae`) maps it into the access token as the
+integer claim `max_rating`. No attribute, no claim: no cap. Those five, and
+no other client, also put chino-api's audience, `chino`, into their access
+tokens — the CLI's too, so that what portal-api forwards to chino-api with an
+admin's bearer, deleting someone's data among it, is taken there. The realm
+Job declares the attribute, puts both mappers on each of those clients — the
+cap first, so that no run leaves a client with the audience and without the
+cap — and makes anew one whose config differs. It also turns off the
+required action `VERIFY_PROFILE`, which would stop a person without an email
+or a last name at sign-in to ask for them, and gives a realm without a
+password policy the import's, `length(8) and notUsername and notEmail`.
 
 **Deleting an account.** chino-api's `DELETE /api/v1/me` deletes the
 signed-in person's data and asks portal-api to delete their account, with
