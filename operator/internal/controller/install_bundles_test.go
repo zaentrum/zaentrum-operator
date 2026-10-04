@@ -42,7 +42,9 @@ const pinnedInstall = "../../../deploy/operator-install.yaml"
 var sinceThePin = []string{
 	"spec.identity.mobileClientId",
 	"spec.identity.tvClientId",
+	"spec.backup",
 	"spec.pipeline",
+	"status.backup",
 }
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted

@@ -443,6 +443,47 @@ spec:
             description: ZaentrumSpec defines the desired state of a Zaentrum platform
               instance.
             properties:
+              backup:
+                description: Backup configures backups of the bundled Postgres.
+                properties:
+                  claimName:
+                    description: |-
+                      ClaimName names an existing claim to keep the dumps on instead — one kept
+                      from an earlier install, to restore from; none is created then.
+                    type: string
+                  className:
+                    description: |-
+                      ClassName is that claim's StorageClass. Empty: the bundled Postgres's —
+                      storage.postgres.className, else storage.className, else the cluster's
+                      default.
+                    type: string
+                  enabled:
+                    description: |-
+                      Enabled runs the backups. Unset: on wherever the bundled Postgres keeps its
+                      data on a claim — a new install — and off where it still runs on an
+                      emptyDir, which spec.storage.postgres.migrate moves onto a claim.
+                    type: boolean
+                  retention:
+                    description: |-
+                      Retention is how many dumps are kept, newest first: once a backup is
+                      complete, older dumps beyond it are removed. Default 7.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  schedule:
+                    description: |-
+                      Schedule is when a backup runs, as a CronJob schedule in the time zone of
+                      the cluster's controller manager. Default "@daily", at midnight.
+                    type: string
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Size of the claim backups, ReadWriteOnce. Default
+                      5Gi.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                type: object
               channel:
                 default: stable
                 description: Channel selects the release train (consumed by Stage-2
@@ -855,6 +896,76 @@ spec:
                   AvailableUpdate is the newest in-channel tag discovered by Stage-2
                   auto-update logic, if any.
                 type: string
+              backup:
+                description: |-
+                  Backup reports the bundled Postgres's backups and the latest restore.
+                  Absent with external databases.
+                properties:
+                  dumps:
+                    description: |-
+                      Dumps are the dumps on the claim, newest first, as the latest backup that
+                      succeeded left them.
+                    items:
+                      type: string
+                    type: array
+                  job:
+                    description: Job is the latest backup's Job.
+                    type: string
+                  lastDump:
+                    description: 'LastDump is the dump that backup wrote: the name
+                      to restore it by.'
+                    type: string
+                  lastFailure:
+                    description: |-
+                      LastFailure is when the latest backup that failed ended; the Backup
+                      condition says why while it is the latest backup.
+                    format: date-time
+                    type: string
+                  lastSuccess:
+                    description: LastSuccess is when the latest backup that succeeded
+                      ended.
+                    format: date-time
+                    type: string
+                  restore:
+                    description: |-
+                      Restore is the latest restore the zaentrum.io/restore-request annotation
+                      asked for.
+                    properties:
+                      finishedAt:
+                        description: FinishedAt is when it ended.
+                        format: date-time
+                        type: string
+                      job:
+                        description: Job is the restore's Job.
+                        type: string
+                      message:
+                        description: Message is what was restored, or why not.
+                        type: string
+                      request:
+                        description: |-
+                          Request is the zaentrum.io/restore-request value — the dump's name — this
+                          restore answers.
+                        type: string
+                      result:
+                        description: Result is Stopping, Running, Succeeded, Failed
+                          or Refused.
+                        enum:
+                        - Stopping
+                        - Running
+                        - Succeeded
+                        - Failed
+                        - Refused
+                        type: string
+                      startedAt:
+                        description: StartedAt is when the restore was asked for and
+                          the clients began to stop.
+                        format: date-time
+                        type: string
+                    required:
+                    - request
+                    - result
+                    type: object
+                type: object
               components:
                 description: Components reports per-Deployment readiness.
                 items:

@@ -171,6 +171,52 @@ type PostgresStorageSpec struct {
 	Migrate bool `json:"migrate,omitempty"`
 }
 
+// RestoreRequestAnnotation asks for the bundled Postgres to be restored from a
+// dump of its backups: its value is the dump's name, as status.backup.dumps
+// lists them (2026-10-04T00-00-05Z). A value the operator has not answered —
+// status.backup.restore.request — starts one restore: every client of the
+// database is stopped, the dump is checked and restored, and the clients start
+// again.
+const RestoreRequestAnnotation = "zaentrum.io/restore-request"
+
+// BackupSpec configures backups of the bundled Postgres (databases.mode perApp
+// or single): a CronJob dumps every platform database into the claim backups,
+// each dump a directory with a checksum of each of its files, and keeps the
+// newest Retention.
+type BackupSpec struct {
+	// Enabled runs the backups. Unset: on wherever the bundled Postgres keeps its
+	// data on a claim — a new install — and off where it still runs on an
+	// emptyDir, which spec.storage.postgres.migrate moves onto a claim.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Schedule is when a backup runs, as a CronJob schedule in the time zone of
+	// the cluster's controller manager. Default "@daily", at midnight.
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// Retention is how many dumps are kept, newest first: once a backup is
+	// complete, older dumps beyond it are removed. Default 7.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	Retention int32 `json:"retention,omitempty"`
+
+	// Size of the claim backups, ReadWriteOnce. Default 5Gi.
+	// +optional
+	Size resource.Quantity `json:"size,omitempty"`
+
+	// ClassName is that claim's StorageClass. Empty: the bundled Postgres's —
+	// storage.postgres.className, else storage.className, else the cluster's
+	// default.
+	// +optional
+	ClassName string `json:"className,omitempty"`
+
+	// ClaimName names an existing claim to keep the dumps on instead — one kept
+	// from an earlier install, to restore from; none is created then.
+	// +optional
+	ClaimName string `json:"claimName,omitempty"`
+}
+
 // FeaturesSpec toggles optional platform capabilities.
 type FeaturesSpec struct {
 	// GPU enables hardware (NVENC) transcoding on the stream plane.
@@ -426,6 +472,10 @@ type ZaentrumSpec struct {
 	// +optional
 	Pipeline PipelineSpec `json:"pipeline,omitempty"`
 
+	// Backup configures backups of the bundled Postgres.
+	// +optional
+	Backup BackupSpec `json:"backup,omitempty"`
+
 	// Update configures Stage-2 auto-update.
 	// +optional
 	Update UpdateSpec `json:"update,omitempty"`
@@ -645,6 +695,84 @@ type VerificationStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+// BackupStatus reports the bundled Postgres's backups, as the backup Jobs'
+// own summaries say, and the latest restore.
+type BackupStatus struct {
+	// LastSuccess is when the latest backup that succeeded ended.
+	// +optional
+	LastSuccess *metav1.Time `json:"lastSuccess,omitempty"`
+
+	// LastDump is the dump that backup wrote: the name to restore it by.
+	// +optional
+	LastDump string `json:"lastDump,omitempty"`
+
+	// LastFailure is when the latest backup that failed ended; the Backup
+	// condition says why while it is the latest backup.
+	// +optional
+	LastFailure *metav1.Time `json:"lastFailure,omitempty"`
+
+	// Dumps are the dumps on the claim, newest first, as the latest backup that
+	// succeeded left them.
+	// +optional
+	Dumps []string `json:"dumps,omitempty"`
+
+	// Job is the latest backup's Job.
+	// +optional
+	Job string `json:"job,omitempty"`
+
+	// Restore is the latest restore the zaentrum.io/restore-request annotation
+	// asked for.
+	// +optional
+	Restore *RestoreStatus `json:"restore,omitempty"`
+}
+
+// RestoreResult is where a restore of the bundled Postgres is.
+// +kubebuilder:validation:Enum=Stopping;Running;Succeeded;Failed;Refused
+type RestoreResult string
+
+const (
+	// RestoreStopping means the database's clients are being stopped; the
+	// restore starts once they are down.
+	RestoreStopping RestoreResult = "Stopping"
+	// RestoreRunning means the restore Job runs.
+	RestoreRunning RestoreResult = "Running"
+	// RestoreSucceeded means every database was restored from the dump.
+	RestoreSucceeded RestoreResult = "Succeeded"
+	// RestoreFailed means the restore failed once it had begun; message says
+	// how far it came.
+	RestoreFailed RestoreResult = "Failed"
+	// RestoreRefused means the restore changed nothing: the dump was not there,
+	// not whole, or did not match its checksums, or the request could not be
+	// carried out.
+	RestoreRefused RestoreResult = "Refused"
+)
+
+// RestoreStatus reports one restore of the bundled Postgres.
+type RestoreStatus struct {
+	// Request is the zaentrum.io/restore-request value — the dump's name — this
+	// restore answers.
+	Request string `json:"request"`
+
+	// Result is Stopping, Running, Succeeded, Failed or Refused.
+	Result RestoreResult `json:"result"`
+
+	// Job is the restore's Job.
+	// +optional
+	Job string `json:"job,omitempty"`
+
+	// StartedAt is when the restore was asked for and the clients began to stop.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// FinishedAt is when it ended.
+	// +optional
+	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+
+	// Message is what was restored, or why not.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // ComponentStatus reports the readiness of one managed Deployment.
 type ComponentStatus struct {
 	// Name is the Deployment name.
@@ -695,6 +823,11 @@ type ZaentrumStatus struct {
 	// first run; see VerificationStatus.
 	// +optional
 	Verification *VerificationStatus `json:"verification,omitempty"`
+
+	// Backup reports the bundled Postgres's backups and the latest restore.
+	// Absent with external databases.
+	// +optional
+	Backup *BackupStatus `json:"backup,omitempty"`
 }
 
 // +kubebuilder:object:root=true
