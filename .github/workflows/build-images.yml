@@ -5,7 +5,9 @@
 #                                          the unsupported deploy/base and compose profiles)
 #   ghcr.io/zaentrum/keycloak:latest      (platform/keycloak — those profiles' identity)
 #   ghcr.io/zaentrum/operator:latest      (operator — the controller-manager)
-# each also tagged with :<git-sha>.
+# each also tagged with :<git-sha>. A release tag vX.Y.Z builds them as
+# :vX.Y.Z and :X.Y instead (no :X.Y for a pre-release), and leaves :latest and
+# the :sha-<commit> tags to main.
 #
 # The application/service images (chino-web, chino-api, chino-stream, katalog-api,
 # katalog-manager) are OWNED BY THEIR POLYREPOS at github.com/zaentrum/<svc> and
@@ -26,6 +28,8 @@ name: build-images
 on:
   push:
     branches: [main]
+    # A release: every platform-owned image at the tag (see the header).
+    tags: ['v*.*.*']
   pull_request: {}
   # Allow a manual full rebuild from the Actions tab.
   workflow_dispatch: {}
@@ -60,7 +64,10 @@ jobs:
 
       # Per-component path filter. Shared paths (this workflow + deploy/) mark
       # everything dirty so a change to the build plumbing rebuilds all images.
+      # Only a PR reads it (decide, below), so only a PR runs it: a release
+      # tag's build does not depend on how the filter diffs a tag.
       - id: filter
+        if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@v3
         with:
           filters: |
@@ -168,9 +175,15 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_PREFIX }}/${{ matrix.svc }}
+          # latest=false: a semver tag would otherwise add :latest by itself.
+          # :latest is main's (the raw line), never a release's.
+          flavor: |
+            latest=false
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=long
+            type=sha,format=long,enable=${{ github.ref_type != 'tag' }}
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push ${{ matrix.svc }}
         if: matrix.changed == 'true' && steps.dockerfile.outputs.present == 'true'
