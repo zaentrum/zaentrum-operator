@@ -25,9 +25,14 @@ import (
 	"time"
 )
 
-// DefaultReleasesURL is the canonical published channel document. It is also
-// the default the controller falls back to when RELEASES_URL is unset.
-const DefaultReleasesURL = "https://raw.githubusercontent.com/zaentrum/stube/main/releases.json"
+// DefaultReleasesURL is the canonical published channel document: the front
+// door's releases.json, which a release updates — stable names the newest
+// release, edge the moving latest. It is also the default the controller falls
+// back to when RELEASES_URL is unset.
+//
+// Operators built before it read the releases.json at this repository's old
+// name (zaentrum/stube), which stays where it is for them.
+const DefaultReleasesURL = "https://raw.githubusercontent.com/zaentrum/zaentrum/main/releases.json"
 
 // fetchTimeout bounds a single releases.json fetch so a slow or hung endpoint
 // can never stall a reconcile.

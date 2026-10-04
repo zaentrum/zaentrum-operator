@@ -5,10 +5,16 @@
 # container. It is published as:
 #   ghcr.io/zaentrum/appliance:latest
 #   ghcr.io/zaentrum/appliance:<git-sha>
+# and, from a release tag vX.Y.Z, as :vX.Y.Z and :X.Y (no :X.Y for a
+# pre-release) — never as :latest. A release's appliance bakes operator:vX.Y.Z
+# and a Zaentrum pinned to vX.Y.Z (deploy/allinone/build.sh, VERSION); main's
+# bakes operator:latest and a Zaentrum on the edge channel.
 #
 # It chains off build-images: once the component images exist for a commit on
 # main, this assembles the bundle that references them. It can also be run by
 # hand (workflow_dispatch) and on direct pushes to main that touch the bundle.
+# A release tag runs it directly; its boot waits for the release's images,
+# which every repository of the platform builds from its own tag.
 name: all-in-one
 
 on:
@@ -20,6 +26,8 @@ on:
   # Also (re)build when the bundle itself changes on main.
   push:
     branches: [main]
+    # A release. A tag push ignores the paths below.
+    tags: ['v*.*.*']
     paths:
       - 'deploy/allinone/**'
       - 'operator/config/**'
@@ -55,6 +63,9 @@ jobs:
       # install and the sample Zaentrum) so the k3s auto-apply dir is populated
       # before the docker build COPYs it in.
       - name: Render manifests
+        env:
+          # A release's tag pins the operator and the platform to it.
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: ./deploy/allinone/build.sh render
 
       - name: Set up QEMU
@@ -75,9 +86,15 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          # latest=false: a semver tag would otherwise add :latest by itself.
+          # A release's appliance is never :latest, nor a :sha- one.
+          flavor: |
+            latest=false
           tags: |
-            type=raw,value=latest
-            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref_type != 'tag' }}
+            type=sha,format=long,enable=${{ github.ref_type != 'tag' }}
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push all-in-one
         uses: docker/build-push-action@v6
@@ -104,16 +121,29 @@ jobs:
     # must pass. The appliance once could not create its Keycloak Service at all;
     # only a boot shows that.
     needs: build
-    # The appliance runs the operator's :latest. Only the run that follows
+    # main's appliance runs the operator's :latest. Only the run that follows
     # build-images (or a manual one) is sure that :latest is this commit's; a
     # push-triggered run may race the operator build and boot yesterday's.
     # build-images runs on every push to main, so every push is booted anyway.
-    if: github.event_name != 'push'
+    # A release's appliance names its own tags, so its run boots it — once
+    # every image of the release is published.
+    if: github.event_name != 'push' || github.ref_type == 'tag'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
-      APPLIANCE: ghcr.io/zaentrum/appliance:sha-${{ github.sha }}
+      APPLIANCE: ${{ github.ref_type == 'tag' && format('ghcr.io/zaentrum/appliance:{0}', github.ref_name) || format('ghcr.io/zaentrum/appliance:sha-{0}', github.sha) }}
     steps:
+      - uses: actions/checkout@v4
+        if: github.ref_type == 'tag'
+
+      # Every repository builds its own images from the release's tag; the
+      # appliance pulls them as its pods start. Booting before they exist
+      # measures the race, not the release.
+      - name: Wait for the release's images
+        if: github.ref_type == 'tag'
+        timeout-minutes: 45
+        run: ./scripts/wait-for-images.sh "$GITHUB_REF_NAME"
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -139,7 +169,7 @@ jobs:
       - name: Wait for the platform's verification of itself
         run: |
           k() { docker exec zaentrum kubectl "$@"; }
-          for i in $(seq 1 90); do
+          for _ in $(seq 1 90); do
             result=$(k -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.verification.result}' 2>/dev/null || true)
             case "$result" in Passed|Failed|Error|Skipped) break ;; esac
             sleep 10

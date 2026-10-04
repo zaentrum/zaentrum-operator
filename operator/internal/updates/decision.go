@@ -2,6 +2,12 @@ package updates
 
 import "strings"
 
+// Latest is the moving tag every image's newest build of main carries. It is
+// the one channel target that is not a release: what it serves changes with
+// every push, and digest pinning (internal/digest) follows it push by push.
+// edge points at it; stable names a release tag.
+const Latest = "latest"
+
 // Decision is the resolved Stage-2 update outcome for a single reconcile pass.
 type Decision struct {
 	// RenderTag is the image tag the templates should render with this pass.
@@ -9,37 +15,49 @@ type Decision struct {
 	// AvailableUpdate is the value to surface in status.availableUpdate: the
 	// channel target when it differs from RenderTag, otherwise "".
 	AvailableUpdate string
-	// Applied is true when this pass moved to the channel target on its own
-	// (auto mode picked up a newer tag).
+	// Applied is true when this pass rendered the channel target because
+	// auto mode follows it.
 	Applied bool
 }
 
 // Decide computes the render tag and surfaced availableUpdate for one pass.
 //
 // Inputs:
-//   - specVersion: spec.version ("" / "latest" => track channel; otherwise pinned).
+//   - specVersion: spec.version ("" / "latest" => follow the channel;
+//     anything else pins that tag).
 //   - auto: spec.update.mode == "auto".
-//   - channelTarget: tag the resolved channel points at; "" when discovery
-//     failed or is unavailable this pass.
+//   - channelTarget: the tag the channel points at; "" when discovery failed
+//     or is unavailable this pass.
+//   - current: status.currentVersion, the tag the last pass rendered; "" for
+//     an install that has rendered nothing yet.
 //
-// Rules (mirroring the Stage-2 contract):
-//   - Pinned spec.version always renders as-is; channel discovery is ignored
-//     and no update is surfaced (the operator opted out of channel tracking).
-//   - Unpinned: the base render tag is the channel target (or "latest" when
-//     discovery failed). When auto, we render the channel target directly so
-//     the new tag is applied this pass. When manual, we only surface the
-//     channel target as availableUpdate if it differs from what we render.
-func Decide(specVersion string, auto bool, channelTarget string) Decision {
+// Rules (the Stage-2 contract):
+//   - A pinned spec.version renders as-is; the channel is not consulted and no
+//     update is surfaced (the CR opted out of channel tracking).
+//   - Auto follows the channel: the channel target is rendered, so a channel
+//     that moves to a new release rolls the install in this very pass.
+//   - Manual keeps what the install runs and surfaces the channel target as
+//     the available update; applying it pins spec.version to it. An install
+//     that runs nothing yet starts on the target: a new install on stable runs
+//     the release stable names, not latest. A channel whose target is the
+//     moving latest (edge) is followed in both modes, as before releases
+//     existed: there is no release on it to hold an install at.
+//   - Discovery failed: keep what the install runs — a network blip must not
+//     move a release install over to latest. An install that runs nothing yet
+//     falls back to latest.
+func Decide(specVersion string, auto bool, channelTarget, current string) Decision {
 	target := strings.TrimSpace(channelTarget)
+	running := strings.TrimSpace(current)
 
 	if IsPinned(specVersion) {
 		// Pinned: render exactly the pinned tag, ignore the channel entirely.
 		return Decision{RenderTag: strings.TrimSpace(specVersion)}
 	}
 
-	// Unpinned: discovery failed -> behave like a plain "latest" render with
-	// nothing to surface.
 	if target == "" {
+		if running != "" {
+			return Decision{RenderTag: running}
+		}
 		return Decision{RenderTag: EffectiveTag(specVersion, "")}
 	}
 
@@ -48,13 +66,14 @@ func Decide(specVersion string, auto bool, channelTarget string) Decision {
 		return Decision{RenderTag: target, Applied: true}
 	}
 
-	// Manual mode: keep rendering "latest" but surface the concrete channel
-	// target as an available update when it is something other than what we
-	// render. (With both channels at "latest" today this collapses to "no
-	// update", which is correct.)
-	rendered := EffectiveTag(specVersion, "")
-	d := Decision{RenderTag: rendered}
-	if target != rendered {
+	// Manual: a new install, or a channel that serves the moving latest, takes
+	// the target. Anything else stays where it is and is told what the channel
+	// serves.
+	if running == "" || target == Latest {
+		return Decision{RenderTag: target}
+	}
+	d := Decision{RenderTag: running}
+	if target != running {
 		d.AvailableUpdate = target
 	}
 	return d

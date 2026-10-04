@@ -95,16 +95,21 @@ Or publish it on the public host with `spec.identity.exposeAdminConsole: true`. 
 ## Run it on a cluster
 
 The same platform runs on any Kubernetes cluster through the **operator**, which reconciles the
-whole stack from a single `Zaentrum` resource. Install it once, as cluster-admin, from its
-pinned install manifest — the CRDs, the cluster RBAC and the controller, pinned to one immutable
-`operator:sha-<commit>` image — then apply a `Zaentrum`:
+whole stack from a single `Zaentrum` resource. Install it once, as cluster-admin, from an
+install manifest — the CRDs, the cluster RBAC and the controller — then apply a `Zaentrum`:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/zaentrum/zaentrum-operator/main/deploy/operator-install.yaml
+# the newest release, its controller on operator:vX.Y.Z — for the stable channel (the default)
+kubectl apply -f https://github.com/zaentrum/zaentrum-operator/releases/latest/download/operator-install.yaml
+# …or the newest build of main, pinned to one immutable operator:sha-<commit> — for edge:
+#   kubectl apply -f https://raw.githubusercontent.com/zaentrum/zaentrum-operator/main/deploy/operator-install.yaml
 kubectl create namespace zaentrum
 kubectl apply -f zaentrum.yaml     # your Zaentrum resource
 kubectl -n zaentrum get zaentrum   # PHASE Ready once it is up
 ```
+
+The operator renders the platform from the chart it embeds, so pair a release's operator with
+the release's images ([Releases](#releases)).
 
 On OpenShift or any OLM cluster, the [OLM bundle](operator/bundle) is the alternative; without
 the operator, `helm install` the chart it renders,
@@ -182,11 +187,26 @@ Zaentrum is the platform; the clients are skins over one shared core.
 
 ## Releases
 
-There are two release channels, `stable` and `edge`, and **today both point at `latest`**: no
-tagged release has been cut, so choosing a channel, or `spec.update.mode: auto`, changes
-nothing yet. An install on `spec.version: latest` — the default — follows every newly published
-image anyway: the operator re-resolves each `ghcr.io/zaentrum/*` image to its current digest as
-it reconciles, and rolls the components whose image changed.
+A release is one tag, `vX.Y.Z`, cut in every repository of the platform at once. Each publishes
+its images as `:vX.Y.Z` and `:X.Y` (the newest patch); this one also publishes the operator, the
+release's install manifest (`operator-install.yaml` on the
+[GitHub release](https://github.com/zaentrum/zaentrum-operator/releases)), the appliance
+`ghcr.io/zaentrum/appliance:vX.Y.Z`, and the OLM bundle and catalog at the same tag. `latest`
+stays the newest build of `main`; a release never moves it.
+
+An install follows one of two channels, which the front door's
+[`releases.json`](https://github.com/zaentrum/zaentrum/blob/main/releases.json) points:
+
+- **`stable`** (the default) names the newest release. A new install starts on it. In manual
+  mode (the default) an install then stays on the version it runs and reports the next release
+  in `status.availableUpdate`; in auto mode it moves on its own. A push to `main` moves nothing:
+  the operator pins each image to the digest of the tag the channel names.
+- **`edge`** is `latest`: every push to `main`, rolled component by component as the operator
+  re-resolves each `ghcr.io/zaentrum/*` image to its current digest.
+
+`spec.version: vX.Y.Z` pins an install to a release and opts it out of both. What a release
+publishes, and how one is cut: the front door's
+[releases guide](https://github.com/zaentrum/zaentrum/blob/main/docs/releases.md).
 
 ## Documentation
 

@@ -4,7 +4,7 @@ metadata:
   name: zaentrum
   namespace: zaentrum
 spec:
-  channel: stable
+  channel: edge
   version: latest
   hostname: zaentrum.localhost
   identity:

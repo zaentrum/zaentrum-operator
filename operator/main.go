@@ -82,7 +82,8 @@ func main() {
 	}
 
 	// RELEASES_URL points the Stage-2 auto-update logic at the published
-	// channel document; empty falls back to the canonical raw GitHub URL.
+	// channel document; empty falls back to the front door's releases.json
+	// (updates.DefaultReleasesURL), which no install bundle overrides.
 	releasesURL := os.Getenv("RELEASES_URL")
 	if releasesURL == "" {
 		releasesURL = updates.DefaultReleasesURL

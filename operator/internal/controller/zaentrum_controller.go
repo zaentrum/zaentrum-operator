@@ -117,10 +117,10 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Stage 2 — release-channel discovery. Resolve spec.channel to its target
 	// tag from the published releases.json, then decide the tag to render this
-	// pass. Discovery is best-effort: any failure leaves status.availableUpdate
-	// unchanged and falls back to the spec/"latest" render so reconcile never
-	// blocks on the network. The resolved target is reused for the controller's
-	// own report below, so one pass consults the channel once.
+	// pass. Discovery is best-effort: any failure surfaces no update and keeps
+	// rendering what the install runs (a new one renders "latest"), so
+	// reconcile never blocks on the network. The resolved target is reused for
+	// the controller's own report below, so one pass consults the channel once.
 	decision, channelTarget := r.resolveUpdate(ctx, &z)
 
 	// Render the platform from the embedded templates with CR-driven values.
@@ -370,21 +370,25 @@ func (r *ZaentrumReconciler) pullCreds(ctx context.Context, z *zaentrumv1alpha1.
 // resolveUpdate performs Stage-2 channel discovery for one reconcile pass and
 // returns the render/availableUpdate decision plus the raw channel target the
 // controller's own report reuses (see self.go). It never returns an error:
-// network or parse failures are logged and degrade to a spec/"latest" render
+// network or parse failures are logged and degrade to rendering what the
+// install already runs (status.currentVersion; "latest" for a new install)
 // with no surfaced update, so a flaky channel endpoint can never block a
-// reconcile — and the empty target then tells the self-report it has nothing
-// to compare against either.
+// reconcile, nor move an install on a release — and the empty target then
+// tells the self-report it has nothing to compare against either.
 func (r *ZaentrumReconciler) resolveUpdate(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) (updates.Decision, string) {
 	logger := log.FromContext(ctx)
 
 	spec := z.Spec
 	auto := spec.Update.Mode == zaentrumv1alpha1.UpdateAuto
+	// What the last pass rendered: manual mode holds an install there, and a
+	// failed lookup keeps it there in either mode.
+	running := z.Status.CurrentVersion
 
 	// A pinned spec.version opts out of channel tracking; skip the network.
 	// The self-report inherits that: an air-gapped, pinned install makes no
 	// outbound call for the platform, and must make none for the operator.
 	if updates.IsPinned(spec.Version) {
-		return updates.Decide(spec.Version, auto, ""), ""
+		return updates.Decide(spec.Version, auto, "", running), ""
 	}
 
 	channel := string(spec.Channel)
@@ -396,17 +400,17 @@ func (r *ZaentrumReconciler) resolveUpdate(ctx context.Context, z *zaentrumv1alp
 	if err != nil {
 		logger.Info("release-channel discovery skipped (fetch failed)",
 			"channel", channel, "error", err.Error())
-		return updates.Decide(spec.Version, auto, ""), ""
+		return updates.Decide(spec.Version, auto, "", running), ""
 	}
 
 	target, err := rel.Resolve(channel)
 	if err != nil {
 		logger.Info("release-channel discovery skipped (resolve failed)",
 			"channel", channel, "error", err.Error())
-		return updates.Decide(spec.Version, auto, ""), ""
+		return updates.Decide(spec.Version, auto, "", running), ""
 	}
 
-	return updates.Decide(spec.Version, auto, target), target
+	return updates.Decide(spec.Version, auto, target, running), target
 }
 
 // applyAll applies every rendered object via server-side apply. Server-side

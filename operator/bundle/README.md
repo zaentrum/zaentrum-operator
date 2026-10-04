@@ -47,20 +47,26 @@ This is distinct from the operator **controller** image
 (`ghcr.io/zaentrum/operator`), which is built from `operator/Dockerfile` by
 the `operator` matrix leg in
 [`.github/workflows/build-images.yml`](../../.github/workflows/build-images.yml).
-The CSV's managed Deployment references that controller image at the release tag
-(`v0.1.0`); this `bundle.Dockerfile` packages the *metadata*, not the controller
-binary.
+The committed CSV is main's: `zaentrum-operator.v0.1.0`, its managed Deployment
+on `ghcr.io/zaentrum/operator:latest`. A release tag's build stamps the release
+into it first ([`stamp.sh`](stamp.sh)): `zaentrum-operator.vX.Y.Z`, version
+`X.Y.Z`, the controller on `operator:vX.Y.Z`, and `olm.skipRange: "<X.Y.Z"` so
+an install of any older version can move to it. This `bundle.Dockerfile`
+packages the *metadata*, not the controller binary.
 
 ## Building
 
 ```bash
-# From operator/bundle:
-docker build -f bundle.Dockerfile -t ghcr.io/zaentrum/operator-bundle:v0.1.0 .
+# From operator/bundle (in a scratch checkout: stamp.sh edits manifests/):
+./stamp.sh v0.4.0
+docker build -f bundle.Dockerfile -t ghcr.io/zaentrum/operator-bundle:v0.4.0 .
 operator-sdk bundle validate .
 ```
 
 CI builds and publishes the bundle image (and the catalog/index image that
-references it) as a step separate from the controller image build.
+references it) as a step separate from the controller image build: from `main`
+as `:latest` and `:sha-<commit>`, from a release tag, stamped, as `:vX.Y.Z` and
+`:X.Y`. A release's catalog serves its bundle on the `stable` channel.
 
 ## Installing
 

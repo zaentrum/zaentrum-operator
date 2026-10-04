@@ -60,10 +60,15 @@ a run is in flight:
    `status.controller` — and then keep the realm in step and verify the
    platform.
 
-**Release channels.** `spec.channel` resolves through `releases.json` to a tag:
-with `spec.update.mode: auto` that tag is rendered, with `manual` it is
-reported in `status.availableUpdate`. Both channels point at `latest` today,
-which digest pinning follows push by push.
+**Release channels.** `spec.channel` resolves through the front door's
+`releases.json` (`internal/updates`) to a tag: `stable` to the newest release,
+`edge` to `latest`. With `spec.update.mode: auto` that tag is rendered. With
+`manual` an install keeps the version it runs (`status.currentVersion`) and
+reports the channel's tag in `status.availableUpdate`; a new install starts on
+the channel's tag, and a channel on `latest` is followed in both modes. When
+the document cannot be read, an install keeps what it runs. Digest pinning
+resolves the rendered tag — the release's, or `latest` push by push — so a push
+to `main` moves only installs that render `latest`.
 
 ### The controller reports itself (`status.controller`)
 
@@ -864,11 +869,15 @@ Dockerfile               multi-stage, distroless → ghcr.io/zaentrum/operator
 
 ## Install
 
-Once, as a cluster-admin, from the pinned install — the CRDs, the cluster RBAC
-and the controller on one `operator:sha-<commit>` image — then a Zaentrum:
+Once, as a cluster-admin, from an install manifest — the CRDs, the cluster
+RBAC and the controller — then a Zaentrum. A release's (`operator:vX.Y.Z`,
+rendered by `scripts/render-release.sh` and attached to the GitHub release)
+goes with the `stable` channel; main's pinned one (`operator:sha-<commit>`)
+with `edge`:
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/zaentrum/zaentrum-operator/main/deploy/operator-install.yaml
+kubectl apply -f https://github.com/zaentrum/zaentrum-operator/releases/latest/download/operator-install.yaml
+#   or main's: https://raw.githubusercontent.com/zaentrum/zaentrum-operator/main/deploy/operator-install.yaml
 kubectl create namespace zaentrum
 kubectl apply -f config/samples/zaentrum_v1alpha1_zaentrum.yaml   # or a Zaentrum of your own
 kubectl -n zaentrum get zaentrum                                  # PHASE Ready once it is up

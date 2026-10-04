@@ -14,6 +14,11 @@ docker run -d --privileged --restart unless-stopped --name zaentrum -p 80:80 \
   ghcr.io/zaentrum/appliance:latest
 ```
 
+That is the newest build of `main`. A release's appliance is the same command
+on the release's tag, `ghcr.io/zaentrum/appliance:vX.Y.Z` (or `:X.Y`, its
+newest patch): the operator and every image of the platform are that release's
+([releases](https://github.com/zaentrum/zaentrum/blob/main/docs/releases.md)).
+
 Then open <http://zaentrum.localhost> — modern browsers resolve `*.localhost` to
 `127.0.0.1`, with no `/etc/hosts` edit. First boot pulls the application images
 (see below) and runs the database migrations, so give it a few minutes;
@@ -257,10 +262,13 @@ three:
 
 - `00-namespace.yaml` — the namespace `zaentrum`;
 - `10-operator.yaml` — the operator's install from `operator/config`: its CRDs,
-  its RBAC and its controller (`ghcr.io/zaentrum/operator:latest`), which
-  reports the install as `appliance` in `status.controller.source`;
+  its RBAC and its controller (`ghcr.io/zaentrum/operator:latest`; a release's
+  appliance, `operator:vX.Y.Z`), which reports the install as `appliance` in
+  `status.controller.source`;
 - `20-zaentrum.yaml` — the `Zaentrum`: bundled identity, a 50Gi library, Kafka
-  on, the media pipeline on the CPU, manual updates.
+  on, the media pipeline on the CPU, manual updates, on the `edge` channel —
+  the latest images, as the operator is `:latest`. A release's appliance pins
+  it to `spec.version: vX.Y.Z` instead.
 
 The entrypoint adds `coredns-custom.yaml`, a CoreDNS entry that sends
 `zaentrum.localhost` to the ingress inside the cluster too, so the services
@@ -337,13 +345,18 @@ pipeline's `analyzer`, `transcoder`, `packager` and `katalog-ingest`, and
 `zae` for the platform's check of itself; and the upstream `postgres`,
 `valkey/valkey`, `apache/kafka` and `quay.io/keycloak/keycloak` images.
 
-The `ghcr.io/zaentrum` images run on the moving tag `latest`, so the box needs
-`ghcr.io` for longer than the first start. The operator re-resolves each of
+In the appliance built from `main`, the `ghcr.io/zaentrum` images run on the
+moving tag `latest`, so the box needs `ghcr.io` for longer than the first
+start. The operator re-resolves each of
 them to its current digest as it reconciles, and rolls a component whose
 digest moved; the platform's services are pulled with
 `imagePullPolicy: Always` whenever their pods start; and the operator's own pod
 pulls `:latest` again whenever it restarts. The appliance follows every push to
 `latest`.
+
+A release's appliance runs the release's tags instead — `operator:vX.Y.Z`, and
+every platform image at `vX.Y.Z` — so nothing it runs moves on its own; a newer
+release is a newer appliance image.
 
 There is no offline or air-gapped mode today: an image tarball in k3s's airgap
 directory is not enough, as `Always` asks the registry before a container
@@ -355,20 +368,26 @@ starts.
 ./deploy/allinone/build.sh            # write manifests/, then docker build :latest
 IMAGE=ghcr.io/zaentrum/appliance:v1 ./deploy/allinone/build.sh
 ./deploy/allinone/build.sh render     # just re-write manifests/
+VERSION=v0.4.0 ./deploy/allinone/build.sh render   # a release's manifests (never committed)
 ```
 
 `build.sh` writes the three manifests the Dockerfile copies into k3s's
 auto-apply directory: `00-namespace.yaml`; `10-operator.yaml`, the CRDs, the
 RBAC and the manager (its namespace and Deployment) of `operator/config`, the
-manager stamped `ZAENTRUM_INSTALL_SOURCE=appliance`; and `20-zaentrum.yaml`, a
-copy of `operator/config/samples/zaentrum_v1alpha1_zaentrum.yaml`. Nothing in
-it comes from `deploy/base`.
+manager stamped `ZAENTRUM_INSTALL_SOURCE=appliance`; and `20-zaentrum.yaml`,
+`operator/config/samples/zaentrum_v1alpha1_zaentrum.yaml` on the `edge`
+channel. With `VERSION=vX.Y.Z` the manager runs `operator:vX.Y.Z` and the
+Zaentrum is pinned to `spec.version: vX.Y.Z` — what a release's build bakes;
+the committed manifests are always main's. Nothing in it comes from
+`deploy/base`.
 
 CI ([`all-in-one.yml`](../../.github/workflows/all-in-one.yml)) builds and
-pushes `ghcr.io/zaentrum/appliance:latest` and `:sha-<commit>` from `main`.
-The runs that follow the component images' build then boot it as a user would
-— `docker run --privileged -p 80:80` — and wait for the platform to be Ready
-and to pass its own verification.
+pushes `ghcr.io/zaentrum/appliance:latest` and `:sha-<commit>` from `main`,
+and `:vX.Y.Z` and `:X.Y` from a release tag (no `:X.Y` for a pre-release).
+The runs that follow the component images' build, and every release's, then
+boot it as a user would — `docker run --privileged -p 80:80` — and wait for
+the platform to be Ready and to pass its own verification; a release's boot
+first waits until every image of the release is published.
 
 ## Stop / remove
 
