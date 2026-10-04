@@ -176,6 +176,14 @@ Zaentrum is the platform; the clients are skins over one shared core.
 | processing (analyzer, packager, transcoder, katalog-ingest) | The media pipeline — off unless `features.pipeline` | Real |
 | **musig** / **tv** | Music / live clients | Planned |
 
+## Releases
+
+There are two release channels, `stable` and `edge`, and **today both point at `latest`**: no
+tagged release has been cut, so choosing a channel, or `spec.update.mode: auto`, changes
+nothing yet. An install on `spec.version: latest` — the default — follows every newly published
+image anyway: the operator re-resolves each `ghcr.io/zaentrum/*` image to its current digest as
+it reconciles, and rolls the components whose image changed.
+
 ## Documentation
 
 **Deployment & operations documentation lives in the front-door repo:
