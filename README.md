@@ -130,24 +130,33 @@ the tree; they do not bring up a working platform and are not supported
 
 ## Route map
 
-One ingress/proxy fronts everything on port 80:
+One Ingress — or, with `routing.provisionRoutes`, OpenShift Routes with the same paths — fronts
+everything on the host `spec.hostname` names:
 
 | Path | Backend | What it is |
 |---|---|---|
-| `/` | `chino-web` | the main app — a static SPA |
-| `/manage` | admin UI (`apps/admin`) | the React launchpad — a SPA with router basename `/manage` |
+| `/`, `/portal` | `zaentrum-portal` | the portal — the launchpad that opens the apps and, for an admin, the consoles |
+| `/api/portal` | `portal-api` | the portal's API |
+| `/chino`, `/auth/callback` | `chino-web` | the video app — a static SPA |
 | `/api` | `chino-api` | the product BFF |
+| `/katalog` | `katalog-manager-ui` | the Catalog console (admin) |
+| `/katalog-manage` | `katalog-manage-ui` | Catalog Management — scan and settings (admin) |
 | `/api/manage` | `katalog-manager-api` | the neutral management / write API |
+| `/auth/realms`, `/auth/resources` | `keycloak` | sign-in (bundled identity); all of `/auth` with `exposeAdminConsole` |
 
 ```mermaid
 flowchart LR
-  user(["Browser"]) --> proxy["Ingress / proxy :80"]
-  proxy -- "/" --> web["chino-web (SPA)"]
-  proxy -- "/manage" --> admin["admin UI (SPA)"]
-  proxy -- "/api" --> api["chino-api (BFF)"]
-  proxy -- "/api/manage" --> mgr["katalog-manager-api"]
+  user(["Browser"]) --> ing["Ingress (spec.hostname)"]
+  ing -- "/ and /portal" --> portal["zaentrum-portal"]
+  ing -- "/api/portal" --> papi["portal-api"]
+  ing -- "/chino" --> web["chino-web (SPA)"]
+  ing -- "/api" --> api["chino-api (BFF)"]
+  ing -- "/katalog, /katalog-manage" --> consoles["catalog consoles"]
+  ing -- "/api/manage" --> mgr["katalog-manager-api"]
+  ing -- "/auth/realms, /auth/resources" --> kc["Keycloak"]
   api --> katalog["katalog-api (read)"]
-  mgr --> katalog
+  api --> stream["chino-stream (HLS)"]
+  stream --> katalog
 ```
 
 ---
@@ -159,11 +168,13 @@ Zaentrum is the platform; the clients are skins over one shared core.
 | Component | What it is | State |
 |---|---|---|
 | **chino** (web · mobile · androidtv) | Video client — the reference product | Real |
-| **admin** (`/manage`) | The launchpad: first-run setup + day-2 management | Real |
+| **portal** (`zaentrum-portal` + `portal-api`) | The launchpad: the apps, the catalog consoles, the operator console | Real |
+| **katalog-manager-ui** (`/katalog`, `/katalog-manage`) | The Catalog and Catalog Management consoles | Real |
 | **chino-api** / **chino-stream** | Product BFF + HLS/CMAF origin | Real |
-| **katalog-manager-api** | Neutral management / write API + first-run backend | Real |
-| **katalog-api** + processing (transcoder, packager, enricher, analyzer, artwork) | Neutral catalog core | Real |
-| **musig** / **tv** | Music / live clients | Planned — slots reserved |
+| **katalog-manager-api** | Neutral management / write API | Real |
+| **katalog-api** | Neutral catalog read API | Real |
+| processing (analyzer, packager, transcoder, katalog-ingest) | The media pipeline — off unless `features.pipeline` | Real |
+| **musig** / **tv** | Music / live clients | Planned |
 
 ## Documentation
 
