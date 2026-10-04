@@ -51,6 +51,11 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The backups of the bundled Postgres: the chart's CronJob, which the operator
+  # applies, and removes when backups are turned off.
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Ingress (plain-Kubernetes exposure; provisionIngress profiles).
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]

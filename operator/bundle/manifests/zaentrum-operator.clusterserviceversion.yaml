@@ -286,6 +286,10 @@ spec:
             - apiGroups: ["batch"]
               resources: ["jobs"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            # The backups of the bundled Postgres (a CronJob).
+            - apiGroups: ["batch"]
+              resources: ["cronjobs"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
             # Ingress (provisionIngress profiles).
             - apiGroups: ["networking.k8s.io"]
               resources: ["ingresses"]

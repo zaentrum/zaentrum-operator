@@ -225,6 +225,30 @@ func TestEveryClusterRoleHoldsWhatVerificationUses(t *testing.T) {
 	}
 }
 
+// What backups need, every ClusterRole shipped with an operator that renders
+// them allows: the chart's CronJob is applied, read and, with backups turned
+// off, deleted; the restore is a Job like the other runs. The pinned install
+// (deploy/operator-install.yaml) pins an operator that renders no CronJob, and
+// gains the rule with the next re-pin, as its CRD gains sinceThePin.
+func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
+	for _, file := range []string{
+		"../../config/rbac/role.yaml",
+		"../../bundle/manifests/zaentrum-operator.clusterserviceversion.yaml",
+		"../../../deploy/allinone/manifests/10-operator.yaml",
+	} {
+		rules := managerRules(t, file)
+		for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
+			assert.True(t, ruleHolds(rules, "batch", "cronjobs", verb), "%s: no %s on batch cronjobs", file, verb)
+		}
+		for _, verb := range []string{"create", "get", "list", "delete"} {
+			assert.True(t, ruleHolds(rules, "batch", "jobs", verb), "%s: no %s on batch jobs", file, verb)
+		}
+		assert.True(t, ruleHolds(rules, "", "persistentvolumeclaims", "patch"), file)
+	}
+	assert.False(t, ruleHolds(managerRules(t, pinnedInstall), "batch", "cronjobs", "create"),
+		"%s holds the CronJob rule: it was re-pinned, so empty sinceThePin and fold it into the loop above", pinnedInstall)
+}
+
 // spec.pipeline.ladder is checked where it is written: the CRD's pattern takes
 // the ladders the transcoder parses — rungs source or NNNp, each with an
 // optional codec and maxrate in either order — and refuses what the transcoder
