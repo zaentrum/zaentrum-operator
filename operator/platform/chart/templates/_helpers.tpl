@@ -164,10 +164,11 @@ gives a client that names none, and so what an import leaves.
 {{/*
 z.realmImport — the bundled realm as a new one is imported, as JSON:
 files/keycloak-realm.json with the redirects, web origins and post-logout
-redirect URIs of z.realmClients filled in. The import (keycloak-realm.yaml)
-writes it into a new realm; the realm Job (realm.yaml) makes a client an
-existing realm lacks from it, and sets what z.realmSettings and z.peopleClient
-read from it.
+redirect URIs of z.realmClients filled in, and files/user-profile.json as the
+realm's user profile. The import (keycloak-realm.yaml) writes it into a new
+realm; the realm Job (realm.yaml) makes a client an existing realm lacks from
+it, and sets what z.realmSettings, z.peopleClient and z.ratingMapper read from
+it.
 */}}
 {{- define "z.realmImport" -}}
 {{- $realm := .Files.Get "files/keycloak-realm.json" | fromJson }}
@@ -180,6 +181,12 @@ read from it.
 {{- range $k, $v := .attributes }}{{ $_ := set $client.attributes $k $v }}{{ end }}
 {{- end }}
 {{- end }}
+{{- /* Keycloak keeps a realm's user profile as a component whose config holds
+       the profile as one JSON string; a new realm without one gets Keycloak's
+       default, which keeps no attribute it does not declare. */}}
+{{- $profile := dict "providerId" "declarative-user-profile" "subComponents" dict
+      "config" (dict "kc.user.profile.config" (list (.Files.Get "files/user-profile.json" | fromJson | toJson))) }}
+{{- $_ := set $realm "components" (dict "org.keycloak.userprofile.UserProfileProvider" (list $profile)) }}
 {{- toJson $realm -}}
 {{- end -}}
 
@@ -203,6 +210,37 @@ realm import (z.realmImport, parsed).
 {{- end -}}
 {{- $settings = append $settings (printf "oauth2.device.authorization.grant.enabled=%s" (index $rep.attributes "oauth2.device.authorization.grant.enabled")) -}}
 {{- dict "clientId" $rep.clientId "representation" $rep "settings" (join " " $settings) "roles" (join " " (sortAlpha $roles)) | toJson -}}
+{{- end -}}
+
+{{/*
+z.ratingMapper — the protocol mapper that puts a person's rating cap, the user
+attribute max_rating (an age), into the access tokens of the clients people
+watch through, as the claim max_rating (an integer; no claim, no cap): the
+clients of the realm import that carry it, its representation there, and its
+config as the realm Job checks it (name=value). And the attribute itself, as
+the realm's user profile declares it (files/user-profile.json): its
+representation, and the part of it the realm Job checks — who may see and
+change it, the range it takes, whether it is required, single-valued — in the
+order Keycloak answers a projection of it. Pass the realm import
+(z.realmImport, parsed).
+*/}}
+{{- define "z.ratingMapper" -}}
+{{- $import := . -}}
+{{- $clients := list -}}
+{{- $mapper := dict -}}
+{{- range $c := $import.clients -}}
+{{- range $m := $c.protocolMappers | default list -}}
+{{- if eq $m.name "max-rating" -}}{{ $clients = append $clients $c.clientId }}{{ $mapper = $m }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $config := list -}}
+{{- range $k, $v := $mapper.config }}{{ $config = append $config (printf "%s=%s" $k $v) }}{{ end -}}
+{{- $attribute := dict -}}
+{{- $profile := index (index $import.components "org.keycloak.userprofile.UserProfileProvider") 0 -}}
+{{- range (index $profile.config "kc.user.profile.config" | first | fromJson).attributes }}{{ if eq .name "max_rating" }}{{ $attribute = . }}{{ end }}{{ end -}}
+{{- $check := printf "{\"name\":%s,\"validations\":%s,\"permissions\":{\"view\":%s,\"edit\":%s},\"multivalued\":%v}"
+      (toJson $attribute.name) (toJson $attribute.validations) (toJson $attribute.permissions.view) (toJson $attribute.permissions.edit) $attribute.multivalued -}}
+{{- dict "clients" (join " " (sortAlpha $clients)) "mapper" $mapper "config" (join " " $config) "attribute" $attribute "check" $check | toJson -}}
 {{- end -}}
 
 {{/*

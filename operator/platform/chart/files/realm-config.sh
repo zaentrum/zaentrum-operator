@@ -24,9 +24,15 @@
 # (view-users, query-users, manage-users) — no other client role, no realm
 # role but the realm's default roles. A role someone granted it by hand goes.
 #
-# Then the realm stops asking people at sign-in to complete their profile (the
-# required action VERIFY_PROFILE): a person here may have no email, and a child
-# no last name. And a realm without a password policy gets PASSWORD_POLICY.
+# Then a person's rating cap: the user attribute max_rating, declared in the
+# realm's user profile as PROFILE_ATTRIBUTE says — Keycloak keeps no attribute
+# its profile does not declare — so that only an admin sees or changes it; and
+# on each client of RATING_CLIENTS the protocol mapper RATING_MAPPER_JSON that
+# puts it into the access token as the claim max_rating. A mapper of that name
+# whose config is not RATING_MAPPER_CONFIG is made anew. The realm stops asking
+# people at sign-in to complete their profile (the required action
+# VERIFY_PROFILE): a person here may have no email, and a child no last name.
+# And a realm without a password policy gets PASSWORD_POLICY.
 #
 # Then the demo user. A realm imported without Secret zaentrum-demo-user gave it
 # the password "${DEMO_USER_PASSWORD}" — Keycloak leaves a placeholder it cannot
@@ -63,6 +69,13 @@
 #   PEOPLE_SETTINGS  how it signs in, as REALM_CLIENTS' settings
 #   PEOPLE_ROLES     its service account's realm-management roles, by name
 #   PEOPLE_CLIENT_SECRET  from Secret zaentrum-people, when there is one
+#   RATING_CLIENTS   the clients whose access tokens carry the rating cap
+#   RATING_MAPPER_JSON    the protocol mapper that puts it there
+#   RATING_MAPPER_CONFIG  its config, space-separated name=value
+#   PROFILE_ATTRIBUTE     the user attribute max_rating, as the realm's user
+#                    profile declares it
+#   PROFILE_ATTRIBUTE_CHECK  the part of it that must be so: a projection of
+#                    the profile's attributes, as Keycloak answers it
 #   PASSWORD_POLICY  the password policy of a realm that has none
 #   MASTER_FRONTEND_URL  the master realm's frontend URL; empty unsets it.
 #                    Not set at all: left as it is.
@@ -361,6 +374,80 @@ if [ -n "${PEOPLE_CLIENT:-}" ]; then
 	fi
 fi
 
+# A person's rating cap. First the user attribute: Keycloak keeps no attribute
+# the realm's user profile does not declare, and one a person could change
+# would cap nothing.
+profile=""
+if [ -n "${PROFILE_ATTRIBUTE:-}" ]; then
+	[[ $PROFILE_ATTRIBUTE =~ \"name\":\"([^\"]+)\" ]] ||
+		fail "PROFILE_ATTRIBUTE names no attribute"
+	attribute=${BASH_REMATCH[1]}
+	have=$(kc get users/profile -r "$realm" \
+		--fields 'attributes(name,validations(integer(min,max)),required(roles,scopes),permissions(view,edit),multivalued)') ||
+		fail "cannot read the user profile of realm $realm: $(why)"
+	have=$(printf '%s' "$have" | tr -d '\n' | sed 's/ //g')
+	if [[ $have != *"$PROFILE_ATTRIBUTE_CHECK"* ]]; then
+		names=$(kc get users/profile -r "$realm" --fields 'attributes(name)' --format csv --noquotes) ||
+			fail "cannot read the user profile of realm $realm: $(why)"
+		at=-1 i=0
+		IFS=, read -ra listed <<<"$names"
+		for name in "${listed[@]}"; do
+			[ "$name" != "$attribute" ] || at=$i
+			i=$((i + 1))
+		done
+		if [ "$at" -lt 0 ]; then
+			kc update users/profile -r "$realm" -s "attributes+=$PROFILE_ATTRIBUTE" ||
+				fail "cannot declare the user attribute $attribute: $(why)"
+			profile="declared the user attribute $attribute"
+		else
+			kc update users/profile -r "$realm" -s "attributes[$at]=$PROFILE_ATTRIBUTE" ||
+				fail "cannot set the user attribute $attribute: $(why)"
+			profile="set the user attribute $attribute as declared"
+		fi
+		echo "realm-config: $profile"
+	fi
+fi
+
+# Then the mapper on each client people watch through. A client the realm
+# lacks was made above, mapper and all, or is not the import's.
+rated=() unrated=()
+if [ -n "${RATING_MAPPER_JSON:-}" ]; then
+	[[ $RATING_MAPPER_JSON =~ \"name\":\"([^\"]+)\" ]] ||
+		fail "RATING_MAPPER_JSON names no mapper"
+	mapper=${BASH_REMATCH[1]}
+	[[ $RATING_MAPPER_JSON =~ \"protocolMapper\":\"([^\"]+)\" ]] ||
+		fail "RATING_MAPPER_JSON names no kind of mapper"
+	kind=${BASH_REMATCH[1]}
+	for client in ${RATING_CLIENTS:-}; do
+		id=$(client_id "$client")
+		if [ -z "$id" ]; then
+			unrated+=("$client")
+			continue
+		fi
+		models=$(kc get "clients/$id/protocol-mappers/models" -r "$realm" --fields id,name --format csv --noquotes) ||
+			fail "cannot read the protocol mappers of the client $client: $(why)"
+		mid=$(printf '%s\n' "$models" | sed -n "s/^\([^,]*\),$mapper\$/\1/p" | head -n 1)
+		if [ -n "$mid" ]; then
+			have=$(kc get "clients/$id/protocol-mappers/models/$mid" -r "$realm") ||
+				fail "cannot read the mapper $mapper of the client $client: $(why)"
+			as_wanted=true
+			grep -qF "\"protocolMapper\" : \"$kind\"" <<<"$have" || as_wanted=false
+			for pair in ${RATING_MAPPER_CONFIG:-}; do
+				grep -qF "\"${pair%%=*}\" : \"${pair#*=}\"" <<<"$have" || as_wanted=false
+			done
+			if $as_wanted; then
+				continue
+			fi
+			kc delete "clients/$id/protocol-mappers/models/$mid" -r "$realm" ||
+				fail "cannot remove the mapper $mapper of the client $client: $(why)"
+		fi
+		printf '%s' "$RATING_MAPPER_JSON" | kc create "clients/$id/protocol-mappers/models" -r "$realm" -f - >/dev/null ||
+			fail "cannot give the client $client the mapper $mapper: $(why)"
+		echo "realm-config: $client: the mapper $mapper puts the rating cap into its access tokens"
+		rated+=("$client")
+	done
+fi
+
 # A person here may have no email and a child no last name: the realm does
 # not stop them at sign-in to ask for either.
 verify=""
@@ -432,6 +519,9 @@ if [ ${#people[@]} -gt 0 ]; then
 	summary+="${summary:+; }${PEOPLE_CLIENT}: ${list%, }"
 fi
 [ -z "$people_secret" ] || summary+="${summary:+; }$people_secret"
+[ -z "$profile" ] || summary+="${summary:+; }$profile"
+[ ${#rated[@]} -eq 0 ] || summary+="${summary:+; }mapped the rating cap for ${rated[*]}"
+[ ${#unrated[@]} -eq 0 ] || summary+="${summary:+; }no client to map the rating cap for: ${unrated[*]}"
 [ -z "$verify" ] || summary+="${summary:+; }$verify"
 [ -z "$policy" ] || summary+="${summary:+; }$policy"
 [ -z "$demo" ] || summary+="${summary:+; }$demo"

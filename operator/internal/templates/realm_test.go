@@ -174,15 +174,18 @@ func TestRealmClientsAllowOnlyThePlatformsOwnRedirects(t *testing.T) {
 	}
 }
 
-// Everything else in the realm import is the file's, as it was.
+// Everything else in the realm import is the file's, as it was — and its user
+// profile is files/user-profile.json, the one component the import adds.
 func TestRealmImportKeepsTheRestOfTheRealm(t *testing.T) {
 	raw, err := os.ReadFile("../../platform/chart/files/keycloak-realm.json")
 	require.NoError(t, err)
 	var file map[string]any
 	require.NoError(t, json.Unmarshal(raw, &file))
+	assert.NotContains(t, file, "components", "the file has no components; the import adds the user profile")
 
 	managed := map[string]bool{"zaentrum-web": true, "chino-web": true, "chino-mobile": true, "chino-tv": true, "zae": true}
 	strip := func(realm map[string]any) map[string]any {
+		delete(realm, "components")
 		for _, c := range realm["clients"].([]any) {
 			cm := c.(map[string]any)
 			if !managed[cm["clientId"].(string)] {
@@ -196,8 +199,12 @@ func TestRealmImportKeepsTheRestOfTheRealm(t *testing.T) {
 		}
 		return realm
 	}
+	profile, err := os.ReadFile("../../platform/chart/files/user-profile.json")
+	require.NoError(t, err)
 	for name, p := range redirectProfiles() {
-		got := strip(realmImport(t, renderCR(t, p.cr)))
+		imported := realmImport(t, renderCR(t, p.cr))
+		assert.JSONEq(t, string(profile), userProfile(t, imported), "%s: the realm's user profile", name)
+		got := strip(imported)
 		var want map[string]any
 		require.NoError(t, json.Unmarshal(raw, &want))
 		assert.Equal(t, strip(want), got, name)

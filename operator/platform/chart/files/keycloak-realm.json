@@ -253,6 +253,23 @@
             "introspection.token.claim": "true",
             "userinfo.token.claim": "false"
           }
+        },
+        {
+          "name": "max-rating",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "max_rating",
+            "claim.name": "max_rating",
+            "jsonType.label": "int",
+            "multivalued": "false",
+            "aggregate.attrs": "false",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
         }
       ]
     },
@@ -294,6 +311,23 @@
           "consentRequired": false,
           "config": {
             "included.custom.audience": "chino",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "max-rating",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "max_rating",
+            "claim.name": "max_rating",
+            "jsonType.label": "int",
+            "multivalued": "false",
+            "aggregate.attrs": "false",
             "id.token.claim": "false",
             "access.token.claim": "true",
             "introspection.token.claim": "true",
@@ -343,6 +377,23 @@
             "introspection.token.claim": "true",
             "userinfo.token.claim": "false"
           }
+        },
+        {
+          "name": "max-rating",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "max_rating",
+            "claim.name": "max_rating",
+            "jsonType.label": "int",
+            "multivalued": "false",
+            "aggregate.attrs": "false",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
         }
       ]
     },
@@ -383,6 +434,23 @@
           "consentRequired": false,
           "config": {
             "included.custom.audience": "chino",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "max-rating",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "max_rating",
+            "claim.name": "max_rating",
+            "jsonType.label": "int",
+            "multivalued": "false",
+            "aggregate.attrs": "false",
             "id.token.claim": "false",
             "access.token.claim": "true",
             "introspection.token.claim": "true",

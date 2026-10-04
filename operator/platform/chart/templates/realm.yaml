@@ -7,10 +7,11 @@
 # clients allows (z.realmSettings) into it, makes one of them the realm lacks
 # as the import has it (z.realmImport), keeps the client the People page
 # manages people with to its secret and its three roles (z.peopleClient), and
-# writes where the admin console signs in (z.adminConsoleURL) into the master
-# realm, through the in-cluster admin API, from the very image the platform's
-# Keycloak runs. See files/realm-config.sh. It changes nothing else, and leaves
-# alone what is already so.
+# a person's rating cap declared and mapped into the viewers' tokens
+# (z.ratingMapper), and writes where the admin console signs in
+# (z.adminConsoleURL) into the master realm, through the in-cluster admin API,
+# from the very image the platform's Keycloak runs. See files/realm-config.sh.
+# It changes nothing else, and leaves alone what is already so.
 #
 # A Helm hook, so a plain Helm install runs it after every install and upgrade.
 # The operator never applies it with the platform: it starts it itself, as a
@@ -94,6 +95,21 @@ spec:
               value: {{ $people.roles | quote }}
             - name: PEOPLE_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: zaentrum-people, key: client-secret, optional: true } }
+{{- $rating := include "z.ratingMapper" $import | fromJson }}
+            # A person's rating cap (z.ratingMapper): the user attribute
+            # max_rating, declared in the realm's user profile so that only an
+            # admin sees or changes it, and the protocol mapper that puts it into
+            # the access tokens of these clients as the claim max_rating.
+            - name: RATING_CLIENTS
+              value: {{ $rating.clients | quote }}
+            - name: RATING_MAPPER_JSON
+              value: {{ $rating.mapper | toJson | quote }}
+            - name: RATING_MAPPER_CONFIG
+              value: {{ $rating.config | quote }}
+            - name: PROFILE_ATTRIBUTE
+              value: {{ $rating.attribute | toJson | quote }}
+            - name: PROFILE_ATTRIBUTE_CHECK
+              value: {{ $rating.check | quote }}
             # The realm's password policy, where it has none.
             - name: PASSWORD_POLICY
               value: {{ $import.passwordPolicy | quote }}
