@@ -2,8 +2,10 @@ package controller
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,11 +23,49 @@ import (
 // shortened ones on purpose.
 var crdCopies = []string{
 	"../../bundle/manifests/zaentrum.io_zaentrums.yaml",
-	"../../../deploy/operator-install.yaml",
+	pinnedInstall,
 	"../../../deploy/allinone/manifests/10-operator.yaml",
 }
 
 const canonicalCRD = "../../config/crd/zaentrum.io_zaentrums.yaml"
+
+// pinnedInstall installs the operator image it pins, and with it the schema
+// that operator knows: it moves only when a cluster-admin re-pins it. The
+// fields added to the canonical CRD since are served by the next re-pin, which
+// splices the canonical CRD into it and empties sinceThePin. Until then the
+// pinned operator, which writes none of them, is served exactly its own schema
+// — and a field missing from this list, or one the file already serves, fails
+// the test.
+const pinnedInstall = "../../../deploy/operator-install.yaml"
+
+var sinceThePin = []string{
+	"spec.identity.mobileClientId",
+	"spec.identity.tvClientId",
+}
+
+// withoutFields is a deep copy of a CRD spec with the given fields — dotted
+// paths below openAPIV3Schema, such as "spec.identity.tvClientId" — removed.
+func withoutFields(t *testing.T, spec any, fields []string) any {
+	t.Helper()
+	b, err := json.Marshal(spec)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(b, &out))
+	versions, _ := out["versions"].([]any)
+	for _, v := range versions {
+		for _, f := range fields {
+			parts := strings.Split(f, ".")
+			node, _ := dig(v, "schema", "openAPIV3Schema").(map[string]any)
+			for _, p := range parts[:len(parts)-1] {
+				node, _ = dig(node, "properties", p).(map[string]any)
+			}
+			props, _ := node["properties"].(map[string]any)
+			require.Contains(t, props, parts[len(parts)-1], "sinceThePin names %s, which the canonical CRD does not serve", f)
+			delete(props, parts[len(parts)-1])
+		}
+	}
+	return out
+}
 
 func docs(t *testing.T, file string) []map[string]any {
 	t.Helper()
@@ -103,6 +143,11 @@ func TestEveryCRDCopyServesTheSameSchema(t *testing.T) {
 	}
 
 	for _, file := range crdCopies {
+		if file == pinnedInstall {
+			assert.Equal(t, withoutFields(t, want, sinceThePin), zaentrumCRDSpec(t, file),
+				"%s serves a different Zaentrum schema than %s without the fields added since its pin (sinceThePin)", file, canonicalCRD)
+			continue
+		}
 		assert.Equal(t, want, zaentrumCRDSpec(t, file), "%s serves a different Zaentrum schema than %s", file, canonicalCRD)
 	}
 }

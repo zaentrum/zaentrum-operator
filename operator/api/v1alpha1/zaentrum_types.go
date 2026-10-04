@@ -57,6 +57,22 @@ type IdentitySpec struct {
 	// +optional
 	ClientID string `json:"clientId,omitempty"`
 
+	// TVClientID is the public client the TV apps sign in through, with the
+	// device authorization grant and PKCE (S256); chino-api advertises it in
+	// /api/config. Empty: the bundled realm's chino-tv with bundled identity,
+	// and with an external one chino-api's own default, "chino".
+	// +optional
+	TVClientID string `json:"tvClientId,omitempty"`
+
+	// MobileClientID is the public client the phone and tablet apps sign in
+	// through: the authorization code with PKCE (S256) in the system browser,
+	// returning to cloud.nalet.chino:/oauth/callback exactly; chino-api
+	// advertises it in /api/config. Empty: the bundled realm's chino-mobile
+	// with bundled identity, and with an external one chino-api's own default,
+	// "chino".
+	// +optional
+	MobileClientID string `json:"mobileClientId,omitempty"`
+
 	// Audience is the expected token audience services validate against.
 	// +kubebuilder:default=chino
 	// +optional

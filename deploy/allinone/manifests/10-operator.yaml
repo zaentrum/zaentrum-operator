@@ -574,12 +574,28 @@ spec:
                     description: LoginTheme is the bundled Keycloak login theme name
                       (empty = Keycloak default).
                     type: string
+                  mobileClientId:
+                    description: |-
+                      MobileClientID is the public client the phone and tablet apps sign in
+                      through: the authorization code with PKCE (S256) in the system browser,
+                      returning to cloud.nalet.chino:/oauth/callback exactly; chino-api
+                      advertises it in /api/config. Empty: the bundled realm's chino-mobile
+                      with bundled identity, and with an external one chino-api's own default,
+                      "chino".
+                    type: string
                   mode:
                     default: bundled
                     description: Mode is "bundled" (ship Keycloak) or "external" (federate).
                     enum:
                     - bundled
                     - external
+                    type: string
+                  tvClientId:
+                    description: |-
+                      TVClientID is the public client the TV apps sign in through, with the
+                      device authorization grant and PKCE (S256); chino-api advertises it in
+                      /api/config. Empty: the bundled realm's chino-tv with bundled identity,
+                      and with an external one chino-api's own default, "chino".
                     type: string
                 type: object
               imagePullSecrets:

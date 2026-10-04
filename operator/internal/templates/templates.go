@@ -117,6 +117,8 @@ func (v Values) chartValues() map[string]interface{} {
 			"issuer":             spec.Identity.Issuer,
 			"issuerScheme":       orDefault(spec.Identity.IssuerScheme, "http"),
 			"clientId":           orDefault(spec.Identity.ClientID, "chino-web"),
+			"tvClientId":         spec.Identity.TVClientID,
+			"mobileClientId":     spec.Identity.MobileClientID,
 			"audience":           orDefault(spec.Identity.Audience, "chino"),
 			"loginTheme":         spec.Identity.LoginTheme,
 			"exposeAdminConsole": spec.Identity.ExposeAdminConsole,

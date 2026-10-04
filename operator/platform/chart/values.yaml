@@ -17,6 +17,13 @@ identity:
   issuer: ""               # explicit issuer URL; empty → derived from scheme+hostname
   issuerScheme: http       # http | https  (the demo terminates TLS at the edge → https)
   clientId: chino-web
+  # The public clients the TV apps (the device grant with PKCE) and the phone
+  # and tablet apps (the authorization code with PKCE, returning to
+  # cloud.nalet.chino:/oauth/callback) sign in through; chino-api advertises
+  # them in /api/config. Empty: the bundled realm's chino-tv and chino-mobile,
+  # or with an external provider chino-api's default, "chino".
+  tvClientId: ""
+  mobileClientId: ""
   audience: chino
   loginTheme: ""           # bundled Keycloak login theme name (demo: zaentrum)
   # The bundled Keycloak's admin console and admin API on the public host
