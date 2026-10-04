@@ -84,10 +84,14 @@ empty library — and three steps make it yours
 
 ### Keycloak's admin console
 
-Keycloak's own admin console — where further accounts are made — is not on the
-published port. It answers through a port-forward on `localhost:8080`, so
-publish that port when you start the container (`-p 127.0.0.1:8080:8080` beside
-`-p 80:80`), then:
+Further accounts are made in Keycloak's admin console, which is not on the
+published port: the Ingress sends only `/auth/realms` and `/auth/resources` to
+Keycloak. The console answers through a port-forward on `localhost:8080` — its
+links and its sign-in point there — so the container has to publish that port.
+Docker publishes a port only when it creates a container, and a re-created
+appliance starts an empty platform ([persistence](#persistence)): if you will
+want the console, start the container with `-p 127.0.0.1:8080:8080` beside
+`-p 80:80`. Then:
 
 ```bash
 docker exec -d zaentrum kubectl -n zaentrum port-forward --address 0.0.0.0 svc/keycloak 8080:80
@@ -96,8 +100,21 @@ docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
 open http://localhost:8080/auth/admin/    # as admin, with that password
 ```
 
-Or publish it on the appliance's own port with `spec.identity.exposeAdminConsole:
-true` ([the operator's README](../../operator/README.md#the-admin-console)).
+That is the master realm's console, signed in as its bootstrap admin; the realm
+`zaentrum`, with its users, is one switch away.
+
+An appliance started without that port can publish the console on its own port
+instead, with `spec.identity.exposeAdminConsole: true`
+([the operator's README](../../operator/README.md#the-admin-console)):
+
+```bash
+docker exec zaentrum kubectl -n zaentrum patch zaentrum zaentrum --type merge \
+  -p '{"spec":{"identity":{"exposeAdminConsole":true}}}'
+```
+
+Once Keycloak has restarted, the realm's own console is
+<http://zaentrum.localhost/auth/admin/zaentrum/console/>, for the realm's
+`admin`.
 
 ## Persistence
 

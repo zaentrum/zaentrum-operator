@@ -67,6 +67,30 @@ For other devices, run the operator on a cluster under a real hostname with TLS
 ([self-hosting](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#b-self-host-with-the-operator),
 [troubleshooting](https://github.com/zaentrum/zaentrum/blob/main/docs/troubleshooting.md#8-sign-in-fails-over-plain-http-cookie-not-found)).
 
+## Identity
+
+Zaentrum runs its **own bundled Keycloak** (realm `zaentrum`), or — with
+`identity.mode: external` on a cluster — validates the tokens of your own OIDC provider and
+renders no Keycloak. Those are the two modes the CRD accepts; federating your provider through
+the bundled Keycloak (`broker`,
+[ADR-0007](https://github.com/zaentrum/zaentrum/blob/main/docs/adr/0007-identity-modes.md)) is
+designed, not built.
+
+Users are managed in Keycloak, whose admin console is **not on the public host**: the Ingress
+sends only `/auth/realms` and `/auth/resources` to Keycloak. Reach it through a port-forward on
+local port 8080 — the console's links point there — signed in as the bootstrap admin (keys
+`username` and `password` of the Secret `zaentrum-keycloak-admin`), then switch to the realm
+`zaentrum`:
+
+```bash
+kubectl -n zaentrum port-forward svc/keycloak 8080:80
+open http://localhost:8080/auth/admin/
+```
+
+Or publish it on the public host with `spec.identity.exposeAdminConsole: true`. The details:
+[operator/README.md](operator/README.md#the-admin-console); the appliance's variant:
+[deploy/allinone/README.md](deploy/allinone/README.md#keycloaks-admin-console).
+
 ---
 
 ## Route map
