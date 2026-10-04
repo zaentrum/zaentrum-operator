@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build the Zaentrum all-in-one image.
 #
-# Renders deploy/base with kustomize into ./manifests/, which the Dockerfile
+# Writes ./manifests/ from operator/config — the namespace, the operator's
+# install (CRDs, RBAC, manager) and the sample Zaentrum — which the Dockerfile
 # COPYs into the k3s auto-apply directory (/var/lib/rancher/k3s/server/manifests).
-# k3s applies everything in that directory on first boot, so the rendered
-# manifest IS the install.
+# k3s applies everything in that directory on first boot, so those manifests
+# ARE the install.
 #
 #   ./deploy/allinone/build.sh                 # render + docker build :latest
 #   IMAGE=ghcr.io/zaentrum/appliance:v1 ./build.sh    # custom tag
@@ -13,7 +14,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-BASE="$ROOT/deploy/base"
 OUT="$HERE/manifests"
 IMAGE="${IMAGE:-ghcr.io/zaentrum/appliance:latest}"
 
@@ -21,9 +21,7 @@ IMAGE="${IMAGE:-ghcr.io/zaentrum/appliance:latest}"
 # from a Zaentrum CR — rather than baking the rendered platform manifests directly.
 # k3s auto-applies the files below in filename order: the zaentrum namespace, then
 # the operator install (CRD + RBAC + manager), then the Zaentrum CR. The operator
-# then creates/owns everything (so /manage can talk to it + auto-update works).
-# deploy/base stays the operator's template source AND the kustomize path for
-# non-appliance / external-cluster installs.
+# then renders the platform from the chart it embeds, and creates and owns it.
 OP="$ROOT/operator/config"
 
 # The appliance is the ONE install the cluster cannot be asked about: it bakes
@@ -69,4 +67,5 @@ render
 echo ">> docker build $IMAGE"
 docker build -t "$IMAGE" "$HERE"
 echo ">> built $IMAGE"
-echo "   run: docker run -d --privileged --name zaentrum -p 8080:80 $IMAGE"
+echo "   run: docker run -d --privileged --restart unless-stopped --name zaentrum -p 80:80 $IMAGE"
+echo "   then open http://zaentrum.localhost"

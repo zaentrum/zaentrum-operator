@@ -1,8 +1,9 @@
 # Build the platform-owned Zaentrum images and push them to GitHub Container Registry.
 #
 # This monorepo builds ONLY the images that have no dedicated polyrepo:
-#   ghcr.io/zaentrum/admin:latest         (apps/admin — first-run + day-2 UI)
-#   ghcr.io/zaentrum/keycloak:latest      (platform/keycloak — bundled identity)
+#   ghcr.io/zaentrum/admin:latest         (apps/admin — the old management console of
+#                                          the unsupported deploy/base and compose profiles)
+#   ghcr.io/zaentrum/keycloak:latest      (platform/keycloak — those profiles' identity)
 #   ghcr.io/zaentrum/operator:latest      (operator — the controller-manager)
 # each also tagged with :<git-sha>.
 #
@@ -10,9 +11,9 @@
 # katalog-manager) are OWNED BY THEIR POLYREPOS at github.com/zaentrum/<svc> and
 # published to the SAME flat ghcr.io/zaentrum/<svc> namespace by those repos'
 # own workflows. This monorepo must NOT rebuild them here — doing so would
-# clobber the polyrepo images with a divergent copy. deploy/base + the operator
-# templates simply reference the flat ghcr.io/zaentrum/<svc> images those
-# polyrepos publish.
+# clobber the polyrepo images with a divergent copy. The platform's chart
+# (operator/platform/chart) simply references the flat ghcr.io/zaentrum/<svc>
+# images those polyrepos publish.
 #
 # Path filtering keeps PRs cheap: a component only builds when its own sources
 # (or this workflow / the shared deploy bits) change. On `main` we always build
@@ -111,10 +112,10 @@ jobs:
           - svc: keycloak
             context: platform/keycloak
             changed: ${{ needs.changes.outputs.keycloak }}
-          # The cluster operator (controller-manager). Reconciles the Zaentrum CRD
-          # into the same resource set that `kubectl kustomize deploy/base`
-          # renders. Built from operator/ (Go); image is wired into the OLM
-          # bundle under operator/bundle/ for OperatorHub/OpenShift install.
+          # The cluster operator (controller-manager). Reconciles a Zaentrum into
+          # the platform its embedded chart renders. Built from operator/ (Go);
+          # image is wired into the OLM bundle under operator/bundle/ for
+          # OperatorHub/OpenShift install.
           - svc: operator
             context: operator
             changed: ${{ needs.changes.outputs.operator }}

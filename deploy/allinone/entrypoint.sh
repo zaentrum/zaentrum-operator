@@ -28,11 +28,12 @@ MANIFEST_DIR=/var/lib/rancher/k3s/server/manifests
 # real cluster holds, so a token minted by the browser-facing Keycloak validates
 # unchanged in-cluster. We therefore DO NOT rewrite the Ingress here.
 #
-# Reaching the box by a different name (raw IP, a LAN hostname): set your real
-# name in all four places — zaentrum-env OIDC_ISSUER, zaentrum-keycloak-config
-# KC_HOSTNAME, the deploy/base/ingress.yaml host, AND STUBE_ISSUER_HOST below
-# (the latter drives the in-cluster rewrite). They must agree, because the
-# issuer host is both the browser host and the in-cluster validation host.
+# Reaching the box by another name (a LAN or public hostname): set it in two
+# places — spec.hostname of the Zaentrum, from which the operator derives the
+# issuer, KC_HOSTNAME and the Ingress host, and STUBE_ISSUER_HOST when the
+# container starts, which drives the in-cluster rewrite below. They must agree,
+# because the issuer host is both the browser host and the in-cluster
+# validation host (README "Phones and TVs: a name and a certificate").
 
 # --- in-cluster split-horizon for the public host -------------------------
 # The bundled Keycloak pins its issuer to the PUBLIC host (KC_HOSTNAME ->
@@ -45,11 +46,10 @@ MANIFEST_DIR=/var/lib/rancher/k3s/server/manifests
 # (the *.localhost auto-resolution): a pod then takes exactly the browser's
 # routes — /auth to Keycloak for discovery and JWKS, and every app path as well,
 # which the platform's own check (status.verification) walks. Resolving the host
-# straight to Keycloak served /auth alone. To run under a different name, set your
-# real host in deploy/base/ingress.yaml + KC_HOSTNAME + OIDC_ISSUER +
-# STUBE_ISSUER_HOST (this rewrite follows STUBE_ISSUER_HOST). k3s applies anything
-# in the manifest dir, so drop the ConfigMap there. CoreDNS hot-reloads the import
-# on change.
+# straight to Keycloak served /auth alone. Under another name, this rewrite
+# follows STUBE_ISSUER_HOST; the Zaentrum's spec.hostname must name the same.
+# k3s applies anything in the manifest dir, so drop the ConfigMap there. CoreDNS
+# hot-reloads the import on change.
 ISSUER_HOST="${STUBE_ISSUER_HOST:-zaentrum.localhost}"
 cat > "$MANIFEST_DIR/coredns-custom.yaml" <<EOF
 apiVersion: v1

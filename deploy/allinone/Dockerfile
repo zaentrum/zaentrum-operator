@@ -1,25 +1,23 @@
 # Zaentrum all-in-one: a whole Zaentrum cluster in a single container.
 #
-# Bundles a single-node k3s (real Kubernetes) plus the rendered deploy/base
-# manifests. k3s auto-applies anything under its server manifests dir on boot,
-# so starting the container installs Zaentrum. Application images are pulled from
-# ghcr.io/zaentrum/appliance on first boot (see README for offline/airgap baking).
+# Bundles a single-node k3s (real Kubernetes), the operator's install and a
+# Zaentrum (manifests/, which build.sh writes from operator/config). k3s
+# auto-applies its server manifests dir on boot, so starting the container
+# installs the operator, which brings up the platform. The platform's images are
+# pulled from ghcr.io/zaentrum/<service> as their pods start; there is no
+# offline mode (README "Where the images come from").
 #
 # Build it with deploy/allinone/build.sh (renders manifests first).
 FROM rancher/k3s:v1.31.5-k3s1
 
-# Rendered Zaentrum manifests -> k3s auto-apply dir. k3s applies every *.yaml here
-# at startup and re-applies on change.
+# The operator's install and the Zaentrum -> k3s auto-apply dir. k3s applies
+# every *.yaml here at startup and re-applies a file when it changes.
 COPY manifests/ /var/lib/rancher/k3s/server/manifests/
 
 COPY entrypoint.sh /usr/local/bin/zaentrum-entrypoint.sh
 
-# OPTIONAL airgap: drop the app image tarball(s) into agent/images and k3s
-# imports them before pulling from a registry. Left empty by default so the
-# image stays small; see README "Offline / airgap".
-#   /var/lib/rancher/k3s/agent/images/zaentrum-airgap.tar
-
-# Traefik ingress listens on :80 inside the container; publish it with -p.
-EXPOSE 80
+# Traefik answers on :80 inside the container, and on :443 once the platform has
+# a certificate of its own (README "Phones and TVs"); publish them with -p.
+EXPOSE 80 443
 
 ENTRYPOINT ["/usr/local/bin/zaentrum-entrypoint.sh"]

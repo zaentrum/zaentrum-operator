@@ -1,7 +1,7 @@
 # Build the Zaentrum all-in-one image and push it to GitHub Container Registry.
 #
-# The all-in-one bundles a single-node k3s (FROM rancher/k3s) plus the rendered
-# deploy/base manifests, so `docker run` installs a whole Zaentrum cluster in one
+# The all-in-one bundles a single-node k3s (FROM rancher/k3s), the operator's
+# install and a Zaentrum, so `docker run` installs a whole Zaentrum cluster in one
 # container. It is published as:
 #   ghcr.io/zaentrum/appliance:latest
 #   ghcr.io/zaentrum/appliance:<git-sha>
@@ -22,7 +22,7 @@ on:
     branches: [main]
     paths:
       - 'deploy/allinone/**'
-      - 'deploy/base/**'
+      - 'operator/config/**'
       - '.github/workflows/all-in-one.yml'
   # Manual trigger from the Actions tab.
   workflow_dispatch: {}
@@ -51,9 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Render deploy/base into deploy/allinone/manifests so the k3s auto-apply
-      # dir is populated before the docker build COPYs it in. build.sh does the
-      # render with `kubectl kustomize` (kustomize ships inside kubectl).
+      # Write deploy/allinone/manifests from operator/config (the operator's
+      # install and the sample Zaentrum) so the k3s auto-apply dir is populated
+      # before the docker build COPYs it in.
       - name: Render manifests
         run: ./deploy/allinone/build.sh render
 
