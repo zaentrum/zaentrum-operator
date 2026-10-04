@@ -210,6 +210,29 @@ func TestRealmImportKeepsTheRestOfTheRealm(t *testing.T) {
 	}
 }
 
+// The realm describes the platform as it is — the /manage console and its
+// manage-api are long gone — and every description fits Keycloak's column of
+// 255 characters, as a longer one fails the import.
+func TestRealmImportDescribesThePlatformAsItIs(t *testing.T) {
+	realm := realmImport(t, renderCR(t, base("zaentrum")))
+	described := map[string]string{}
+	for _, r := range realm["roles"].(map[string]any)["realm"].([]any) {
+		rm := r.(map[string]any)
+		described["role "+rm["name"].(string)], _ = rm["description"].(string)
+	}
+	for _, c := range realm["clients"].([]any) {
+		cm := c.(map[string]any)
+		described["client "+cm["clientId"].(string)], _ = cm["description"].(string)
+	}
+	for what, d := range described {
+		assert.LessOrEqual(t, len([]rune(d)), 255, "%s: Keycloak keeps 255 characters of a description", what)
+		for _, gone := range []string{"/manage ", "/manage console", "manage-api", "wizard"} {
+			assert.NotContains(t, d, gone, "%s still describes %q", what, gone)
+		}
+	}
+	assert.Contains(t, described["role zaentrum-admin"], "Catalog Management")
+}
+
 // route is one path the platform's host serves and the Service behind it.
 type route struct{ host, path, service string }
 
