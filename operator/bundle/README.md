@@ -12,10 +12,10 @@ ClusterServiceVersion (the operator's install metadata, RBAC, and managed
 Deployment), the CRDs it owns, and a small set of annotations.
 
 The Zaentrum operator (the Go controller-manager under `operator/`) reconciles a
-single `Zaentrum` custom resource into the same resource set that
-`kubectl kustomize deploy/base` renders — namespace, the bundled
-data/Kafka/Keycloak, `katalog-*`, `chino-*`, `admin`, the ingress, and the boot
-fixes. This bundle is how that operator gets installed by OLM.
+single `Zaentrum` custom resource into the whole platform, rendered from the
+Helm chart it embeds (`operator/platform/chart`): the portal, the catalog and
+its consoles, chino, the bundled Postgres, Kafka and Keycloak, the Ingress or
+the OpenShift Routes. This bundle is how that operator gets installed by OLM.
 
 It is content-neutral, like the rest of the repo: it ships only the platform,
 with no downloaders or indexer integrations.
@@ -64,5 +64,6 @@ references it) as a step separate from the controller image build.
 
 ## Installing
 
-See [`docs/operator.md`](../../docs/operator.md) for how to install on
-OpenShift / any OLM cluster and create a `Zaentrum` CR.
+See the front door's
+[operator guide](https://github.com/zaentrum/zaentrum/blob/main/docs/operator.md)
+for how to install on OpenShift / any OLM cluster and create a `Zaentrum` CR.
