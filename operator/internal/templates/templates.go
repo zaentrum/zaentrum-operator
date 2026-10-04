@@ -52,6 +52,13 @@ type Values struct {
 	// the claim.
 	PostgresVolume  string
 	PostgresMigrate bool
+	// CertManager says the cluster serves cert-manager's Certificate API; the
+	// chart issues the platform's certificate there (spec.tls.issuerRef).
+	CertManager bool
+	// TLSCertificate, TLSKey and TLSCA are the PEMs of the platform's
+	// certificate (spec.tls), read from its Secret, which the Routes carry
+	// inline; empty without Routes, or before the Secret is there.
+	TLSCertificate, TLSKey, TLSCA string
 	// RestoreDump is the dump a restore of the bundled Postgres restores this
 	// pass, or empty. While it is set, every client of the database is stopped
 	// and the restore Job is rendered among the hooks. The reconciler sets it
@@ -63,6 +70,14 @@ type Values struct {
 // OpenShiftSecurityAPI is the API group/version of OpenShift's
 // SecurityContextConstraints, which the chart gates its pods' user on.
 const OpenShiftSecurityAPI = "security.openshift.io/v1"
+
+// CertManagerAPI is cert-manager's API group/version, which the chart issues
+// the platform's certificate with (templates/certificate.yaml), and
+// CertificateName that Certificate's name.
+const (
+	CertManagerAPI  = "cert-manager.io/v1"
+	CertificateName = "zaentrum"
+)
 
 func NewValues(z *zaentrumv1alpha1.Zaentrum) Values {
 	ns := z.Namespace
@@ -179,6 +194,7 @@ func (v Values) chartValues() map[string]interface{} {
 		"network": map[string]interface{}{
 			"issuerHostAliasIP": spec.Network.IssuerHostAliasIP,
 		},
+		"tls": v.tlsValues(),
 		"routing": map[string]interface{}{
 			"provisionIngress": derefBool(spec.Routing.ProvisionIngress, true),
 			"provisionRoutes":  derefBool(spec.Routing.ProvisionRoutes, false),
@@ -227,6 +243,26 @@ func (v Values) chartValues() map[string]interface{} {
 	}
 }
 
+// tlsValues maps spec.tls onto the chart's tls values.
+func (v Values) tlsValues() map[string]interface{} {
+	t := v.cr.Spec.TLS
+	if t == nil {
+		return map[string]interface{}{"enabled": false}
+	}
+	ref := map[string]interface{}{"name": "", "kind": "", "group": ""}
+	if t.IssuerRef != nil {
+		ref = map[string]interface{}{"name": t.IssuerRef.Name, "kind": t.IssuerRef.Kind, "group": t.IssuerRef.Group}
+	}
+	return map[string]interface{}{
+		"enabled":       true,
+		"secretName":    t.SecretName,
+		"issuerRef":     ref,
+		"certificate":   v.TLSCertificate,
+		"key":           v.TLSKey,
+		"caCertificate": v.TLSCA,
+	}
+}
+
 func orDefaultInt32(v, def int32) int32 {
 	if v == 0 {
 		return def
@@ -262,13 +298,19 @@ func loadChart() (*chart.Chart, error) {
 // objects. Client-only (no Helm release/apply). Every object is namespaced to the
 // CR's namespace (templates that omit the field still land correctly).
 func Render(v Values) ([]*unstructured.Unstructured, error) {
-	return render(v.chartValues(), v.Namespace, v.OpenShift, nil)
+	return renderOn(v.chartValues(), v.Namespace, v.OpenShift, v.CertManager, nil)
 }
 
 // render renders the chart with the given values over values.yaml, as `helm
 // template` would. lookup answers the chart's lookup calls the way a cluster
 // does under `helm install`; nil answers none, as `helm template` does.
 func render(vals map[string]interface{}, namespace string, openShift bool, lookup engine.ClientProvider) ([]*unstructured.Unstructured, error) {
+	return renderOn(vals, namespace, openShift, false, lookup)
+}
+
+// renderOn renders as render does, on a cluster that serves OpenShift's
+// security API and cert-manager's as said.
+func renderOn(vals map[string]interface{}, namespace string, openShift, certManager bool, lookup engine.ClientProvider) ([]*unstructured.Unstructured, error) {
 	chrt, err := loadChart()
 	if err != nil {
 		return nil, err
@@ -279,6 +321,9 @@ func render(vals map[string]interface{}, namespace string, openShift bool, looku
 	caps.APIVersions = append(caps.APIVersions, "route.openshift.io/v1", "route.openshift.io/v1/Route")
 	if openShift {
 		caps.APIVersions = append(caps.APIVersions, OpenShiftSecurityAPI, OpenShiftSecurityAPI+"/SecurityContextConstraints")
+	}
+	if certManager {
+		caps.APIVersions = append(caps.APIVersions, CertManagerAPI, CertManagerAPI+"/Certificate")
 	}
 	relOpts := chartutil.ReleaseOptions{Name: "zaentrum", Namespace: namespace}
 	renderVals, err := chartutil.ToRenderValues(chrt, vals, relOpts, caps)

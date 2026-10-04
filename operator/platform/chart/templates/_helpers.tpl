@@ -3,18 +3,75 @@ Shared conventions for the zaentrum platform chart. Every service template uses
 these so image/issuer/hostAliases/pull-secrets/labels stay consistent.
 */}}
 
+{{/* z.issuerScheme — the scheme the platform derives its URLs with: https
+     with a certificate of its own (tls.enabled), else identity.issuerScheme. */}}
+{{- define "z.issuerScheme" -}}
+{{- if .Values.tls.enabled -}}https{{- else -}}{{ .Values.identity.issuerScheme }}{{- end -}}
+{{- end -}}
+
 {{/* z.issuer — the OIDC issuer URL (explicit override, else derived). */}}
 {{- define "z.issuer" -}}
 {{- if .Values.identity.issuer -}}
 {{- .Values.identity.issuer -}}
 {{- else -}}
-{{- .Values.identity.issuerScheme }}://{{ .Values.global.hostname }}/auth/realms/zaentrum
+{{- include "z.issuerScheme" . }}://{{ .Values.global.hostname }}/auth/realms/zaentrum
 {{- end -}}
 {{- end -}}
 
 {{/* z.kcHostname — KC_HOSTNAME for the bundled Keycloak (scheme+host+/auth). */}}
 {{- define "z.kcHostname" -}}
-{{- .Values.identity.issuerScheme }}://{{ .Values.global.hostname }}/auth
+{{- include "z.issuerScheme" . }}://{{ .Values.global.hostname }}/auth
+{{- end -}}
+
+{{/* z.tlsSecret — the Secret the platform's certificate is in. */}}
+{{- define "z.tlsSecret" -}}
+{{- .Values.tls.secretName | default "zaentrum-tls" -}}
+{{- end -}}
+
+{{/* z.tlsHosts — the hosts the certificate is for, as a JSON list: the
+     platform's, and the chino host of subdomains routing. */}}
+{{- define "z.tlsHosts" -}}
+{{- $hosts := list .Values.global.hostname -}}
+{{- if and (eq .Values.routing.mode "subdomains") .Values.routing.hosts.chino -}}
+{{- $hosts = append $hosts .Values.routing.hosts.chino -}}
+{{- end -}}
+{{- toJson $hosts -}}
+{{- end -}}
+
+{{/* z.tlsPEM — one PEM of the platform's certificate for the Routes, which
+     carry it inline: tls.<value> when the operator passed it, else the
+     Secret's <key> (lookup, under helm install/upgrade). Empty without
+     tls.enabled, or before the Secret is there: the router's own then.
+     Use: (dict "root" $ "value" "certificate" "key" "tls.crt"). */}}
+{{- define "z.tlsPEM" -}}
+{{- if .root.Values.tls.enabled -}}
+{{- $pem := index .root.Values.tls .value -}}
+{{- if not $pem -}}
+{{- $live := lookup "v1" "Secret" .root.Release.Namespace (include "z.tlsSecret" .root) -}}
+{{- if and $live $live.data -}}{{- with index $live.data .key -}}{{- $pem = b64dec . -}}{{- end -}}{{- end -}}
+{{- end -}}
+{{- $pem -}}
+{{- end -}}
+{{- end -}}
+
+{{/* z.routeTLS — a Route's tls: edge termination, http as policy says, and
+     the platform's certificate when there is one (tls.enabled), else the
+     router's. Place under spec: {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }} */}}
+{{- define "z.routeTLS" -}}
+{{- $crt := include "z.tlsPEM" (dict "root" .root "value" "certificate" "key" "tls.crt") -}}
+{{- $key := include "z.tlsPEM" (dict "root" .root "value" "key" "key" "tls.key") -}}
+{{- if and $crt $key }}
+tls:
+  termination: edge
+  insecureEdgeTerminationPolicy: {{ .policy }}
+  certificate: {{ $crt | quote }}
+  key: {{ $key | quote }}
+{{- with include "z.tlsPEM" (dict "root" .root "value" "caCertificate" "key" "ca.crt") }}
+  caCertificate: {{ . | quote }}
+{{- end }}
+{{- else }}
+tls: { termination: edge, insecureEdgeTerminationPolicy: {{ .policy }} }
+{{- end }}
 {{- end -}}
 
 {{/* z.publicURL — the origin users reach the platform at: https where the edge
@@ -22,7 +79,7 @@ these so image/issuer/hostAliases/pull-secrets/labels stay consistent.
      in front does), else http. The verification Job checks the platform from
      there, outside-in, the way a user meets it. */}}
 {{- define "z.publicURL" -}}
-{{- if or (eq .Values.identity.issuerScheme "https") .Values.routing.provisionRoutes -}}https{{- else -}}http{{- end -}}://{{ .Values.global.hostname }}
+{{- if or (eq (include "z.issuerScheme" .) "https") .Values.routing.provisionRoutes -}}https{{- else -}}http{{- end -}}://{{ .Values.global.hostname }}
 {{- end -}}
 
 {{/*

@@ -1,0 +1,25 @@
+{{- if and .Values.tls.enabled .Values.tls.issuerRef.name (.Capabilities.APIVersions.Has "cert-manager.io/v1/Certificate") }}
+# ── The platform's certificate, from cert-manager ───────────────────────────
+#
+# tls.issuerRef names the Issuer or ClusterIssuer; cert-manager signs a
+# certificate for the platform's hosts (z.tlsHosts) into tls.secretName and
+# renews it there, and the Ingress (or the Routes, inline) serves it. Rendered
+# only where the cluster serves cert-manager's API.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: zaentrum
+  labels:
+    app.kubernetes.io/name: zaentrum-tls
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  secretName: {{ include "z.tlsSecret" . }}
+  dnsNames:
+{{- range include "z.tlsHosts" . | fromJsonArray }}
+    - {{ . | quote }}
+{{- end }}
+  issuerRef:
+    name: {{ .Values.tls.issuerRef.name | quote }}
+    kind: {{ .Values.tls.issuerRef.kind | default "Issuer" }}
+    group: {{ .Values.tls.issuerRef.group | default "cert-manager.io" }}
+{{- end }}

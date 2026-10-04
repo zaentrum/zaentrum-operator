@@ -1,7 +1,8 @@
 {{- if .Values.routing.provisionRoutes }}
 # Routing profile: SINGLE-ORIGIN PATHS (B1) on the demo host. Public traffic is
 # TLS-terminated at the OKD router and forwarded to HTTP backends; HTTP remains
-# allowed for the in-cluster issuer path. The OKD router matches most-specific
+# allowed for the in-cluster issuer path. The router's own certificate, or with
+# tls.enabled the platform's, inline (z.routeTLS). The OKD router matches most-specific
 # path first, so /api/manage > /api, and /auth, /chino, /portal are disjoint.
 # NOTE: /chino + /portal assume the SPAs are built for that sub-path base; if
 # not, switch to the subdomains profile (routes-subdomains.yaml).
@@ -20,7 +21,7 @@ spec:
   path: /
   to: { kind: Service, name: zaentrum-portal, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 # chino product (launched from the portal tile). Its image is built for Vite
 # base=/chino/, so it serves /chino/ + /chino/assets/; a sign-in returns to the
@@ -36,7 +37,7 @@ spec:
   path: /chino
   to: { kind: Service, name: chino-web, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 # /portal → the zaentrum launchpad shell (login → spaces/tiles). The SPA is built with
 # Vite base=/portal/ and its OIDC redirect is /portal/auth/callback (served by this route),
@@ -53,7 +54,7 @@ spec:
   path: /portal
   to: { kind: Service, name: zaentrum-portal, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 # /katalog → the standalone katalog-manager-ui console (split out of the portal).
 # Its image is built for a runtime base and mounted at /katalog/, so it serves
@@ -70,7 +71,7 @@ spec:
   path: /katalog
   to: { kind: Service, name: katalog-manager-ui, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 # /katalog-manage → the Catalog Management app (the same katalog image mounted at
 # /katalog-manage; renders scan + settings, vs Catalog browse at /katalog). The
@@ -86,7 +87,7 @@ spec:
   path: /katalog-manage
   to: { kind: Service, name: katalog-manage-ui, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -99,7 +100,7 @@ spec:
   path: /api
   to: { kind: Service, name: chino-api, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -111,7 +112,7 @@ spec:
   path: /api/manage
   to: { kind: Service, name: katalog-manager-api, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 # /api/portal → portal-api (the launchpad registry). More specific than /api, so
 # the router sends /api/portal/* here and everything else /api/* to chino-api.
@@ -125,7 +126,7 @@ spec:
   path: /api/portal
   to: { kind: Service, name: portal-api, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 {{- if eq .Values.identity.mode "bundled" }}
 ---
 # Bundled headless Keycloak → issuer https://<hostname>/auth/realms/zaentrum
@@ -145,7 +146,7 @@ spec:
   path: {{ if .Values.identity.exposeAdminConsole }}/auth{{ else }}/auth/realms{{ end }}
   to: { kind: Service, name: keycloak, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -157,7 +158,7 @@ spec:
   path: /auth/resources
   to: { kind: Service, name: keycloak, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 {{- end }}
 ---
 # The neutral chino-web SPA's OIDC redirect_uri is origin/auth/callback, which on this
@@ -175,7 +176,7 @@ spec:
   path: /auth/callback
   to: { kind: Service, name: chino-web, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Allow }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
 {{- end }}
 
 {{- if and .Values.routing.provisionRoutes (eq .Values.routing.mode "subdomains") .Values.routing.hosts.chino }}
@@ -193,7 +194,7 @@ spec:
   path: /
   to: { kind: Service, name: chino-web, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Redirect") | nindent 2 }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -205,7 +206,7 @@ spec:
   path: /api
   to: { kind: Service, name: chino-api, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Redirect") | nindent 2 }}
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -217,5 +218,5 @@ spec:
   path: /auth/callback
   to: { kind: Service, name: chino-web, weight: 100 }
   port: { targetPort: http }
-  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+  {{- include "z.routeTLS" (dict "root" $ "policy" "Redirect") | nindent 2 }}
 {{- end }}

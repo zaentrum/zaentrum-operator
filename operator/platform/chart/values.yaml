@@ -105,6 +105,23 @@ network:
   # validators so in-cluster token validation reaches the public HTTPS issuer.
   issuerHostAliasIP: ""
 
+# The platform's own certificate (templates/certificate.yaml, the Ingress's tls,
+# the Routes' edge): with tls.enabled every URL the platform derives is https.
+tls:
+  enabled: false
+  secretName: ""            # a kubernetes.io/tls Secret (tls.crt, tls.key); empty: zaentrum-tls
+  # A cert-manager issuer to sign a Certificate for the hosts into that Secret
+  # (needs cert-manager's CRDs); empty name: bring the Secret yourself.
+  issuerRef:
+    name: ""
+    kind: ""                # Issuer (default) | ClusterIssuer
+    group: ""               # default cert-manager.io
+  # The Routes carry their certificate inline. Empty: read from the Secret
+  # (lookup, under helm install/upgrade); the operator always passes them.
+  certificate: ""
+  key: ""
+  caCertificate: ""
+
 routing:
   provisionIngress: true    # plain-k8s Ingress (single-origin paths)
   provisionRoutes: false    # OpenShift Routes (demo)

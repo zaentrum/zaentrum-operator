@@ -6,6 +6,13 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
 spec:
+{{- if .Values.tls.enabled }}
+  # The platform's certificate (tls.secretName). What becomes of plain http
+  # for the host is the ingress controller's to say: a redirect, or nothing.
+  tls:
+    - hosts: [{{ .Values.global.hostname | quote }}]
+      secretName: {{ include "z.tlsSecret" . }}
+{{- end }}
   rules:
     - host: {{ .Values.global.hostname }}
       http:
@@ -100,6 +107,11 @@ metadata:
   name: chino-subdomain
   labels: { app: chino-web, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
 spec:
+{{- if .Values.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.routing.hosts.chino | quote }}]
+      secretName: {{ include "z.tlsSecret" . }}
+{{- end }}
   rules:
     - host: {{ .Values.routing.hosts.chino }}
       http:
