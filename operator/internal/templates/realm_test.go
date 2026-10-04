@@ -2,6 +2,7 @@ package templates
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -323,35 +324,156 @@ func realmJob(t *testing.T, z *zaentrumv1alpha1.Zaentrum) *batchv1.Job {
 // jobClients reads the realm Job's REALM_CLIENTS back into client settings.
 func jobClients(t *testing.T, job *batchv1.Job) map[string]realmClient {
 	t.Helper()
-	env := envByName(job.Spec.Template.Spec.Containers[0])
 	out := map[string]realmClient{}
-	for _, line := range strings.Split(strings.TrimSpace(env["REALM_CLIENTS"].Value), "\n") {
-		f := strings.Split(line, "|")
-		require.Len(t, f, 4, "a REALM_CLIENTS line is clientId|redirects|origins|post-logout: %q", line)
+	for id, f := range jobClientLines(t, job) {
 		words := func(s string) []string {
 			if s == "" {
 				return []string{}
 			}
 			return strings.Split(s, " ")
 		}
-		out[f[0]] = realmClient{RedirectURIs: words(f[1]), WebOrigins: words(f[2]),
+		out[id] = realmClient{RedirectURIs: words(f[1]), WebOrigins: words(f[2]),
 			Attributes: map[string]string{"post.logout.redirect.uris": f[3]}}
 	}
 	return out
+}
+
+// jobClientLines splits the realm Job's REALM_CLIENTS lines into their fields,
+// by client.
+func jobClientLines(t *testing.T, job *batchv1.Job) map[string][]string {
+	t.Helper()
+	env := envByName(job.Spec.Template.Spec.Containers[0])
+	out := map[string][]string{}
+	for _, line := range strings.Split(strings.TrimSpace(env["REALM_CLIENTS"].Value), "\n") {
+		f := strings.Split(line, "|")
+		require.Len(t, f, 5, "a REALM_CLIENTS line is clientId|redirects|origins|post-logout|settings: %q", line)
+		out[f[0]] = f
+	}
+	return out
+}
+
+// jobSettings reads the settings field of the realm Job's REALM_CLIENTS: how
+// each client signs people in, name=value.
+func jobSettings(t *testing.T, job *batchv1.Job) map[string]map[string]string {
+	t.Helper()
+	out := map[string]map[string]string{}
+	for id, f := range jobClientLines(t, job) {
+		out[id] = map[string]string{}
+		for _, kv := range strings.Fields(f[4]) {
+			name, value, ok := strings.Cut(kv, "=")
+			require.True(t, ok, "%s: a setting is name=value: %q", id, kv)
+			out[id][name] = value
+		}
+	}
+	return out
+}
+
+// importedSettings is what jobSettings should read for a client of the realm
+// import: its fields and the two sign-in attributes, as Keycloak spells them.
+func importedSettings(c map[string]any) map[string]string {
+	attrs, _ := c["attributes"].(map[string]any)
+	device, _ := attrs["oauth2.device.authorization.grant.enabled"].(string)
+	if device == "" {
+		device = "false"
+	}
+	pkce, _ := attrs["pkce.code.challenge.method"].(string)
+	out := map[string]string{
+		"oauth2.device.authorization.grant.enabled": device,
+		"pkce.code.challenge.method":                pkce,
+	}
+	for _, f := range []string{"publicClient", "standardFlowEnabled", "implicitFlowEnabled", "directAccessGrantsEnabled"} {
+		out[f] = fmt.Sprint(c[f])
+	}
+	return out
+}
+
+// importedClient is the realm import's representation of one client.
+func importedClient(t *testing.T, objs []*unstructured.Unstructured, id string) map[string]any {
+	t.Helper()
+	for _, c := range realmImport(t, objs)["clients"].([]any) {
+		if cm := c.(map[string]any); cm["clientId"] == id {
+			return cm
+		}
+	}
+	t.Fatalf("the realm import has no client %s", id)
+	return nil
 }
 
 // The realm Job writes into an existing realm exactly what the import writes
 // into a new one: one derivation, two readers.
 func TestRealmJobSetsWhatTheImportSets(t *testing.T) {
 	for name, p := range redirectProfiles() {
-		imported := realmClients(t, renderCR(t, p.cr))
-		set := jobClients(t, realmJob(t, p.cr))
+		objs := renderCR(t, p.cr)
+		imported := realmClients(t, objs)
+		job := realmJob(t, p.cr)
+		set := jobClients(t, job)
 		require.Len(t, set, 5, name)
+		settings := jobSettings(t, job)
 		for id, c := range set {
 			want := imported[id]
 			assert.Equal(t, want.RedirectURIs, c.RedirectURIs, "%s: %s", name, id)
 			assert.Equal(t, append([]string{}, want.WebOrigins...), c.WebOrigins, "%s: %s", name, id)
 			assert.Equal(t, want.Attributes["post.logout.redirect.uris"], c.Attributes["post.logout.redirect.uris"], "%s: %s", name, id)
+			assert.Equal(t, importedSettings(importedClient(t, objs, id)), settings[id], "%s: %s signs in as the import says", name, id)
+		}
+
+		// A client the realm lacks is made from the import's own representation.
+		env := envByName(job.Spec.Template.Spec.Containers[0])
+		made := map[string]map[string]any{}
+		for _, line := range strings.Split(strings.TrimSpace(env["REALM_CLIENT_JSON"].Value), "\n") {
+			id, rep, ok := strings.Cut(line, " ")
+			require.True(t, ok, "%s: a REALM_CLIENT_JSON line is <clientId> <representation>", name)
+			var c map[string]any
+			require.NoError(t, json.Unmarshal([]byte(rep), &c), "%s: %s", name, id)
+			made[id] = c
+		}
+		require.Len(t, made, len(set), name)
+		for id := range set {
+			assert.Equal(t, importedClient(t, objs, id), made[id], "%s: %s is made as the import makes it", name, id)
+		}
+	}
+}
+
+// The clients the phone and TV apps sign in through, as a new realm gets them
+// and as the realm Job keeps an existing one: the TV apps' the device grant
+// with PKCE and no redirect at all; the phone apps' the authorization code with
+// PKCE, returning to the apps' one redirect exactly — no wildcard, and no
+// device grant they never use. Both public, neither with a password grant.
+func TestRealmPhoneAndTVClientsSignInAsTheirAppsDo(t *testing.T) {
+	for name, p := range redirectProfiles() {
+		objs := renderCR(t, p.cr)
+		settings := jobSettings(t, realmJob(t, p.cr))
+		clients := realmClients(t, objs)
+
+		tv := importedSettings(importedClient(t, objs, "chino-tv"))
+		assert.Equal(t, map[string]string{
+			"publicClient": "true", "standardFlowEnabled": "false", "implicitFlowEnabled": "false",
+			"directAccessGrantsEnabled": "false", "oauth2.device.authorization.grant.enabled": "true",
+			"pkce.code.challenge.method": "S256",
+		}, tv, name)
+		assert.Equal(t, tv, settings["chino-tv"], name)
+		assert.Empty(t, clients["chino-tv"].RedirectURIs, "%s: the device grant returns nowhere", name)
+
+		mobile := importedSettings(importedClient(t, objs, "chino-mobile"))
+		assert.Equal(t, map[string]string{
+			"publicClient": "true", "standardFlowEnabled": "true", "implicitFlowEnabled": "false",
+			"directAccessGrantsEnabled": "false", "oauth2.device.authorization.grant.enabled": "false",
+			"pkce.code.challenge.method": "S256",
+		}, mobile, name)
+		assert.Equal(t, mobile, settings["chino-mobile"], name)
+		assert.Equal(t, []string{"cloud.nalet.chino:/oauth/callback"}, clients["chino-mobile"].RedirectURIs, name)
+		assert.Empty(t, clients["chino-mobile"].WebOrigins, name)
+
+		for _, id := range []string{"chino-tv", "chino-mobile"} {
+			c := importedClient(t, objs, id)
+			var audience string
+			for _, m := range c["protocolMappers"].([]any) {
+				if mm := m.(map[string]any); mm["protocolMapper"] == "oidc-audience-mapper" {
+					audience, _ = mm["config"].(map[string]any)["included.custom.audience"].(string)
+				}
+			}
+			assert.Equal(t, "chino", audience, "%s: %s's tokens are for the API (aud chino)", name, id)
+			assert.Contains(t, c["optionalClientScopes"], "offline_access", "%s: %s keeps a refresh token", name, id)
 		}
 	}
 }

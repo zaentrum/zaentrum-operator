@@ -3,9 +3,11 @@
 #
 # The realm import (keycloak-realm.yaml) only ever makes a new realm. A realm
 # that exists keeps what was imported when it was made, so this Job writes the
-# platform's own sign-in redirects (z.realmClients) into it, and where the
-# admin console signs in (z.adminConsoleURL) into the master realm, through the
-# in-cluster admin API, from the very image the platform's Keycloak runs. See
+# platform's own sign-in redirects (z.realmClients) and the flows each of those
+# clients allows (z.realmSettings) into it, makes one of them the realm lacks
+# as the import has it (z.realmImport), and writes where the admin console
+# signs in (z.adminConsoleURL) into the master realm, through the in-cluster
+# admin API, from the very image the platform's Keycloak runs. See
 # files/realm-config.sh. It changes nothing else, and leaves alone what is
 # already so.
 #
@@ -58,11 +60,22 @@ spec:
             # kcadm reads the admin password from here, so it is never an argument.
             - name: KC_CLI_PASSWORD
               valueFrom: { secretKeyRef: { name: zaentrum-keycloak-admin, key: password, optional: true } }
-            # <clientId>|<redirect URIs>|<web origins>|<post-logout URIs ##-joined>
+{{- $import := include "z.realmImport" . | fromJson }}
+{{- $reps := dict }}
+{{- range $import.clients }}{{ $_ := set $reps .clientId . }}{{ end }}
+            # <clientId>|<redirect URIs>|<web origins>|<post-logout URIs ##-joined>|<settings>
+            # the settings as the import has them (z.realmSettings)
             - name: REALM_CLIENTS
               value: |
 {{- range $client, $c := include "z.realmClients" . | fromJson }}
-                {{ $client }}|{{ join " " $c.redirectUris }}|{{ join " " $c.webOrigins }}|{{ with $c.attributes }}{{ index . "post.logout.redirect.uris" }}{{ end }}
+                {{ $client }}|{{ join " " $c.redirectUris }}|{{ join " " $c.webOrigins }}|{{ with $c.attributes }}{{ index . "post.logout.redirect.uris" }}{{ end }}|{{ include "z.realmSettings" (index $reps $client) }}
+{{- end }}
+            # <clientId> <the client as the import has it>: what a client the
+            # realm lacks is made from.
+            - name: REALM_CLIENT_JSON
+              value: |
+{{- range $client, $c := include "z.realmClients" . | fromJson }}
+                {{ $client }} {{ index $reps $client | toJson }}
 {{- end }}
             # What a demo user still signing in with the import's placeholder
             # password gets instead.

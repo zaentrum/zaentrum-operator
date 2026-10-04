@@ -105,6 +105,41 @@ gives a client that names none, and so what an import leaves.
 {{- end -}}
 
 {{/*
+z.realmImport — the bundled realm as a new one is imported, as JSON:
+files/keycloak-realm.json with the redirects, web origins and post-logout
+redirect URIs of z.realmClients filled in. The import (keycloak-realm.yaml)
+writes it into a new realm; the realm Job (realm.yaml) makes a client an
+existing realm lacks from it, and sets what z.realmSettings reads from it.
+*/}}
+{{- define "z.realmImport" -}}
+{{- $realm := .Files.Get "files/keycloak-realm.json" | fromJson }}
+{{- $want := include "z.realmClients" . | fromJson }}
+{{- range $client := $realm.clients }}
+{{- with index $want $client.clientId }}
+{{- $_ := set $client "redirectUris" .redirectUris }}
+{{- $_ := set $client "webOrigins" .webOrigins }}
+{{- if not $client.attributes }}{{ $_ := set $client "attributes" dict }}{{ end }}
+{{- range $k, $v := .attributes }}{{ $_ := set $client.attributes $k $v }}{{ end }}
+{{- end }}
+{{- end }}
+{{- toJson $realm -}}
+{{- end -}}
+
+{{/*
+z.realmSettings — how a client of the realm import signs people in, as the
+realm Job sets it: space-separated name=value, a client field or, with a dot
+in its name, an attribute. Pass the client's representation. A public client
+with no secret, the flows it allows and none other, and PKCE (S256) on them.
+*/}}
+{{- define "z.realmSettings" -}}
+{{- $c := . -}}
+{{- $a := .attributes | default dict -}}
+{{- range $i, $field := list "publicClient" "standardFlowEnabled" "implicitFlowEnabled" "directAccessGrantsEnabled" -}}
+{{- if $i }} {{ end }}{{ $field }}={{ required (printf "the realm import's client %s says nothing of %s" $c.clientId $field) (index $c $field) }}
+{{- end }} oauth2.device.authorization.grant.enabled={{ index $a "oauth2.device.authorization.grant.enabled" | default "false" }} pkce.code.challenge.method={{ required (printf "the realm import's client %s has no PKCE method" $c.clientId) (index $a "pkce.code.challenge.method") }}
+{{- end -}}
+
+{{/*
 z.tvClientId / z.mobileClientId — the public clients chino-api advertises in
 /api/config for the TV apps and for the phone and tablet apps: identity.
 tvClientId / mobileClientId, else, with bundled identity, the bundled realm's

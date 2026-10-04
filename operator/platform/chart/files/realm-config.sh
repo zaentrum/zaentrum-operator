@@ -8,10 +8,13 @@
 #
 # For each client in REALM_CLIENTS it sets exactly the redirect URIs, web
 # origins and post-logout redirect URIs the chart derived from the platform's
-# own origins (z.realmClients), and nothing else of the client: every other
-# setting and attribute stays as it is. A client that already has them is left
-# alone; one the realm lacks is reported, not made — making clients is the
-# realm import's job.
+# own origins (z.realmClients), and how the client signs people in as the realm
+# import has it: a public client, the flows it allows — the TV apps' client the
+# device grant, the phone apps' the authorization code — and none other, PKCE
+# on them (z.realmSettings). Nothing else of the client: every other setting
+# and attribute stays as it is. A client that already has them is left alone.
+# One the realm lacks — a realm imported before the chart had it, or one
+# deleted since — is made as the import makes it (REALM_CLIENT_JSON).
 #
 # Then the demo user. A realm imported without Secret zaentrum-demo-user gave it
 # the password "${DEMO_USER_PASSWORD}" — Keycloak leaves a placeholder it cannot
@@ -36,9 +39,13 @@
 #   KC_ADMIN_USER    the master realm's bootstrap admin (zaentrum-keycloak-admin)
 #   KC_CLI_PASSWORD  its password (read by kcadm itself)
 #   REALM_CLIENTS    one line per client:
-#                      <clientId>|<redirect URIs>|<web origins>|<post-logout URIs>
+#                      <clientId>|<redirect URIs>|<web origins>|<post-logout URIs>|<settings>
 #                    the URIs separated by spaces, the post-logout ones by ##
-#                    (Keycloak's own separator), each list possibly empty
+#                    (Keycloak's own separator), each list possibly empty; the
+#                    settings space-separated name=value, a client field or,
+#                    with a dot in its name, an attribute
+#   REALM_CLIENT_JSON  one line per client: <clientId> <its representation, as
+#                    the realm import has it>, for a client the realm lacks
 #   MASTER_FRONTEND_URL  the master realm's frontend URL; empty unsets it.
 #                    Not set at all: left as it is.
 #   DEMO_USER_PASSWORD   from Secret zaentrum-demo-user, when there is one
@@ -114,14 +121,63 @@ until kc config credentials --server "$KC_SERVER" --realm master --user "$KC_ADM
 	sleep 5
 done
 
-set_clients=() same=() missing=()
-while IFS='|' read -r client redirects origins logout; do
+# imported prints the realm import's representation of a client, or fails.
+imported() {
+	local want=$1 name rep
+	while read -r name rep; do
+		if [ "$name" = "$want" ] && [ -n "$rep" ]; then
+			printf '%s' "$rep"
+			return 0
+		fi
+	done <<<"${REALM_CLIENT_JSON:-}"
+	return 1
+}
+
+set_clients=() set_flows=() made=() same=() missing=()
+while IFS='|' read -r client redirects origins logout settings; do
 	[ -n "$client" ] || continue
 	id=$(kc get clients -r "$realm" -q "clientId=$client" --fields id --format csv --noquotes) ||
 		fail "cannot look up the client $client in realm $realm: $(why)"
 	if [ -z "$id" ]; then
-		missing+=("$client")
+		# The import's representation carries the redirects and settings
+		# above already: made so, it is in step.
+		if ! rep=$(imported "$client"); then
+			missing+=("$client")
+			continue
+		fi
+		printf '%s' "$rep" | kc create clients -r "$realm" -f - >/dev/null ||
+			fail "cannot make the client $client: $(why)"
+		echo "realm-config: $client: made, as the realm import makes it"
+		made+=("$client")
 		continue
+	fi
+
+	# How the client signs people in. A field reads as true or false; an
+	# attribute the client does not have reads as empty, which for a switch
+	# means off.
+	flows="" fields="" attrs=""
+	for setting in $settings; do
+		name=${setting%%=*} value=${setting#*=}
+		case $name in
+		*.*) have=$(kc get "clients/$id" -r "$realm" --fields "attributes($name)" --format csv --noquotes) ;;
+		*) have=$(kc get "clients/$id" -r "$realm" --fields "$name" --format csv --noquotes) ;;
+		esac || fail "cannot read the client $client: $(why)"
+		if [ "$have" = "$value" ] || { [ -z "$have" ] && [ "$value" = false ]; }; then
+			continue
+		fi
+		case $name in
+		*.*) attrs+="${attrs:+,}$(js "$name"):$(js "$value")" ;;
+		*) fields+="${fields:+,}$(js "$name"):$value" ;;
+		esac
+		flows+="${flows:+; }$name ${have:-unset} -> $value"
+	done
+	if [ -n "$flows" ]; then
+		# A merge, as below: what is named changes, nothing else.
+		body="{${fields}${fields:+${attrs:+,}}${attrs:+\"attributes\":{$attrs}}}"
+		printf '%s' "$body" | kc update "clients/$id" -r "$realm" -f - -m ||
+			fail "cannot set how the client $client signs in: $(why)"
+		echo "realm-config: $client: $flows"
+		set_flows+=("$client")
 	fi
 
 	want="$(sorted "$redirects" ' ')
@@ -141,7 +197,7 @@ $(sorted "$have_origins" ',')
 --
 $(sorted "$have_logout" '##')"
 	if [ "$want" = "$have" ]; then
-		same+=("$client")
+		[ -n "$flows" ] || same+=("$client")
 		continue
 	fi
 
@@ -191,7 +247,9 @@ if [ -n "${MASTER_FRONTEND_URL+set}" ]; then
 fi
 
 summary=""
-[ ${#set_clients[@]} -eq 0 ] || summary+="set the redirects of ${set_clients[*]}"
+[ ${#made[@]} -eq 0 ] || summary+="made ${made[*]}"
+[ ${#set_clients[@]} -eq 0 ] || summary+="${summary:+; }set the redirects of ${set_clients[*]}"
+[ ${#set_flows[@]} -eq 0 ] || summary+="${summary:+; }set the sign-in flows of ${set_flows[*]}"
 [ ${#same[@]} -eq 0 ] || summary+="${summary:+; }already so: ${same[*]}"
 [ ${#missing[@]} -eq 0 ] || summary+="${summary:+; }not in realm $realm: ${missing[*]}"
 [ -z "$demo" ] || summary+="${summary:+; }$demo"

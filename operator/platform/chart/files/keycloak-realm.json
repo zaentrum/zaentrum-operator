@@ -304,7 +304,7 @@
     {
       "clientId": "chino-tv",
       "name": "Chino TV",
-      "description": "Living-room / TV client for the chino product. OAuth 2.0 Device Authorization Grant (no browser on device). Public client. Tokens carry aud=chino.",
+      "description": "Living-room / TV client for the chino product. OAuth 2.0 Device Authorization Grant with PKCE (S256), no browser on the device; no redirect. Public client. Tokens carry aud=chino.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
@@ -348,7 +348,7 @@
     {
       "clientId": "chino-mobile",
       "name": "Chino Mobile",
-      "description": "Phone / tablet client for the chino product. Authorization Code + PKCE (S256) via the system browser, plus the OAuth 2.0 Device Authorization Grant. Public client. Tokens carry aud=chino.",
+      "description": "Phone / tablet client for the chino product. Authorization Code + PKCE (S256) via the system browser, returning to cloud.nalet.chino:/oauth/callback; no device grant. Public client. Tokens carry aud=chino.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
@@ -362,7 +362,7 @@
       "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "oauth2.device.authorization.grant.enabled": "true",
+        "oauth2.device.authorization.grant.enabled": "false",
         "post.logout.redirect.uris": "+"
       },
       "defaultClientScopes": [

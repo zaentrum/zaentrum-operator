@@ -433,15 +433,16 @@ copy, no condition.
 ### Sign-in redirects, and the realm Job
 
 The clients people sign in through return only to the platform's own origins
-— derived from `hostname` and the routing (`z.realmClients`):
+— derived from `hostname` and the routing (`z.realmClients`) — and allow only
+the flows their apps use, each a public client with PKCE (S256):
 
-| Client | Redirect URIs | Post-logout |
-|---|---|---|
-| `chino-web` | `<origin>/auth/callback` | `<origin>` |
-| `zaentrum-web` | `<origin>/portal/`, `/katalog/`, `/katalog-manage/` + `auth/callback` | `<origin>` + those bases |
-| `chino-mobile` | `cloud.nalet.chino:/oauth/callback` | its redirect |
-| `chino-tv` | none (device grant) | |
-| `zae` | `http://127.0.0.1/*`, `http://localhost/*` | its redirects |
+| Client | Who signs in | Flows | Redirect URIs | Post-logout |
+|---|---|---|---|---|
+| `chino-web` | the web app | code, device | `<origin>/auth/callback` | `<origin>` |
+| `zaentrum-web` | the portal and the catalog consoles | code | `<origin>/portal/`, `/katalog/`, `/katalog-manage/` + `auth/callback` | `<origin>` + those bases |
+| `chino-mobile` | the phone and tablet apps | code | `cloud.nalet.chino:/oauth/callback` | its redirect |
+| `chino-tv` | the Android TV and Tizen apps | device | none | |
+| `zae` | the command line | code, device | `http://127.0.0.1/*`, `http://localhost/*` | its redirects |
 
 The apps learn which client is theirs from chino-api's `GET /api/config`
 (`oidcClientId.web`, `.tv`, `.mobile`, `.portal`) and use chino-api's default,
@@ -463,9 +464,13 @@ so the operator runs the chart's realm Job, `zaentrum-realm-<suffix>`
 (`templates/realm.yaml`, `files/realm-config.sh`), whenever what it sets
 changes — and once a day besides, as a run's Job is kept a day — while Keycloak
 is available, never beside a verification run. It sets exactly those lists
-with `kcadm`, nothing else of a client, and leaves alone what is already so.
-`RealmConfigured` reports its summary, or why it failed; a failed run is tried
-again after ten minutes.
+and the flows above with `kcadm` — public, which of the authorization code,
+the implicit flow, the password grant and the device grant are on, and the
+PKCE method, each as the realm import has it — nothing else of a client, and
+leaves alone what is already so. A client the realm lacks, one imported before
+the chart had it or deleted since, it makes from the realm import's own
+representation. `RealmConfigured` reports its summary, or why it failed; a
+failed run is tried again after ten minutes.
 
 The same run retires a password every bundled install once shared: a realm
 imported without Secret `zaentrum-demo-user` gave its `demo` user the

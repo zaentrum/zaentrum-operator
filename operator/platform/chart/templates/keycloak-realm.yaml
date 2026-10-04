@@ -14,17 +14,9 @@
 # URIs, web origins and post-logout redirect URIs (z.realmClients, derived from
 # global.hostname and the routing); files/keycloak-realm.json leaves them empty.
 # An import only ever makes a new realm, so the realm Job (realm.yaml) writes
-# the same values into one that already exists.
-{{- $realm := .Files.Get "files/keycloak-realm.json" | fromJson }}
-{{- $want := include "z.realmClients" . | fromJson }}
-{{- range $client := $realm.clients }}
-{{- with index $want $client.clientId }}
-{{- $_ := set $client "redirectUris" .redirectUris }}
-{{- $_ := set $client "webOrigins" .webOrigins }}
-{{- if not $client.attributes }}{{ $_ := set $client "attributes" dict }}{{ end }}
-{{- range $k, $v := .attributes }}{{ $_ := set $client.attributes $k $v }}{{ end }}
-{{- end }}
-{{- end }}
+# the same values, and the flows each client allows, into one that already
+# exists, and makes a client it lacks from this same import (z.realmImport).
+{{- $realm := include "z.realmImport" . | fromJson }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
