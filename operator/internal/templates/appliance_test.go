@@ -3,6 +3,7 @@ package templates
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,8 @@ import (
 )
 
 // The Zaentrum the appliance boots (deploy/allinone/manifests/20-zaentrum.yaml,
-// a copy of config/samples) makes a fresh box's titles playable: the media
+// config/samples on the edge channel: main's appliance runs operator:latest and
+// the latest images with it) makes a fresh box's titles playable: the media
 // pipeline runs, on the CPU, and nothing waits for a GPU the box has not got.
 // What its pods ask for fits a machine of four cores and 8 GiB beside k3s,
 // Traefik, CoreDNS and the platform's own Jobs, which keep a core and 2 GiB:
@@ -29,7 +31,10 @@ func TestTheAppliancesZaentrumFitsAPlainBox(t *testing.T) {
 	require.NoError(t, yaml.UnmarshalStrict(raw, &z))
 	sample, err := os.ReadFile("../../config/samples/zaentrum_v1alpha1_zaentrum.yaml")
 	require.NoError(t, err)
-	assert.Equal(t, string(sample), string(raw), "the appliance boots the sample (build.sh render)")
+	onEdge := strings.Replace(string(sample), "\n  channel: stable\n", "\n  channel: edge\n", 1)
+	require.NotEqual(t, string(sample), onEdge, "the sample names no channel: stable to move to edge")
+	assert.Equal(t, onEdge, string(raw), "the appliance boots the sample on edge (build.sh render)")
+	assert.Equal(t, zaentrumv1alpha1.ChannelEdge, z.Spec.Channel)
 	// The API server's defaults for what the file leaves out.
 	if z.Spec.Identity.Mode == "" {
 		z.Spec.Identity.Mode = zaentrumv1alpha1.IdentityBundled
