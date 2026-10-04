@@ -430,6 +430,55 @@ and the Postgres follow the volume to its node.
 With `databases.mode: external` the databases are the tenant's: no claim, no
 copy, no condition.
 
+### The platform's certificate (`spec.tls`)
+
+```yaml
+spec:
+  hostname: media.example.org
+  tls:
+    secretName: zaentrum-tls         # default; kubernetes.io/tls: tls.crt, tls.key (ca.crt)
+    issuerRef:                       # optional: cert-manager issues it into that Secret
+      name: letsencrypt
+      kind: ClusterIssuer            # Issuer (default) | ClusterIssuer
+```
+
+With `spec.tls` the platform serves its hosts — `hostname`, and in subdomains
+routing `routing.hosts.chino` — over https with a certificate of its own, and
+every URL it derives is https: the issuer, Keycloak's `KC_HOSTNAME`, the
+sign-in redirects (the realm Job writes them), the public URL its checks
+use. That holds whatever `identity.issuerScheme` says, which keeps its
+default, `http`, for an install without TLS.
+
+- **A Secret you bring.** The Ingresses' `tls` name it. OpenShift Routes
+  cannot name a Secret: the operator reads it every pass and the Routes carry
+  it inline, edge-terminated as before; a renewed certificate reaches them on
+  the next pass. (Anyone who may read the namespace's Routes may read the key
+  there, as with any Route that carries its own certificate.)
+- **cert-manager.** With `issuerRef`, where the cluster serves cert-manager's
+  API, the chart renders a `Certificate` named `zaentrum` for the hosts, and
+  cert-manager writes and renews the Secret. The operator's ClusterRole holds
+  `cert-manager.io/certificates`; `deploy/operator-install.yaml` gains the rule
+  with its next re-pin.
+
+Keep `network.issuerHostAliasIP` (or a DNS entry) pointing the hostname at the
+ingress from inside the cluster, so the services validating tokens reach the
+https issuer; they trust the public certificate authorities their images
+carry, so use a certificate from one — as the phone and TV apps only trust
+those too.
+
+The `TLS` condition says how the hosts are served, and never moves the phase:
+
+| Reason | | |
+|---|---|---|
+| `Certificate` | True | the platform's certificate, for every host, valid until the date it names |
+| `Router` | True | no `spec.tls`; the OpenShift Routes, with the router's certificate and an https issuer |
+| `TerminatedInFront` | True | no `spec.tls`; `identity.issuerScheme: https`, TLS ends in a proxy in front |
+| `Issuing` | Unknown | cert-manager has not written the Secret yet; what cert-manager says |
+| `PlainHTTP` | False | plain http: a browser signs in only on a `localhost` name, phones and TVs not at all |
+| `IssuerSchemeHTTP` | False | Routes serve https, but the issuer is http |
+| `SecretMissing`, `BadCertificate`, `WrongHost`, `Expired` | False | no Secret, no certificate or key in it, one for another host, one past its date |
+| `NoCertManager` | False | an `issuerRef`, and no cert-manager in the cluster |
+
 ### Backups of the bundled Postgres (`spec.backup`)
 
 ```yaml

@@ -62,7 +62,9 @@ Sign-in needs **https** everywhere but on the machine itself. Keycloak marks its
 `http://<lan-ip>` Keycloak answers the login form with "Cookie not found" — and the Android
 phone and TV apps refuse plain http altogether and trust public certificate authorities only.
 The appliance serves plain http at `zaentrum.localhost`, so it is for the machine it runs on.
-For other devices, run the operator on a cluster under a real hostname with TLS
+For other devices, give the appliance a name and a certificate
+([how](deploy/allinone/README.md#phones-and-tvs-a-name-and-a-certificate)), or run the operator
+on a cluster under a real hostname with TLS
 ([self-hosting](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#b-self-host-with-the-operator),
 [troubleshooting](https://github.com/zaentrum/zaentrum/blob/main/docs/troubleshooting.md#8-sign-in-fails-over-plain-http-cookie-not-found)).
 
@@ -109,8 +111,10 @@ the operator, `helm install` the chart it renders,
 [`operator/platform/chart`](operator/platform/chart).
 
 `spec.hostname` is the name the platform answers at: the operator derives the OIDC issuer,
-Keycloak's `KC_HOSTNAME` and the Ingress host from it. Serve that name over https — TLS
-terminated in front of the Ingress, `identity.issuerScheme: https`, and
+Keycloak's `KC_HOSTNAME` and the Ingress host from it. Serve that name over https — with
+`spec.tls`, a certificate Secret or a cert-manager issuer
+([the platform's certificate](operator/README.md#the-platforms-certificate-spectls)), or TLS
+terminated in front of the Ingress and `identity.issuerScheme: https` — and
 `network.issuerHostAliasIP` so in-cluster token validation reaches the https issuer. A minimal
 resource and every field:
 [self-hosting](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#b-self-host-with-the-operator),

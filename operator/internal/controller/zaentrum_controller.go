@@ -150,12 +150,21 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if restoreDump != "" {
 		db.start = false
 	}
+	// The platform's own certificate (spec.tls): cert-manager issues it where it
+	// is there, and the Routes, which cannot name a Secret, carry it inline
+	// (tls.go). A Secret that cannot be read defers the render rather than
+	// strip the Routes of the certificate they have.
+	tlsSecret, issuing, err := r.platformCertificate(ctx, &z)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("read the platform's certificate: %w", err)
+	}
 	vals := templates.NewValues(&z)
 	vals.OpenShift = openShift
 	vals.Version = decision.RenderTag
 	vals.PostgresVolume = db.volume
 	vals.PostgresMigrate = db.migrate
 	vals.RestoreDump = restoreDump
+	certificateValues(&vals, &z, tlsSecret, issuing)
 	rendered, err := templates.Render(vals)
 	if err != nil {
 		r.setApplied(&z, metav1.ConditionFalse, "RenderFailed", err.Error())
@@ -225,6 +234,7 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// stopped, and the backups are read.
 	restoreInFlight := r.stepRestore(ctx, &z, objs, tests)
 	r.reportBackups(ctx, &z, objs)
+	r.reportTLS(ctx, &z, tlsSecret, issuing)
 
 	// Refresh component readiness from the live Deployments and roll status up.
 	allReady, err := r.refreshComponents(ctx, &z, objs)

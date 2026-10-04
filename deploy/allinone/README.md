@@ -35,8 +35,9 @@ by another name (`http://localhost`, the machine's IP) and the pages answer
 plain http on `localhost` names alone: Keycloak marks its login cookies
 `Secure`, which a browser keeps over http only for `localhost`. A phone, a TV or
 another computer cannot sign in to it — and the Android phone and TV apps
-refuse plain http outright. For other devices, run the operator on a cluster
-under a real hostname with https
+refuse plain http outright. For other devices, give the appliance a name and a
+certificate ([below](#phones-and-tvs-a-name-and-a-certificate)), or run the
+operator on a cluster under a real hostname with https
 ([self-hosting](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#b-self-host-with-the-operator)).
 
 ### Why `--privileged`?
@@ -115,6 +116,71 @@ docker exec zaentrum kubectl -n zaentrum patch zaentrum zaentrum --type merge \
 Once Keycloak has restarted, the realm's own console is
 <http://zaentrum.localhost/auth/admin/zaentrum/console/>, for the realm's
 `admin`.
+
+## Phones and TVs: a name and a certificate
+
+What another device needs is the platform under a name that resolves to this
+machine, served over https with a certificate it trusts — the Android apps
+trust public certificate authorities only — on port 443. Five steps.
+
+1. **A name and a certificate.** A DNS name you control, `media.example.org`
+   here, that resolves to this machine on your network and on the machine
+   itself. A certificate for it from a public authority, such as Let's Encrypt
+   through a DNS-01 challenge, which needs nothing of the box to be reachable
+   from the internet: the chain (`fullchain.pem`) and its key (`privkey.pem`).
+2. **Port 443 and the name inside the cluster.** Docker publishes a port only
+   when it creates a container, and the entrypoint writes the in-cluster DNS
+   entry for the platform's name (the CoreDNS rewrite that lets the services
+   validate tokens against the https issuer) from `STUBE_ISSUER_HOST` when the
+   container starts. So the container is created anew — which keeps the
+   platform only when it runs on a named volume with a fixed host name
+   ([persistence](#persistence)). An appliance that does not starts empty
+   then: copy the library, the backups and the platform's Secrets off it
+   first, and bring them into the new one
+   ([restoring](../../operator/README.md#backups-of-the-bundled-postgres-specbackup)).
+   On such a volume:
+
+   ```bash
+   docker rm -f zaentrum
+   docker run -d --privileged --restart unless-stopped --name zaentrum -h zaentrum \
+     -p 80:80 -p 443:443 -e STUBE_ISSUER_HOST=media.example.org \
+     -v zaentrum:/var/lib/rancher/k3s ghcr.io/zaentrum/appliance:latest
+   ```
+
+   k3s's Traefik takes 443 as it takes 80.
+3. **The certificate, as a Secret** in the platform's namespace:
+
+   ```bash
+   docker cp fullchain.pem zaentrum:/tmp/tls.crt
+   docker cp privkey.pem zaentrum:/tmp/tls.key
+   docker exec zaentrum sh -c 'kubectl -n zaentrum create secret tls zaentrum-tls \
+     --cert=/tmp/tls.crt --key=/tmp/tls.key && rm /tmp/tls.crt /tmp/tls.key'
+   ```
+4. **The platform on that name, with it**
+   ([`spec.tls`](../../operator/README.md#the-platforms-certificate-spectls)):
+
+   ```bash
+   docker exec zaentrum kubectl -n zaentrum patch zaentrum zaentrum --type merge \
+     -p '{"spec":{"hostname":"media.example.org","tls":{"secretName":"zaentrum-tls"}}}'
+   docker exec zaentrum kubectl -n zaentrum get zaentrum zaentrum \
+     -o jsonpath='{.status.conditions[?(@.type=="TLS")].message}'; echo
+   ```
+
+   The Ingress answers `media.example.org` with the certificate; the issuer,
+   Keycloak's hostname and the sign-in redirects become
+   `https://media.example.org` (the realm Job writes the redirects into the
+   realm), and the TLS condition reads "media.example.org served over https
+   with the certificate in Secret zaentrum-tls, valid until …". It no longer
+   answers `zaentrum.localhost`, and everyone signs in again, once.
+5. **The apps.** In the phone or TV app, add the server
+   `https://media.example.org`; the apps learn their clients from it.
+
+Renew by replacing the Secret the same way (`kubectl create secret tls …
+--dry-run=client -o yaml | kubectl apply -f -`); the ingress serves the new
+certificate at once. k3s applies `20-zaentrum.yaml` again when that file
+changes — as when you copy a newer image's manifests into the volume — and so
+puts its `hostname`, `zaentrum.localhost`, back: patch again after (the TLS
+condition says `WrongHost` meanwhile).
 
 ## Persistence
 
