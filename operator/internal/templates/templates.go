@@ -105,6 +105,10 @@ func (v Values) chartValues() map[string]interface{} {
 	for name, n := range spec.Replicas {
 		services[name] = map[string]interface{}{"replicas": int(n)}
 	}
+	languages := make([]interface{}, 0, len(spec.Pipeline.PreferredLanguages))
+	for _, l := range spec.Pipeline.PreferredLanguages {
+		languages = append(languages, l)
+	}
 	return map[string]interface{}{
 		"global": map[string]interface{}{
 			"version":          v.Version,
@@ -127,6 +131,14 @@ func (v Values) chartValues() map[string]interface{} {
 			"kafka":    spec.Features.Kafka,
 			"gpu":      spec.Features.GPU,
 			"pipeline": spec.Features.Pipeline,
+		},
+		"pipeline": map[string]interface{}{
+			"encoder":            orDefault(spec.Pipeline.Encoder, "gpu"),
+			"ladder":             spec.Pipeline.Ladder,
+			"segmentSeconds":     int(spec.Pipeline.SegmentSeconds),
+			"surroundAudio":      spec.Pipeline.SurroundAudio,
+			"hlsSubtitles":       spec.Pipeline.HLSSubtitles,
+			"preferredLanguages": languages,
 		},
 		"storage": map[string]interface{}{
 			"mediaSize":       mediaSize,

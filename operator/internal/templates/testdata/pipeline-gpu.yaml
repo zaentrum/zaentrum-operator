@@ -1,0 +1,321 @@
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    labels:
+      app: analyzer
+      app.kubernetes.io/part-of: zaentrum-demo
+      component: pipeline
+      plane: worker
+    name: analyzer
+    namespace: zaentrum-demo
+  spec:
+    replicas: 1
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        app: analyzer
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          app: analyzer
+          app.kubernetes.io/part-of: zaentrum-demo
+          component: pipeline
+          plane: worker
+      spec:
+        containers:
+        - env:
+          - name: KATALOG_API_URL
+            value: http://katalog-manager-api
+          - name: OIDC_TOKEN_URL
+            value: http://keycloak/auth/realms/zaentrum/protocol/openid-connect/token
+          - name: OIDC_CLIENT_ID
+            value: zaentrum-manager
+          - name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                key: client-secret
+                name: zaentrum-keycloak
+          - name: KAFKA_BROKERS
+            value: kafka:9092
+          - name: KAFKA_TOPIC_PREFIX
+            value: stube.
+          - name: KAFKA_GROUP_ID
+            value: analyzer-workers
+          - name: CONSUME_TOPIC
+            value: stube.catalog.item.enriched
+          - name: PRODUCE_TOPIC
+            value: stube.catalog.item.analyzed
+          - name: CLAIM_BATCH_SIZE
+            value: "2"
+          - name: IDLE_SLEEP_SECONDS
+            value: "20"
+          - name: TIDB_FIRST_CLAIM_INTERVAL_SECONDS
+            value: "0.25"
+          - name: TIDB_FIRST_BATCH_SIZE
+            value: "4"
+          - name: ENABLE_WHISPER
+            value: "false"
+          image: ghcr.io/zaentrum/analyzer:latest
+          imagePullPolicy: Always
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+          name: app
+          ports:
+          - containerPort: 8080
+            name: http
+            protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: "4"
+              memory: 4Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+          - mountPath: /var/lib/katalog
+            name: katalog-data
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        volumes:
+        - name: katalog-data
+          persistentVolumeClaim:
+            claimName: media
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    labels:
+      app: packager
+      app.kubernetes.io/part-of: zaentrum-demo
+      component: pipeline
+      plane: worker
+    name: packager
+    namespace: zaentrum-demo
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: packager
+    strategy:
+      rollingUpdate:
+        maxSurge: 25%
+        maxUnavailable: 25%
+      type: RollingUpdate
+    template:
+      metadata:
+        labels:
+          app: packager
+          app.kubernetes.io/part-of: zaentrum-demo
+          component: pipeline
+          plane: worker
+      spec:
+        containers:
+        - env:
+          - name: KATALOG_API_URL
+            value: http://katalog-manager-api
+          - name: OIDC_TOKEN_URL
+            value: http://keycloak/auth/realms/zaentrum/protocol/openid-connect/token
+          - name: OIDC_CLIENT_ID
+            value: zaentrum-manager
+          - name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                key: client-secret
+                name: zaentrum-keycloak
+          - name: KAFKA_BROKERS
+            value: kafka:9092
+          - name: KAFKA_TOPIC_PREFIX
+            value: stube.
+          - name: KAFKA_GROUP_ID
+            value: packager-workers
+          - name: CONSUME_TOPIC
+            value: stube.catalog.item.transcoded
+          - name: CLAIM_BATCH_SIZE
+            value: "1"
+          - name: IDLE_SLEEP_SECONDS
+            value: "30"
+          image: ghcr.io/zaentrum/packager:latest
+          imagePullPolicy: Always
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+          name: app
+          ports:
+          - containerPort: 8080
+            name: http
+            protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: "4"
+              memory: 4Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+          - mountPath: /var/lib/katalog
+            name: katalog-data
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        volumes:
+        - name: katalog-data
+          persistentVolumeClaim:
+            claimName: media
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    labels:
+      app: transcoder
+      app.kubernetes.io/part-of: zaentrum-demo
+      component: pipeline
+      plane: worker
+    name: transcoder
+    namespace: zaentrum-demo
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: transcoder
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          app: transcoder
+          app.kubernetes.io/part-of: zaentrum-demo
+          component: pipeline
+          plane: worker
+      spec:
+        containers:
+        - env:
+          - name: KATALOG_API_URL
+            value: http://katalog-manager-api
+          - name: OIDC_TOKEN_URL
+            value: http://keycloak/auth/realms/zaentrum/protocol/openid-connect/token
+          - name: OIDC_CLIENT_ID
+            value: zaentrum-manager
+          - name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                key: client-secret
+                name: zaentrum-keycloak
+          - name: KAFKA_BROKERS
+            value: kafka:9092
+          - name: KAFKA_TOPIC_PREFIX
+            value: stube.
+          - name: KAFKA_GROUP_ID
+            value: transcoder-workers
+          - name: CONSUME_TOPIC
+            value: stube.catalog.item.analyzed
+          - name: PRODUCE_TOPIC
+            value: stube.catalog.item.transcoded
+          - name: CLAIM_BATCH_SIZE
+            value: "1"
+          - name: IDLE_SLEEP_SECONDS
+            value: "30"
+          - name: NVENC_PRESET
+            value: p5
+          - name: NVENC_CQ
+            value: "23"
+          - name: NVENC_MAXRATE_1080P_MBPS
+            value: "8"
+          - name: NVENC_MAXRATE_2160P_MBPS
+            value: "14"
+          - name: LD_LIBRARY_PATH
+            value: /usr/local/nvidia/lib64:/usr/local/nvidia/lib
+          image: ghcr.io/zaentrum/transcoder:latest
+          imagePullPolicy: Always
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+          name: app
+          ports:
+          - containerPort: 8080
+            name: http
+            protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+            requests:
+              cpu: "1"
+              memory: 2Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+          - mountPath: /var/lib/katalog
+            name: katalog-data
+        nodeSelector:
+          nvidia.com/gpu.present: "true"
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        volumes:
+        - name: katalog-data
+          persistentVolumeClaim:
+            claimName: media

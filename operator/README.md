@@ -430,6 +430,42 @@ and the Postgres follow the volume to its node.
 With `databases.mode: external` the databases are the tenant's: no claim, no
 copy, no condition.
 
+### The media pipeline (`spec.pipeline`)
+
+`features.pipeline` runs the workers that make a title playable everywhere:
+the analyzer, the transcoder, the packager and katalog-ingest. `spec.pipeline`
+says how:
+
+```yaml
+spec:
+  features: { pipeline: true }
+  pipeline:
+    encoder: gpu               # gpu | cpu
+    ladder: ""                 # e.g. "source,720p" (the transcoder's LADDER)
+    segmentSeconds: 6          # 1..30 (SEGMENT_SECONDS of both workers)
+    surroundAudio: "off"       # off | eac3 | ac3
+    hlsSubtitles: false
+    preferredLanguages: []     # e.g. [de, en]
+```
+
+| Field | Default | |
+|---|---|---|
+| `encoder` | `gpu` | `gpu`: NVENC — the transcoder asks for `nvidia.com/gpu: 1` and is placed on a node labelled `nvidia.com/gpu.present=true`, tolerating the GPU taint, as before this field existed. `cpu`: libx264/libx265 on any node, no GPU asked for, tolerated or looked for, the transcoder asking for 500m CPU and 1Gi (limits 4 CPUs, 8Gi) |
+| `ladder` | one rendition a title | extra renditions, `<source\|NNNp>[:<hevc\|h264>][:<maxrate>]` separated by commas; checked by the CRD, as the transcoder would refuse a typo at its start |
+| `segmentSeconds` | the workers' 6 | the HLS segment length and the transcoder's keyframe interval |
+| `surroundAudio` | off | a 5.1 rendition beside each surround track's stereo one; leave it off until chino-stream keeps it from players that cannot decode it |
+| `hlsSubtitles` | false | name the WebVTT renditions in the HLS master; the clients draw the sidecars themselves |
+| `preferredLanguages` | the catalog's language list | the order the default audio track is picked in |
+
+An empty field is not passed on, so each worker keeps its own default and an
+install that sets nothing renders its workers exactly as before. Either
+encoder passes through a source the clients play as it is — HEVC, or H.264 a
+browser decodes (8-bit 4:2:0, up to High) — which costs a remux. Anything else
+(MPEG-2, VC-1, AV1, 10-bit H.264) is an encode: minutes on NVENC, hours a
+title with x265 on a few cores, one title at a time. The packaged streams live
+beside the library on the `media` volume, about as large again as what they
+were made from, and more with a ladder.
+
 ### Sign-in redirects, and the realm Job
 
 The clients people sign in through return only to the platform's own origins
