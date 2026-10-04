@@ -106,6 +106,7 @@ func TestDecide(t *testing.T) {
 		spec          string
 		auto          bool
 		channel       string
+		current       string // status.currentVersion: what the last pass rendered
 		wantRender    string
 		wantAvailable string
 		wantApplied   bool
@@ -115,22 +116,68 @@ func TestDecide(t *testing.T) {
 			spec:       "v1.0.0",
 			auto:       true,
 			channel:    "v2.0.0",
+			current:    "v0.9.0",
 			wantRender: "v1.0.0",
 		},
 		{
-			name:          "manual surfaces newer channel target",
+			// The reference demo's case: it ran latest before stable named a
+			// release, and manual mode does not move it — it is told.
+			name:          "manual keeps an install on latest and surfaces the release",
 			spec:          "latest",
 			auto:          false,
 			channel:       "v2.0.0",
+			current:       "latest",
 			wantRender:    "latest",
 			wantAvailable: "v2.0.0",
+		},
+		{
+			name:       "manual starts a new install on the channel's release",
+			spec:       "latest",
+			auto:       false,
+			channel:    "v2.0.0",
+			current:    "",
+			wantRender: "v2.0.0",
+		},
+		{
+			name:       "manual starts a new install with no spec.version on the release",
+			spec:       "",
+			auto:       false,
+			channel:    "v2.0.0",
+			wantRender: "v2.0.0",
+		},
+		{
+			name:          "manual holds a release install when the channel moves on",
+			spec:          "latest",
+			auto:          false,
+			channel:       "v2.1.0",
+			current:       "v2.0.0",
+			wantRender:    "v2.0.0",
+			wantAvailable: "v2.1.0",
+		},
+		{
+			name:       "manual on the channel's own release surfaces nothing",
+			spec:       "latest",
+			auto:       false,
+			channel:    "v2.0.0",
+			current:    "v2.0.0",
+			wantRender: "v2.0.0",
 		},
 		{
 			name:        "auto rolls channel target this pass",
 			spec:        "latest",
 			auto:        true,
 			channel:     "v2.0.0",
+			current:     "latest",
 			wantRender:  "v2.0.0",
+			wantApplied: true,
+		},
+		{
+			name:        "auto rolls a release install to the next release",
+			spec:        "",
+			auto:        true,
+			channel:     "v2.1.0",
+			current:     "v2.0.0",
+			wantRender:  "v2.1.0",
 			wantApplied: true,
 		},
 		{
@@ -138,6 +185,17 @@ func TestDecide(t *testing.T) {
 			spec:       "latest",
 			auto:       false,
 			channel:    "latest",
+			current:    "latest",
+			wantRender: "latest",
+		},
+		{
+			// edge serves the moving latest: there is no release on it to
+			// hold an install at, so manual follows it as auto does.
+			name:       "manual follows a channel on latest",
+			spec:       "latest",
+			auto:       false,
+			channel:    "latest",
+			current:    "v2.0.0",
 			wantRender: "latest",
 		},
 		{
@@ -164,10 +222,27 @@ func TestDecide(t *testing.T) {
 			channel:    "",
 			wantRender: "latest",
 		},
+		{
+			// A network blip must not move a release install over to latest.
+			name:       "discovery failed keeps a release install on its release",
+			spec:       "latest",
+			auto:       false,
+			channel:    "",
+			current:    "v2.0.0",
+			wantRender: "v2.0.0",
+		},
+		{
+			name:       "discovery failed in auto keeps a release install on its release",
+			spec:       "",
+			auto:       true,
+			channel:    "",
+			current:    "v2.0.0",
+			wantRender: "v2.0.0",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := Decide(tt.spec, tt.auto, tt.channel)
+			d := Decide(tt.spec, tt.auto, tt.channel, tt.current)
 			if d.RenderTag != tt.wantRender {
 				t.Errorf("RenderTag = %q, want %q", d.RenderTag, tt.wantRender)
 			}
@@ -178,6 +253,44 @@ func TestDecide(t *testing.T) {
 				t.Errorf("Applied = %v, want %v", d.Applied, tt.wantApplied)
 			}
 		})
+	}
+}
+
+// The front door's releases.json once a release is out: stable names the
+// release's tag, edge stays on the moving latest. A new install renders what
+// its channel serves, in either update mode — stable the release, not latest.
+func TestStableResolvesTheReleaseAndEdgeLatest(t *testing.T) {
+	const doc = `{
+	  "channels": { "stable": "v0.1.0", "edge": "latest" },
+	  "versions": {
+	    "v0.1.0": { "released": "2026-10-04", "notes": "the first tagged release" },
+	    "latest": { "notes": "the newest build of main" }
+	  }
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(doc))
+	}))
+	defer srv.Close()
+
+	rel, err := Client{HTTP: srv.Client()}.Fetch(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	stable, err := rel.Resolve("stable")
+	if err != nil || stable != "v0.1.0" {
+		t.Fatalf("Resolve(stable) = %q, %v; want v0.1.0", stable, err)
+	}
+	edge, err := rel.Resolve("edge")
+	if err != nil || edge != Latest {
+		t.Fatalf("Resolve(edge) = %q, %v; want %s", edge, err, Latest)
+	}
+	for _, auto := range []bool{false, true} {
+		if got := Decide("latest", auto, stable, "").RenderTag; got != "v0.1.0" {
+			t.Errorf("a new install on stable (auto=%v) renders %q, want v0.1.0", auto, got)
+		}
+		if got := Decide("latest", auto, edge, "").RenderTag; got != Latest {
+			t.Errorf("a new install on edge (auto=%v) renders %q, want %s", auto, got, Latest)
+		}
 	}
 }
 

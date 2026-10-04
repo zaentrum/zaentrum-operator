@@ -392,6 +392,8 @@ func TestReconcileWritesTheControllerReport(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "zaentrum", Namespace: "zaentrum", UID: "z-uid", Generation: 3},
 	}
 	z.Spec.Features.Kafka = true
+	// An install that already runs: manual mode holds it where it is.
+	z.Status.CurrentVersion = "latest"
 
 	s := selfScheme(t)
 	c := fake.NewClientBuilder().
@@ -423,8 +425,8 @@ func TestReconcileWritesTheControllerReport(t *testing.T) {
 		"the channel the platform reads is the channel the controller is measured against")
 
 	// The platform's own status is what it always was: the report sits beside
-	// it, not on top of it. Manual mode still renders "latest" and surfaces the
-	// channel target as the PLATFORM's available update.
+	// it, not on top of it. Manual mode keeps the install on the "latest" it
+	// runs and surfaces the channel target as the PLATFORM's available update.
 	assert.Equal(t, "latest", got.Status.CurrentVersion)
 	assert.Equal(t, "v9", got.Status.AvailableUpdate)
 	assert.Equal(t, int64(3), got.Status.ObservedGeneration)
