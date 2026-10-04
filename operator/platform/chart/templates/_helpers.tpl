@@ -190,6 +190,50 @@ install, or `helm template` — the claim.
 {{- $volume -}}
 {{- end -}}
 
+{{/*
+z.backupEnabled — "true" when the bundled Postgres is backed up:
+backup.enabled, else wherever it keeps its data on a claim (z.postgresVolume)
+— a new install — and not on an emptyDir. Empty with external databases.
+*/}}
+{{- define "z.backupEnabled" -}}
+{{- if ne .Values.databases.mode "external" -}}
+{{- $on := .Values.backup.enabled -}}
+{{- if kindIs "invalid" $on -}}{{- $on = ne (include "z.postgresVolume" .) "emptyDir" -}}{{- end -}}
+{{- if $on -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* z.backupClaim — the claim the dumps are kept on. */}}
+{{- define "z.backupClaim" -}}
+{{- .Values.backup.claimName | default "backups" -}}
+{{- end -}}
+
+{{/* z.restoring — the dump a restore restores the bundled Postgres from this
+     render, or nothing. While it does, every client of the database is
+     stopped (z.replicas "db") and no backup starts. */}}
+{{- define "z.restoring" -}}
+{{- if ne .Values.databases.mode "external" -}}{{ .Values.backup.restore }}{{- end -}}
+{{- end -}}
+
+{{/* z.platformDatabases — the platform's databases, space-separated. */}}
+{{- define "z.platformDatabases" -}}
+{{- with .Values.databases -}}{{ .chino }} {{ .katalog }} {{ .keycloak }} {{ .portal }}{{- end -}}
+{{- end -}}
+
+{{/* z.backupSecurity — the pod securityContext of the backup and restore
+     Jobs: z.podSecurity, and off OpenShift the group 65532 owns what they
+     write, for a volume whose root it would not be. */}}
+{{- define "z.backupSecurity" -}}
+securityContext:
+  runAsNonRoot: true
+{{- if not (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}
+  runAsUser: 65532
+  fsGroup: 65532
+{{- end }}
+  seccompProfile:
+    type: RuntimeDefault
+{{- end -}}
+
 {{/* z.partOf — the app.kubernetes.io/part-of label value. */}}
 {{- define "z.partOf" -}}{{ .Values.global.partOf }}{{- end -}}
 
@@ -197,6 +241,10 @@ install, or `helm template` — the claim.
 z.replicas — per-service replica count from .Values.services.<name>.replicas,
 falling back to a default. (Avoids Sprig `dig`, which rejects the typed
 chartutil.Values.) Use: replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-api" "def" 1) }}
+"db" true marks a service of the bundled Postgres's — one with a session in a
+database, a reader as much as a writer, or one that writes through
+katalog-manager-api: while a restore recreates the databases (z.restoring),
+which no session may hold, it is 0.
 */}}
 {{- define "z.replicas" -}}
 {{- $r := .def -}}
@@ -205,6 +253,7 @@ chartutil.Values.) Use: replicas: {{ include "z.replicas" (dict "root" $ "name" 
 {{- $svc := index $svcs .name -}}
 {{- if $svc -}}{{- $r = ($svc.replicas | default .def) -}}{{- end -}}
 {{- end -}}
+{{- if and .db (include "z.restoring" .root) -}}{{- $r = 0 -}}{{- end -}}
 {{- $r -}}
 {{- end -}}
 

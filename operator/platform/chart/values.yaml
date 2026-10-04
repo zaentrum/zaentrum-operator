@@ -76,6 +76,22 @@ storage:
     # (spec.storage.postgres.migrate).
     migrate: false
 
+# Backups of the bundled Postgres (templates/backup.yaml): a CronJob dumps every
+# platform database (databases.*) into the claim backups, with a checksum of
+# each file, and keeps the newest `retention` dumps.
+backup:
+  enabled: null            # null: on wherever the bundled Postgres keeps its data on a claim
+  schedule: "@daily"
+  retention: 7
+  size: 5Gi
+  className: ""            # empty: the Postgres's (storage.postgres.className, else storage.className)
+  claimName: ""            # an existing claim to keep the dumps on; empty: the chart provisions `backups`
+  # A dump's name, e.g. 2026-10-04T00-00-05Z: stop every client of the
+  # database and restore it (templates/postgres-restore.yaml, a post-upgrade
+  # hook). Upgrade again without it to start them. The operator does both for
+  # the annotation zaentrum.io/restore-request.
+  restore: ""
+
 # Event streaming: the bundled broker, or a shared external cluster (per-tenant
 # topic prefix + mTLS). External mode skips the bundled kafka entirely.
 eventStreaming:

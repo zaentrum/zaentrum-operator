@@ -1,0 +1,84 @@
+{{- with include "z.restoring" . }}
+# ── Restoring the bundled Postgres from a dump ──────────────────────────────
+#
+# Recreates every platform database from the dump {{ . }} on the claim
+# {{ include "z.backupClaim" $ }} (files/postgres-restore.sh), once it has made
+# sure the dump is whole: its checksums match, every database is in it — else
+# it refuses, changing nothing. While backup.restore names a dump, every client
+# of the database is stopped (z.replicas "db") and no backup starts; the
+# script waits for their sessions to end.
+#
+# A Helm hook, so `helm upgrade --set backup.restore=<dump>` stops the
+# clients and runs it; an upgrade without it starts them again. The operator
+# never applies it with the platform: it stops the clients, starts this as a
+# Job of its own once they are down, and starts them again when it has ended
+# (internal/controller/restore.go), for the annotation
+# zaentrum.io/restore-request.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-restore
+  labels:
+    app.kubernetes.io/name: postgres-restore
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: {{ $.Values.global.partOf }}
+  annotations:
+    helm.sh/hook: post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+    zaentrum.io/restore-dump: {{ . | quote }}
+spec:
+  # One attempt: a refusal or a failure is read, not repeated.
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-restore
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: {{ $.Values.global.partOf }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "z.imagePullSecrets" $ | nindent 6 }}
+      {{- include "z.backupSecurity" $ | nindent 6 }}
+      containers:
+        - name: restore
+          image: postgres:16-alpine
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+{{ $.Files.Get "files/postgres-restore.sh" | indent 14 }}
+          env:
+            - name: PGHOST
+              value: postgres
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+            - name: DUMP
+              value: {{ . | quote }}
+            - name: DATABASES
+              value: {{ include "z.platformDatabases" $ | quote }}
+            - name: BACKUP_DIR
+              value: /backups
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          terminationMessagePolicy: File
+          volumeMounts:
+            - { name: backups, mountPath: /backups, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: backups
+          persistentVolumeClaim: { claimName: {{ include "z.backupClaim" $ }}, readOnly: true }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+{{- end }}

@@ -1,0 +1,120 @@
+{{- if include "z.backupEnabled" . }}
+# ── Backups of the bundled Postgres ─────────────────────────────────────────
+#
+# A CronJob dumps every platform database, on backup.schedule, into a dump of
+# its own on the claim backups — pg_dump's custom format a database, the roles,
+# and the sha256 of each file — and keeps the newest backup.retention dumps
+# (files/postgres-backup.sh). Over the network, from the image the Postgres
+# runs, while the platform keeps serving. The operator reads each run's
+# summary from its pod into status.backup; a restore is
+# templates/postgres-restore.yaml.
+#
+# What a dump does not hold: the platform's Secrets (the database's own
+# password, Keycloak's admin and client secrets, the stream signing key) and
+# the media library, which lives on its own volume. See operator/README.md.
+{{- if not .Values.backup.claimName }}
+# The dumps' claim. It is kept when the platform goes — helm uninstall leaves
+# it, and the operator puts no owner on it — so the backups outlive the
+# database they are of. Delete it yourself.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backups
+  labels:
+    app.kubernetes.io/name: zaentrum-backup
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  # One backup at a time writes it (concurrencyPolicy Forbid).
+  accessModes: [ReadWriteOnce]
+{{- with (.Values.backup.className | default .Values.storage.postgres.className | default .Values.storage.className) }}
+  storageClassName: {{ . | quote }}
+{{- end }}
+  resources: { requests: { storage: {{ .Values.backup.size | default "5Gi" | quote }} } }
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zaentrum-backup
+  labels:
+    app.kubernetes.io/name: zaentrum-backup
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  schedule: {{ .Values.backup.schedule | default "@daily" | quote }}
+  # One at a time; a run missed while the cluster was down still runs within
+  # six hours of when it was due.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # No backup starts while a restore has the database's clients stopped.
+  suspend: {{ if include "z.restoring" . }}true{{ else }}false{{ end }}
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zaentrum-backup
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+        zaentrum.io/database: backup
+    spec:
+      # A second try for a Postgres that was restarting; then the next
+      # schedule.
+      backoffLimit: 1
+      activeDeadlineSeconds: 10800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: zaentrum-backup
+            app.kubernetes.io/component: database
+            app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+        spec:
+          restartPolicy: Never
+          # It talks to Postgres, never to the Kubernetes API.
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          {{- include "z.imagePullSecrets" . | nindent 10 }}
+          {{- include "z.backupSecurity" . | nindent 10 }}
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+{{ .Files.Get "files/postgres-backup.sh" | indent 18 }}
+              env:
+                - name: PGHOST
+                  value: postgres
+                - name: PGUSER
+                  valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+                - name: DATABASES
+                  value: {{ include "z.platformDatabases" . | quote }}
+                - name: RETENTION
+                  value: {{ .Values.backup.retention | default 7 | quote }}
+                - name: BACKUP_DIR
+                  value: /backups
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { cpu: "1", memory: 512Mi }
+              terminationMessagePolicy: File
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: {{ include "z.backupClaim" . }} }
+            - name: tmp
+              emptyDir: { sizeLimit: 64Mi }
+{{- end }}

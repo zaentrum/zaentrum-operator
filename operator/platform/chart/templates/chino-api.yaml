@@ -9,7 +9,7 @@ metadata:
     product: chino
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
 spec:
-  replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-api" "def" 1) }}
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-api" "def" 1 "db" true) }}
   selector:
     matchLabels:
       app: chino-api

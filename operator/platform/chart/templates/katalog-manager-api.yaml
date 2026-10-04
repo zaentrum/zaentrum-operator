@@ -9,7 +9,7 @@ metadata:
     plane: write
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
 spec:
-  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-manager-api" "def" 1) }}
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-manager-api" "def" 1 "db" true) }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:

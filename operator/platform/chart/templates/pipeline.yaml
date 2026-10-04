@@ -18,7 +18,7 @@ metadata:
     plane: worker
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
 spec:
-  replicas: {{ include "z.replicas" (dict "root" $ "name" "analyzer" "def" 1) }}
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "analyzer" "def" 1 "db" true) }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
@@ -164,7 +164,7 @@ metadata:
     plane: worker
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
 spec:
-  replicas: {{ include "z.replicas" (dict "root" $ "name" "packager" "def" 2) }}
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "packager" "def" 2 "db" true) }}
   selector:
     matchLabels:
       app: packager
@@ -307,7 +307,7 @@ metadata:
     plane: worker
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
 spec:
-  replicas: {{ include "z.replicas" (dict "root" $ "name" "transcoder" "def" 1) }}
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "transcoder" "def" 1 "db" true) }}
   selector:
     matchLabels:
       app: transcoder
@@ -483,7 +483,7 @@ metadata:
     value-stream: zaentrum
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
 spec:
-  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-ingest" "def" 1) }}
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "katalog-ingest" "def" 1 "db" true) }}
   selector:
     matchLabels:
       app: katalog-ingest

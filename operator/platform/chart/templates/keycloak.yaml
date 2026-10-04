@@ -43,7 +43,7 @@ metadata:
   name: keycloak
   labels: { app: keycloak, role: identity, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
 spec:
-  replicas: {{ include "z.replicas" (dict "root" $ "name" "keycloak" "def" 1) }}
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "keycloak" "def" 1 "db" true) }}
   selector: { matchLabels: { app: keycloak } }
   strategy:
     # Keycloak holds a JPA/Liquibase changelog lock during DB migration; two

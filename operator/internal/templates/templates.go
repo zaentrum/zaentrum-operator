@@ -52,6 +52,11 @@ type Values struct {
 	// the claim.
 	PostgresVolume  string
 	PostgresMigrate bool
+	// RestoreDump is the dump a restore of the bundled Postgres restores this
+	// pass, or empty. While it is set, every client of the database is stopped
+	// and the restore Job is rendered among the hooks. The reconciler sets it
+	// from status.backup.restore (restore.go).
+	RestoreDump string
 }
 
 // NewValues builds the render context from a Zaentrum CR.
@@ -104,6 +109,22 @@ func (v Values) chartValues() map[string]interface{} {
 	services := map[string]interface{}{}
 	for name, n := range spec.Replicas {
 		services[name] = map[string]interface{}{"replicas": int(n)}
+	}
+	backup := map[string]interface{}{
+		// nil: the chart decides, from where the Postgres keeps its data.
+		"enabled":   nil,
+		"schedule":  orDefault(spec.Backup.Schedule, "@daily"),
+		"retention": int(orDefaultInt32(spec.Backup.Retention, 7)),
+		"size":      "5Gi",
+		"className": spec.Backup.ClassName,
+		"claimName": spec.Backup.ClaimName,
+		"restore":   v.RestoreDump,
+	}
+	if spec.Backup.Enabled != nil {
+		backup["enabled"] = *spec.Backup.Enabled
+	}
+	if !spec.Backup.Size.IsZero() {
+		backup["size"] = spec.Backup.Size.String()
 	}
 	languages := make([]interface{}, 0, len(spec.Pipeline.PreferredLanguages))
 	for _, l := range spec.Pipeline.PreferredLanguages {
@@ -201,6 +222,7 @@ func (v Values) chartValues() map[string]interface{} {
 		"verification": map[string]interface{}{
 			"enabled": derefBool(spec.Verification.Enabled, true),
 		},
+		"backup":   backup,
 		"services": services,
 	}
 }
@@ -352,6 +374,33 @@ const (
 	AnnotationMigrationSource = "zaentrum.io/migration-source"
 	AnnotationMigrationTarget = "zaentrum.io/migration-target"
 )
+
+// The chart's backups (templates/backup.yaml) and the restore Job
+// (templates/postgres-restore.yaml).
+const (
+	// BackupCronJobName is the CronJob that runs the backups.
+	BackupCronJobName = "zaentrum-backup"
+	// BackupContainer runs files/postgres-backup.sh; its termination message is
+	// the run's summary in JSON, or why it failed.
+	BackupContainer = "backup"
+	// RestoreJobName is the restore hook Job's rendered name; each restore gets a
+	// Job of its own named after it.
+	RestoreJobName = "postgres-restore"
+	// RestoreContainer runs files/postgres-restore.sh; its termination message
+	// is what was restored, or why not.
+	RestoreContainer = "restore"
+	// AnnotationRestoreDump is the dump a restore Job restores.
+	AnnotationRestoreDump = "zaentrum.io/restore-dump"
+	// RestoreRefusedExitCode is the restore script's exit code when it changed
+	// nothing: the dump was not whole, or the database still had clients.
+	RestoreRefusedExitCode = 3
+)
+
+// RestoreJob returns the restore Job among the hooks, or nil when the render
+// restores nothing.
+func RestoreJob(hooks []*unstructured.Unstructured) *unstructured.Unstructured {
+	return hookJob(hooks, RestoreJobName)
+}
 
 // PostgresMigrationJob returns the migration Job among the hooks, or nil when
 // the render copies nothing.
