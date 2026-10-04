@@ -14,17 +14,6 @@ docker run -d --privileged --restart unless-stopped -p 80:80 --name zaentrum \
 open http://zaentrum.localhost
 ```
 
-Then open **http://zaentrum.localhost** — the first-run setup **wizard** guides you through it.
-(Modern browsers auto-resolve `*.localhost` to `127.0.0.1`, so this needs **no `/etc/hosts`
-edit**.) Sign-in uses the **bundled Keycloak** — log in as `admin` with the one-time
-password generated for your appliance (you are asked to choose a new one at that first
-sign-in):
-
-```bash
-docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
-  -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
-```
-
 That single container runs the whole platform: a full Kubernetes (k3s) in-process, the
 **operator**, and everything the operator brings up — the portal, the web app, the catalog and
 its consoles, streaming, and bundled **Keycloak**, **Postgres**, **Valkey** and **Kafka**. One
@@ -33,6 +22,7 @@ image, one port, nothing else to install; the first boot pulls the platform's im
 
 - **Port 80, and the name `zaentrum.localhost`.** The platform's Ingress answers that host
   only, and its sign-in is bound to `http://zaentrum.localhost` — no other name, no other port.
+  Modern browsers resolve `*.localhost` to `127.0.0.1`, so this needs no `/etc/hosts` edit.
 - **linux/amd64 only.** No arm64 image is published yet.
 
 The appliance in detail: [deploy/allinone/README.md](deploy/allinone/README.md).
@@ -42,16 +32,27 @@ The appliance in detail: [deploy/allinone/README.md](deploy/allinone/README.md).
 
 ---
 
-## First-run flow
+## First run
 
-On first boot nothing is configured yet, so Zaentrum sends you to the setup wizard at
-**`/manage/setup`**. You give it a display name, your OIDC provider details, and the path
-to your library; it generates a stream-signing key, persists the config, and from then on
-the app opens straight to your catalog.
+There is **no setup wizard**: a fresh install comes up configured, with the bundled Keycloak
+(realm `zaentrum`) and an empty library. Three steps make it yours
+([self-hosting → first run](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#first-run)):
 
-Under the hood the admin UI calls `GET /api/manage/setup/status`. While that returns
-`{"configured": false}`, the app routes every visitor to the wizard. Once you finish setup
-it flips to `true` and the wizard step-aside disappears.
+1. **Sign in** as `admin` with the first admin password. The operator generates it once per
+   install and keeps it in the Secret `zaentrum-keycloak-admin`; Keycloak then has you choose a
+   password of your own:
+
+   ```bash
+   docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
+     -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
+   ```
+
+   On a cluster, run the same `kubectl` without `docker exec zaentrum`.
+2. **Add a TMDB key** under **Catalog Management → settings** (`/katalog-manage/`) before the
+   first scan: titles, posters and plots come from TMDB, and the images carry no key.
+3. **Copy your files into the library, then trigger a scan** in Catalog Management. The library
+   is the `media/` folder of the platform's `media` volume — on the appliance, a directory
+   inside the container ([how to fill it](deploy/allinone/README.md#first-run)).
 
 ---
 

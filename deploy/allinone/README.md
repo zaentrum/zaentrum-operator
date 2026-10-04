@@ -31,16 +31,50 @@ by another name (`http://localhost`, the machine's IP) and the pages answer
 
 **linux/amd64 only.** No arm64 image is published yet.
 
-### Signing in the first time
+### Why `--privileged`?
 
-The first administrator is `admin`, with a one-time password generated for this
-container — no two appliances share one. Keycloak asks for a new password at
-that first sign-in:
+The container runs **k3s**, which needs to mount filesystems, manage cgroups,
+and run an embedded container runtime (containerd) for the application pods.
+That requires privileges a normal container does not get. `--privileged` is the
+simple, reliable way to grant them. (Hardened setups can instead pass the
+narrower set of capabilities + mounts k3s documents, but `--privileged` is the
+supported default here.)
 
-```bash
-docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
-  -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
-```
+## First run
+
+There is **no setup wizard**. The appliance comes up configured — for
+`http://zaentrum.localhost`, with the bundled Keycloak (realm `zaentrum`) and an
+empty library — and three steps make it yours
+([self-hosting → first run](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#first-run)):
+
+1. **Sign in.** <http://zaentrum.localhost> is the portal, whose launchpad opens
+   the video app and, for an admin, the catalog consoles. Sign in as `admin`
+   with the **first admin password**, which the operator generated once for this
+   install into the Secret `zaentrum-keycloak-admin` — no two appliances share
+   one. Keycloak then has you choose a password of your own:
+
+   ```bash
+   docker exec zaentrum kubectl -n zaentrum get secret zaentrum-keycloak-admin \
+     -o jsonpath='{.data.realm-admin-password}' | base64 -d; echo
+   ```
+
+2. **Add a TMDB key — before the first scan.** Titles, posters and plots come
+   from TMDB, and the images carry no key of their own. In **Catalog
+   Management** on the launchpad (`/katalog-manage/`), open **settings** and
+   enter a TMDB v4 read access token as **TMDB api key**; it applies from the
+   next lookup, with no restart.
+3. **Fill the library, then scan.** The catalog reads the `media/` folder of the
+   platform's `media` volume, which on the appliance is a directory under k3s's
+   storage path inside the container. Once the platform is up, copy your files
+   there, then press **trigger scan** in Catalog Management:
+
+   ```bash
+   lib=$(docker exec zaentrum sh -c 'echo /var/lib/rancher/k3s/storage/pvc-*_zaentrum_media')/media
+   docker exec zaentrum mkdir -p "$lib"
+   docker cp ./my-library/. zaentrum:"$lib/"
+   ```
+
+### Keycloak's admin console
 
 Keycloak's own admin console — where further accounts are made — is not on the
 published port. It answers through a port-forward on `localhost:8080`, so
@@ -57,16 +91,7 @@ open http://localhost:8080/auth/admin/    # as admin, with that password
 Or publish it on the appliance's own port with `spec.identity.exposeAdminConsole:
 true` ([the operator's README](../../operator/README.md#the-admin-console)).
 
-### Why `--privileged`?
-
-The container runs **k3s**, which needs to mount filesystems, manage cgroups,
-and run an embedded container runtime (containerd) for the application pods.
-That requires privileges a normal container does not get. `--privileged` is the
-simple, reliable way to grant them. (Hardened setups can instead pass the
-narrower set of capabilities + mounts k3s documents, but `--privileged` is the
-supported default here.)
-
-### Persistence
+## Persistence
 
 Postgres (users, watch state, the catalog), the media library and the HLS cache
 live on PersistentVolumeClaims backed by k3s's `local-path` StorageClass, so
@@ -93,10 +118,6 @@ docker run --rm -v zaentrum:/state --entrypoint sh ghcr.io/zaentrum/appliance:la
 An appliance made before Postgres moved onto a claim keeps it on an emptyDir
 until it is copied over: see
 [the operator's README](../../operator/README.md#the-bundled-postgres-keeps-its-data-specstoragepostgres).
-
-Put your own library files where the stream service expects them (the `media`
-PVC under `local-path`), or point `chino-stream` at a host path via an overlay
-if you run the cluster form instead.
 
 ## What's inside
 
