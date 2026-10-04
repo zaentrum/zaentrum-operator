@@ -25,8 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The base ships no credentials and refuses to build without them:
+      # make random ones for this throwaway cluster.
       - name: kustomize build (base + demo)
         run: |
+          ./deploy/base/make-secrets.sh
           kubectl kustomize deploy/base   > /tmp/base.yaml
           kubectl kustomize deploy/overlays/demo > /tmp/demo.yaml
           echo "rendered $(grep -c '^kind:' /tmp/base.yaml) base resources"

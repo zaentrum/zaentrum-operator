@@ -1,3 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# UNSUPPORTED. This profile is kept in the tree for reference. It does not
+# bring up a working platform — no identity provider, no portal, no catalog
+# consoles, and a management console that is gone — and nothing tests it. Run
+# the appliance or the operator instead (README.md).
+#
+# It ships no credentials: `docker compose up` refuses to start until
+#   ZAENTRUM_DB_PASSWORD          the database's password
+#   ZAENTRUM_STREAM_SIGNING_KEY   32 random bytes, base64 (openssl rand -base64 32)
+# are set, in the environment or an .env file beside this one (git ignores it).
+# ─────────────────────────────────────────────────────────────────────────────
+#
 # Lighter front door for a NAS / single box. Same images as the k8s base.
 # Software transcode by default (no GPU). For HW transcode use the k3s
 # appliance + GPU overlay, or add an NVIDIA device reservation here.
@@ -26,7 +38,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: zaentrum
-      POSTGRES_PASSWORD: zaentrum-dev-change-me
+      POSTGRES_PASSWORD: "${ZAENTRUM_DB_PASSWORD:?set ZAENTRUM_DB_PASSWORD: this profile ships no credentials}"
       POSTGRES_DB: zaentrum
     volumes: ["pg:/var/lib/postgresql/data"]
     healthcheck: { test: ["CMD", "pg_isready", "-U", "zaentrum"], interval: 10s, retries: 5 }
@@ -60,7 +72,7 @@ services:
     image: ghcr.io/zaentrum/katalog-api:latest
     environment:
       <<: *oidc
-      KATALOG_API_PG_URL: "postgres://zaentrum:zaentrum-dev-change-me@postgres:5432/zaentrum?sslmode=disable"
+      KATALOG_API_PG_URL: "postgres://zaentrum:${ZAENTRUM_DB_PASSWORD:?set ZAENTRUM_DB_PASSWORD: this profile ships no credentials}@postgres:5432/zaentrum?sslmode=disable"
     depends_on: { postgres: { condition: service_healthy } }
 
   # Neutral management / write API. Served under /api/manage.
@@ -71,8 +83,8 @@ services:
       ADDR: ":8080"
       KATALOG_API_BASE_URL: "http://katalog-api:8080"
       KAFKA_BROKERS: "kafka:9092"
-      PG_URL: "postgres://zaentrum:zaentrum-dev-change-me@postgres:5432/zaentrum?sslmode=disable"
-      STREAM_SIGNING_KEY: "dev-only-stream-signing-key-change-me"
+      PG_URL: "postgres://zaentrum:${ZAENTRUM_DB_PASSWORD:?set ZAENTRUM_DB_PASSWORD: this profile ships no credentials}@postgres:5432/zaentrum?sslmode=disable"
+      STREAM_SIGNING_KEY: "${ZAENTRUM_STREAM_SIGNING_KEY:?set ZAENTRUM_STREAM_SIGNING_KEY: this profile ships no credentials}"
     depends_on:
       postgres: { condition: service_healthy }
       katalog-api: { condition: service_started }
@@ -84,8 +96,8 @@ services:
       <<: *oidc
       KATALOG_BASE_URL: "http://katalog-api:8080"
       STREAM_BASE_URL: "http://chino-stream:8080"
-      PG_URL: "postgres://zaentrum:zaentrum-dev-change-me@postgres:5432/zaentrum?sslmode=disable"
-      STREAM_SIGNING_KEY: "dev-only-stream-signing-key-change-me"
+      PG_URL: "postgres://zaentrum:${ZAENTRUM_DB_PASSWORD:?set ZAENTRUM_DB_PASSWORD: this profile ships no credentials}@postgres:5432/zaentrum?sslmode=disable"
+      STREAM_SIGNING_KEY: "${ZAENTRUM_STREAM_SIGNING_KEY:?set ZAENTRUM_STREAM_SIGNING_KEY: this profile ships no credentials}"
     depends_on: [katalog-api, chino-stream]
 
   chino-stream:
@@ -95,7 +107,7 @@ services:
       KATALOG_API_BASE_URL: "http://katalog-api:8080"
       MEDIA_ROOT: "/media"
       USE_NVENC: "false"
-      STREAM_SIGNING_KEY: "dev-only-stream-signing-key-change-me"
+      STREAM_SIGNING_KEY: "${ZAENTRUM_STREAM_SIGNING_KEY:?set ZAENTRUM_STREAM_SIGNING_KEY: this profile ships no credentials}"
     volumes:
       - "${STUBE_MEDIA:-./media}:/media:ro"   # ← your library (files you own)
 

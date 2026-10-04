@@ -1,3 +1,14 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# UNSUPPORTED. This profile is kept in the tree for reference. It does not
+# bring up a working platform — it predates the portal and the catalog
+# consoles, and serves a management console that is gone — and nothing but a
+# server-side dry run tests it. Run the appliance or the operator instead
+# (README.md).
+#
+# It ships no credentials. Each Secret below is made from a file in secrets/,
+# which `kubectl kustomize` refuses to build without; make them, random, with
+#   deploy/base/make-secrets.sh
+# ─────────────────────────────────────────────────────────────────────────────
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -50,34 +61,22 @@ configMapGenerator:
       - ADMIN_SUBJECTS=
 
 secretGenerator:
-  # DEV DEFAULTS — fine for a local appliance, CHANGE for anything exposed.
-  - name: zaentrum-db
-    literals:
-      - user=zaentrum
-      - password=zaentrum-dev-change-me
-  - name: zaentrum-stream-signing
-    literals:
-      # Dev default — MUST be valid base64 (chino-api/chino-stream base64-decode
-      # it; decodes to 32 bytes here). Regenerate for anything exposed:
-      #   openssl rand -base64 32
-      - key=ZGV2LW9ubHktY2hhbmdlLW1lLW5vdC1mb3ItcHJvZCE=
-  # Confidential secret for the 'zaentrum-manager' service-account client. The
-  # realm import substitutes ${ZAENTRUM_MANAGER_SECRET} with this value, and
-  # katalog-manager-api reads it as KEYCLOAK_ADMIN_CLIENT_SECRET to call the
-  # Admin REST API. DEV value — rotate for anything exposed.
-  - name: zaentrum-keycloak
-    literals:
-      - client-secret=zaentrum-manager-dev-change-me
-  # Bundled Keycloak bootstrap admin. 'username'/'password' bootstrap the
-  # master-realm temporary admin; 'realm-admin-password' seeds the zaentrum-realm
-  # 'admin' user (realm-admin) via the realm import with temporary=true, so the
-  # first login forces a password change. DEV values — change for anything
-  # exposed.
-  - name: zaentrum-keycloak-admin
-    literals:
-      - username=admin
-      - password=dev
-      - realm-admin-password=dev
+  # No values here: a missing file fails the build, so no install ever runs on
+  # a password everyone has. make-secrets.sh writes random ones, git ignores
+  # them (.gitignore: secrets/, *.env).
+  - name: zaentrum-db                  # user, password
+    envs: [secrets/db.env]
+  - name: zaentrum-stream-signing      # key: 32 random bytes, base64
+    envs: [secrets/stream-signing.env]
+  # The 'zaentrum-manager' service-account client's secret: the realm import
+  # substitutes ${ZAENTRUM_MANAGER_SECRET} with it.
+  - name: zaentrum-keycloak            # client-secret
+    envs: [secrets/keycloak.env]
+  # The master realm's bootstrap admin (username, password) and the
+  # zaentrum-realm 'admin' user's first password (realm-admin-password), which
+  # the realm import marks temporary.
+  - name: zaentrum-keycloak-admin      # username, password, realm-admin-password
+    envs: [secrets/keycloak-admin.env]
 
 images:
   - name: ghcr.io/zaentrum/chino-web
