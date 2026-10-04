@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -77,6 +78,9 @@ type ZaentrumReconciler struct {
 	// OpenShift says whether the cluster is OpenShift (serves its SCC API). Nil
 	// until discovered, then kept (openshift.go); a test sets it.
 	OpenShift *bool
+	// unserved holds, for a kind the prune lists, when the cluster last said
+	// it does not serve it (prune.go).
+	unserved  map[schema.GroupKind]time.Time
 	clusterMu sync.Mutex
 }
 
@@ -224,6 +228,10 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	r.setApplied(&z, metav1.ConditionTrue, "Applied",
 		fmt.Sprintf("applied %d objects via server-side apply", len(objs)))
+
+	// What the operator applied before and this render no longer carries goes
+	// — never what holds data, nor what it did not apply (prune.go).
+	r.prunePlatform(ctx, &z, objs)
 
 	// A copy of the bundled Postgres onto its claim, which was just applied.
 	if db.start {

@@ -28,8 +28,9 @@ import (
 // straight from the API server, as the verification's are.
 //
 // Backups are on by default wherever the bundled Postgres keeps its data on a
-// claim. Turned off, the CronJob this Zaentrum owns is removed — the operator
-// prunes nothing else it stops rendering — and the claim with the dumps stays.
+// claim. Turned off, the CronJob this Zaentrum owns is removed — here, so that
+// one an operator applied before it labelled what it applies goes too, which
+// the prune (prune.go) leaves alone — and the claim with the dumps stays.
 
 const (
 	condTypeBackup = "Backup"
@@ -168,8 +169,9 @@ func rendered(objs []*unstructured.Unstructured, kind, name string) bool {
 }
 
 // removeBackupSchedule deletes the backup CronJob this Zaentrum owns, its Jobs
-// with it: backups were turned off, and the operator removes nothing else it
-// no longer renders. The claim with the dumps stays.
+// with it: backups were turned off. The prune removes it as well once it
+// carries the operator's label; this removes it whether or not it does. The
+// claim with the dumps stays.
 func (r *ZaentrumReconciler) removeBackupSchedule(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) {
 	var cron batchv1.CronJob
 	err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: templates.BackupCronJobName}, &cron)

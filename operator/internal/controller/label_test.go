@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -37,6 +38,15 @@ type platformEnv struct {
 func newPlatformEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum, funcs *interceptor.Funcs, objs ...client.Object) *platformEnv {
 	t.Helper()
 	s := selfScheme(t)
+	// The kinds the prune lists that client-go's scheme lacks — Routes,
+	// Certificates — as a cluster that serves them would answer: the fake
+	// client lists only what its scheme knows.
+	for _, gvk := range templates.PruneKinds {
+		if !s.Recognizes(gvk) {
+			s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+			s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
+		}
+	}
 	f := interceptor.Funcs{Patch: applyAsCreateOrUpdate}
 	if funcs != nil {
 		f.Delete, f.List = funcs.Delete, funcs.List

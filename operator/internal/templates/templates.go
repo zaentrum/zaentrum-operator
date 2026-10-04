@@ -23,6 +23,7 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/engine"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
@@ -35,8 +36,36 @@ const FieldManager = "zaentrum-operator"
 // LabelPlatform names, on every object the operator applies for the
 // platform, the Zaentrum it applies it for: what the operator applied, told
 // apart from whatever else the namespace holds — an addon's objects, a
-// person's, what an earlier operator applied before it labelled.
+// person's, what an earlier operator applied before it labelled. What
+// carries it for a Zaentrum, of one of PruneKinds, and that Zaentrum's
+// render no longer carries is removed; nothing without it ever is
+// (internal/controller/prune.go).
 const LabelPlatform = "zaentrum.io/platform"
+
+// PruneKinds are the kinds of the chart's objects the operator removes once
+// its render no longer carries one: what runs, serves, routes and grants.
+var PruneKinds = []schema.GroupVersionKind{
+	{Group: "apps", Version: "v1", Kind: "Deployment"},
+	{Version: "v1", Kind: "Service"},
+	{Version: "v1", Kind: "ServiceAccount"},
+	{Group: "route.openshift.io", Version: "v1", Kind: "Route"},
+	{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress"},
+	{Group: "batch", Version: "v1", Kind: "CronJob"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "Role"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"},
+	{Group: "cert-manager.io", Version: "v1", Kind: "Certificate"},
+}
+
+// KeptKinds are the kinds of the chart's objects the operator never removes,
+// rendered or not: a claim holds a database, the backups or the library, a
+// Secret or a ConfigMap credentials and data, and a Job is a run. Every kind
+// the chart renders is one of PruneKinds or of these, and none is both.
+var KeptKinds = []schema.GroupKind{
+	{Kind: "PersistentVolumeClaim"},
+	{Kind: "Secret"},
+	{Kind: "ConfigMap"},
+	{Group: "batch", Kind: "Job"},
+}
 
 // Values is the minimal render context the controller manipulates: the CR plus
 // the version to render (the controller overrides Version with the channel

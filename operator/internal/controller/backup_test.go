@@ -138,8 +138,8 @@ func TestBackupStatusIsWhatTheRunsSay(t *testing.T) {
 }
 
 // Off — turned off, or the Postgres on an emptyDir — the condition says so
-// and why, and the schedule this Zaentrum owns is removed (the operator prunes
-// nothing else it stops rendering); a CronJob it does not own is left alone.
+// and why, and the schedule this Zaentrum owns is removed — labelled by the
+// operator or not, as here; a CronJob it does not own is left alone.
 // External databases: no condition at all.
 func TestBackupsTurnedOff(t *testing.T) {
 	z := verifyCR()

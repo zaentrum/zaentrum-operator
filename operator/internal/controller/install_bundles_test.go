@@ -13,7 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/zaentrum/zaentrum-operator/operator/internal/templates"
 )
 
 // The Zaentrum CRD ships in four copies, maintained apart, and a cluster only
@@ -240,6 +243,39 @@ func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 		assert.True(t, ruleHolds(rules, "", "persistentvolumeclaims", "patch"), file)
 		for _, verb := range []string{"get", "create", "patch", "update"} {
 			assert.True(t, ruleHolds(rules, "cert-manager.io", "certificates", verb), "%s: no %s on cert-manager.io certificates", file, verb)
+		}
+	}
+}
+
+// What the prune does with the API — list each kind it removes, by label, and
+// delete what the render no longer carries — every shipped ClusterRole
+// allows, the pinned install's too, so that the next re-pin needs no new rule.
+func TestEveryClusterRoleHoldsWhatPruningUses(t *testing.T) {
+	resources := map[schema.GroupKind]string{
+		{Group: "apps", Kind: "Deployment"}:                       "deployments",
+		{Kind: "Service"}:                                         "services",
+		{Kind: "ServiceAccount"}:                                  "serviceaccounts",
+		{Group: "route.openshift.io", Kind: "Route"}:              "routes",
+		{Group: "networking.k8s.io", Kind: "Ingress"}:             "ingresses",
+		{Group: "batch", Kind: "CronJob"}:                         "cronjobs",
+		{Group: "rbac.authorization.k8s.io", Kind: "Role"}:        "roles",
+		{Group: "rbac.authorization.k8s.io", Kind: "RoleBinding"}: "rolebindings",
+		{Group: "cert-manager.io", Kind: "Certificate"}:           "certificates",
+	}
+	require.Len(t, templates.PruneKinds, len(resources), "a kind the prune removes, and no rule checked for it here")
+	for _, file := range []string{
+		"../../config/rbac/role.yaml",
+		"../../bundle/manifests/zaentrum-operator.clusterserviceversion.yaml",
+		pinnedInstall,
+		"../../../deploy/allinone/manifests/10-operator.yaml",
+	} {
+		rules := managerRules(t, file)
+		for _, gvk := range templates.PruneKinds {
+			resource, ok := resources[gvk.GroupKind()]
+			require.True(t, ok, "%s: which resource?", gvk)
+			for _, verb := range []string{"list", "delete"} {
+				assert.True(t, ruleHolds(rules, gvk.Group, resource, verb), "%s: no %s on %q %s", file, verb, gvk.Group, resource)
+			}
 		}
 	}
 }
