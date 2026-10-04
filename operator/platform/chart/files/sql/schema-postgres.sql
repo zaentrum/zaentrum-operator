@@ -227,30 +227,6 @@ CREATE TABLE IF NOT EXISTS com_nalet_katalog_Settings (
   PRIMARY KEY(ID)
 );
 
-CREATE TABLE IF NOT EXISTS com_nalet_katalog_DownloadJobs (
-  ID VARCHAR(36) NOT NULL,
-  createdAt TIMESTAMP,
-  createdBy VARCHAR(255),
-  modifiedAt TIMESTAMP,
-  modifiedBy VARCHAR(255),
-  adapter VARCHAR(40) NOT NULL,
-  clientJobId VARCHAR(255) NOT NULL,
-  title VARCHAR(500),
-  wantedItemId VARCHAR(80),
-  state VARCHAR(20) NOT NULL DEFAULT 'queued',
-  progressPct DECIMAL(5, 2) DEFAULT 0,
-  downloadedBytes BIGINT DEFAULT 0,
-  sizeBytes BIGINT,
-  speedBps BIGINT,
-  etaSec INTEGER,
-  files TEXT,
-  errorMessage TEXT,
-  startedAt TIMESTAMP,
-  completedAt TIMESTAMP,
-  lastEventAt TIMESTAMP,
-  PRIMARY KEY(ID)
-);
-
 CREATE TABLE IF NOT EXISTS com_nalet_katalog_EnrichmentJobs (
   ID VARCHAR(36) NOT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'queued',
@@ -610,27 +586,3 @@ CREATE OR REPLACE VIEW KatalogService_Albums AS SELECT
   CAST(Items_0.year AS VARCHAR(255)) AS yearText
 FROM com_nalet_katalog_Items AS Items_0
 WHERE Items_0.type = 'album';
-
-CREATE OR REPLACE VIEW KatalogService_DownloadJobs AS SELECT
-  DownloadJobs_0.ID,
-  DownloadJobs_0.createdAt,
-  DownloadJobs_0.createdBy,
-  DownloadJobs_0.modifiedAt,
-  DownloadJobs_0.modifiedBy,
-  DownloadJobs_0.adapter,
-  DownloadJobs_0.clientJobId,
-  DownloadJobs_0.title,
-  DownloadJobs_0.wantedItemId,
-  DownloadJobs_0.state,
-  DownloadJobs_0.progressPct,
-  DownloadJobs_0.downloadedBytes,
-  DownloadJobs_0.sizeBytes,
-  DownloadJobs_0.speedBps,
-  DownloadJobs_0.etaSec,
-  DownloadJobs_0.files,
-  DownloadJobs_0.errorMessage,
-  DownloadJobs_0.startedAt,
-  DownloadJobs_0.completedAt,
-  DownloadJobs_0.lastEventAt,
-  CASE DownloadJobs_0.state WHEN 'failed' THEN 1 WHEN 'downloading' THEN 2 WHEN 'queued' THEN 2 WHEN 'completed' THEN 3 ELSE 0 END AS stateCriticality
-FROM com_nalet_katalog_DownloadJobs AS DownloadJobs_0;
