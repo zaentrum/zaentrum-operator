@@ -142,6 +142,65 @@ func TestRenderDemoProfile(t *testing.T) {
 	}
 }
 
+// containerEnv lists every environment variable name of every container, init
+// containers included, in every workload of a render.
+func containerEnv(objs []*unstructured.Unstructured) map[string][]string {
+	out := map[string][]string{}
+	for _, o := range objs {
+		var paths [][]string
+		switch o.GetKind() {
+		case "Deployment", "Job":
+			paths = [][]string{{"spec", "template", "spec"}}
+		case "CronJob":
+			paths = [][]string{{"spec", "jobTemplate", "spec", "template", "spec"}}
+		default:
+			continue
+		}
+		for _, p := range paths {
+			for _, key := range []string{"initContainers", "containers"} {
+				containers, _, _ := unstructured.NestedSlice(o.Object, append(p, key)...)
+				for _, c := range containers {
+					env, _, _ := unstructured.NestedSlice(c.(map[string]interface{}), "env")
+					for _, e := range env {
+						name, _ := e.(map[string]interface{})["name"].(string)
+						out[o.GetKind()+"/"+o.GetName()] = append(out[o.GetKind()+"/"+o.GetName()], name)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// No container is told where a download client or a part of one is, in any
+// profile: catalog management reads the library, it fetches nothing. The four
+// settings katalog-manager-api carried, empty everywhere, are gone — and a name
+// joined by "_" counts as one, which a check for the hyphenated name alone let
+// through.
+func TestRenderCarriesNoDownloadClientSettings(t *testing.T) {
+	external := base("zaentrum-beta")
+	external.Spec.Identity.Mode = "external"
+	external.Spec.Identity.Issuer = "https://sso.example.com/realms/example"
+	external.Spec.Databases.Mode = "external"
+	external.Spec.Databases.External.Host = "postgres.example.com"
+	for name, z := range map[string]*zaentrumv1alpha1.Zaentrum{
+		"self-host": base("zaentrum"), "demo": demoCR("zaentrum-demo"), "external": external,
+	} {
+		z.Spec.Features.Pipeline = true
+		objs, err := Render(NewValues(z))
+		require.NoError(t, err, name)
+		for workload, env := range containerEnv(objs) {
+			for _, e := range env {
+				assert.NotContains(t, strings.ToLower(e), "download", "%s: %s is told about a download client: %s", name, workload, e)
+			}
+		}
+		all := strings.ToLower(fmt.Sprintf("%v", objs))
+		for _, forbidden := range []string{"odownloader", "download_gateway", "download-gateway"} { // neutrality-guard:allow
+			assert.NotContains(t, all, forbidden, "%s: the core render names %s", name, forbidden)
+		}
+	}
+}
+
 // spec.replicas overrides an app-tier Deployment; unlisted default to 1.
 func TestReplicasOverride(t *testing.T) {
 	z := base("zaentrum")

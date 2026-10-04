@@ -137,14 +137,6 @@ spec:
               key: api-key
               name: katalog-tmdb
               optional: true
-        - name: ODOWNLOADER_API_URL
-          value: ""
-        - name: ODOWNLOADER_API_TOKEN
-          value: ""
-        - name: DOWNLOAD_GATEWAY_URL
-          value: ""
-        - name: DOWNLOAD_GATEWAY_EVENTS_ENABLED
-          value: "false"
         # Demo: bundled single-node Kafka (plaintext, in-namespace). No mTLS →
         # KAFKA_TLS_* intentionally blank. Isolated from the prod Strimzi.
 {{ include "z.kafkaEnv" . | indent 8 }}
