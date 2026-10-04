@@ -101,8 +101,14 @@ type ZaentrumReconciler struct {
 func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// The Zaentrum is read from the API server, not the cache. This pass starts
+	// Jobs from what status says about the last ones — a verification run, a
+	// realm run, a database copy — and a cache that has not seen the status the
+	// pass before wrote would have it start them again: one did, and replaced a
+	// verification run in flight. Its status write then failed on the stale
+	// resourceVersion, but the Jobs were already made. One GET a pass is cheap.
 	var z zaentrumv1alpha1.Zaentrum
-	if err := r.Get(ctx, req.NamespacedName, &z); err != nil {
+	if err := r.reader().Get(ctx, req.NamespacedName, &z); err != nil {
 		// Deleted: owner references garbage-collect the managed resources.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}

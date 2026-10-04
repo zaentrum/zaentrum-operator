@@ -1229,6 +1229,81 @@ func TestReconcileVerifiesAReadyPlatform(t *testing.T) {
 	assert.Len(t, jobs.Items, 1, "a failed fingerprint is not run again")
 }
 
+// A pass acts on the Zaentrum as the API server holds it. A cache that has not
+// yet seen the status the pass before wrote — no run in flight — once had a
+// pass replace the run in flight with a second, before its status write failed
+// on the stale resourceVersion. Read from the API server, the pass sees the run,
+// starts nothing and writes its status.
+func TestReconcileActsOnTheZaentrumTheAPIServerHolds(t *testing.T) {
+	z := verifyCR()
+	s := selfScheme(t)
+	api := fake.NewClientBuilder().WithScheme(s).WithObjects(z).
+		WithStatusSubresource(&zaentrumv1alpha1.Zaentrum{}, &appsv1.Deployment{}, &batchv1.Job{}).
+		WithInterceptorFuncs(interceptor.Funcs{Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			return applyAsCreateOrUpdate(ctx, cl, obj, patch, opts...)
+		}}).Build()
+	// The cache: it serves the Zaentrum as it was before the run started.
+	var stale *zaentrumv1alpha1.Zaentrum
+	cached := interceptor.NewClient(api, interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		if out, ok := obj.(*zaentrumv1alpha1.Zaentrum); ok && stale != nil {
+			stale.DeepCopyInto(out)
+			return nil
+		}
+		return c.Get(ctx, key, obj, opts...)
+	}})
+	r := &ZaentrumReconciler{Client: cached, APIReader: api, Scheme: s}
+	ctx := context.Background()
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: verifyNS, Name: "zaentrum"}}
+	get := func() *zaentrumv1alpha1.Zaentrum {
+		var got zaentrumv1alpha1.Zaentrum
+		require.NoError(t, api.Get(ctx, req.NamespacedName, &got))
+		return &got
+	}
+	runs := func() []batchv1.Job {
+		var jobs batchv1.JobList
+		require.NoError(t, api.List(ctx, &jobs, client.InNamespace(verifyNS), client.MatchingLabels{labelVerification: verificationRun}))
+		return jobs.Items
+	}
+
+	_, err := r.Reconcile(ctx, req)
+	require.NoError(t, err)
+	var deps appsv1.DeploymentList
+	require.NoError(t, api.List(ctx, &deps, client.InNamespace(verifyNS)))
+	for i := range deps.Items {
+		d := &deps.Items[i]
+		desired := int32(1)
+		if d.Spec.Replicas != nil {
+			desired = *d.Spec.Replicas
+		}
+		d.Status.AvailableReplicas, d.Status.UpdatedReplicas = desired, desired
+		require.NoError(t, api.Status().Update(ctx, d))
+	}
+	_, err = r.Reconcile(ctx, req) // the realm run goes first
+	require.NoError(t, err)
+	var realm batchv1.JobList
+	require.NoError(t, api.List(ctx, &realm, client.InNamespace(verifyNS), client.MatchingLabels{labelRealm: realmRun}))
+	require.Len(t, realm.Items, 1)
+	realm.Items[0].Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+	require.NoError(t, api.Status().Update(ctx, &realm.Items[0]))
+
+	stale = get() // no run yet
+	require.Nil(t, stale.Status.Verification)
+	_, err = r.Reconcile(ctx, req)
+	require.NoError(t, err)
+	require.Len(t, runs(), 1)
+	inFlight := runs()[0].Name
+	require.Equal(t, inFlight, get().Status.Verification.Job)
+
+	// The next pass, while the cache still serves the Zaentrum without the run.
+	_, err = r.Reconcile(ctx, req)
+	require.NoError(t, err, "a pass that read the Zaentrum from the API server writes its status")
+	jobs := runs()
+	require.Len(t, jobs, 1, "no second run")
+	assert.Equal(t, inFlight, jobs[0].Name, "the run in flight was not replaced")
+	assert.Equal(t, inFlight, get().Status.Verification.Job)
+	assert.Equal(t, zaentrumv1alpha1.VerificationRunning, get().Status.Verification.Result)
+}
+
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
