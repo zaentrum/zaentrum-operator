@@ -118,14 +118,25 @@ Once Keycloak has restarted, the realm's own console is
 
 ## Persistence
 
-The platform keeps its data on two claims, which k3s's `local-path`
+The platform keeps its data on three claims, which k3s's `local-path`
 StorageClass makes directories under `/var/lib/rancher/k3s/storage` — inside
 the Docker volume the image declares for `/var/lib/rancher/k3s`:
 
 - `media` — the library, and with the pipeline on, its packaged streams;
 - `postgres-data` — the bundled Postgres: users and their watch state, the
   catalog, Keycloak's accounts and the portal's settings. A new install starts
-  its Postgres on this claim (`spec.storage.postgres`).
+  its Postgres on this claim (`spec.storage.postgres`);
+- `backups` — a dump of every database each night, the newest seven kept
+  ([the operator's README](../../operator/README.md#backups-of-the-bundled-postgres-specbackup)).
+  They are in the same Docker volume as the database, so they undo a mistake
+  inside the platform, not the loss of the volume: copy them off the box too,
+
+  ```bash
+  dumps=$(docker exec zaentrum sh -c 'echo /var/lib/rancher/k3s/storage/pvc-*_zaentrum_backups')
+  docker cp zaentrum:"$dumps"/. ./zaentrum-backups/
+  ```
+
+  and the platform's generated Secrets with them, as that README says.
 
 Kafka's log and the HLS cache are `emptyDir`s, which last as long as their
 pods.

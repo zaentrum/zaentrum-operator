@@ -430,6 +430,141 @@ and the Postgres follow the volume to its node.
 With `databases.mode: external` the databases are the tenant's: no claim, no
 copy, no condition.
 
+### Backups of the bundled Postgres (`spec.backup`)
+
+```yaml
+spec:
+  backup:
+    enabled: true          # unset: on wherever the bundled Postgres is on a claim
+    schedule: "@daily"     # a CronJob schedule, the controller manager's time zone
+    retention: 7           # dumps kept, newest first
+    size: 5Gi              # the claim backups, ReadWriteOnce
+    className: ""          # empty: the Postgres's StorageClass
+    claimName: ""          # an existing claim instead, e.g. one kept from before
+```
+
+The CronJob `zaentrum-backup` (the chart's `templates/backup.yaml`) dumps every
+platform database — `databases.chino`, `.katalog`, `.keycloak`, `.portal` —
+over the network while the platform serves, from the image the Postgres runs
+([`files/postgres-backup.sh`](platform/chart/files/postgres-backup.sh)). One
+run at a time; one that was missed while the cluster was down runs within six
+hours. Each run writes one dump, a directory on the claim `backups` named
+after when it began, in UTC:
+
+```
+backups/2026-10-04T00-00-05Z/
+  globals.sql     the roles and their grants, but the superuser's
+  chino.dump      each database, pg_dump's custom format, compressed
+  katalog.dump
+  keycloak.dump
+  portal.dump
+  SHA256SUMS      the sha256 of each file above
+```
+
+It is written as `.partial-<name>` and renamed once whole; then the newest
+`retention` dumps stay and the rest go. Each database's dump is one consistent
+snapshot of it; the databases are dumped one after another.
+
+Backups are on by default wherever the bundled Postgres keeps its data on a
+claim — every new install — and off where it still runs on an `emptyDir`
+(move it with `spec.storage.postgres.migrate`, or set `enabled: true`) and
+with `databases.mode: external`, whose backups are the tenant's. Turned off,
+the operator removes the CronJob; the claim stays. The claim is not owned by
+the Zaentrum (nor by a Helm release: `helm.sh/resource-policy: keep`), so
+deleting the platform leaves the backups; delete the claim yourself.
+
+The operator reads each run's summary from its pod, as it reads a
+verification run's:
+
+```yaml
+status:
+  backup:
+    lastSuccess: 2026-10-04T00:01:12Z
+    lastDump:    2026-10-04T00-00-05Z      # the name a restore asks for
+    lastFailure: 2026-10-02T00:00:40Z
+    dumps: [2026-10-04T00-00-05Z, 2026-10-03T00-00-04Z, …]
+    job: zaentrum-backup-29324160
+  conditions:
+  - { type: Backup, status: "True", reason: Succeeded,
+      message: "2026-10-04T00-00-05Z: 4 databases, 12.0 MiB; 7 dumps kept, 4.1 GiB free" }
+```
+
+`Backup` is `False` with reason `Failed` — the run's own reason, and the last
+dump that succeeded — when the latest run failed, `Disabled` when backups are
+off, and `Unknown` (`Scheduled`) until the first run. RBAC: the operator's
+ClusterRole holds `batch/cronjobs`; `deploy/operator-install.yaml` gains the
+rule with its next re-pin.
+
+**Restoring.** Annotate the Zaentrum with the dump's name:
+
+```sh
+kubectl -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.backup.dumps}'; echo
+kubectl -n zaentrum annotate zaentrum zaentrum --overwrite \
+  zaentrum.io/restore-request=2026-10-04T00-00-05Z
+kubectl -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.backup.restore}'; echo
+```
+
+The operator then:
+
+1. stops every client of the database — chino-api, katalog-api,
+   katalog-manager-api, keycloak, portal-api, and the pipeline's workers and
+   katalog-ingest, which write through katalog-manager-api — and suspends the
+   backups (`result: Stopping`; the phase is `Restoring`, the platform is
+   down meanwhile);
+2. once none of their pods is left and no backup runs, starts
+   `postgres-restore-<suffix>` ([`files/postgres-restore.sh`](platform/chart/files/postgres-restore.sh),
+   `result: Running`), which makes sure the dump is whole — the directory is
+   there, `SHA256SUMS` names `globals.sql` and a dump of every database and
+   nothing else is beside them, every checksum matches, `pg_restore` reads
+   each dump — and **refuses**, changing nothing, when it is not; waits for any
+   other session to leave the databases; makes the roles of the dump the
+   Postgres lacks (never the superuser, whose password stays Secret
+   `zaentrum-db`'s); recreates each database from its dump, stopping at the
+   first error; and checks each holds the tables its dump lists;
+3. reads the result — `Succeeded`, `Refused` (nothing was changed) or
+   `Failed` (one database may already be restored: restore again) — and starts
+   the clients again; after a success the realm Job runs again over the
+   restored realm.
+
+`status.backup.restore` and the `Restore` condition say where it is. A request
+is answered once: to restore the same dump again, give it a value of its own,
+`2026-10-04T00-00-05Z#2`. A value that names no dump, external databases, or
+no claim `backups` are refused at once. A restore waits for a database copy
+(`spec.storage.postgres.migrate`) to end, and neither a verification nor a
+realm run starts while one runs. What was written after the dump was made is
+gone once it is restored.
+
+With plain Helm, the same in two upgrades: `--set backup.restore=<dump>`
+stops the clients, suspends the backups and runs the restore as a post-upgrade
+hook (`kubectl logs job/postgres-restore`); an upgrade without it starts them
+again.
+
+**What a backup does not hold.**
+
+- *The platform's Secrets* — `zaentrum-db`, `zaentrum-keycloak` (the
+  `zaentrum-manager` client's secret, which the restored realm also holds),
+  `zaentrum-keycloak-admin` (the bootstrap admin, whose password the restored
+  master realm also holds), `zaentrum-demo-user` and `zaentrum-stream-signing`.
+  Restoring into the install that made the dump needs
+  none of them; restoring into a new one — another cluster, a re-created
+  appliance — needs those it had. Keep them once, somewhere safe, as you would
+  the dumps, which hold the realm's password hashes and client secrets:
+
+  ```sh
+  kubectl -n zaentrum get secret zaentrum-db zaentrum-keycloak zaentrum-keycloak-admin \
+    zaentrum-demo-user zaentrum-stream-signing -o yaml > zaentrum-secrets.yaml
+  ```
+
+  Into a new install: create the namespace, apply them (drop `ownerReferences`,
+  `uid` and `resourceVersion` first) before the Zaentrum, so the operator finds
+  them and makes none; bring the claim with the dumps along
+  (`spec.backup.claimName`); once the platform is up, restore. With
+  `secrets.external` they are yours already.
+- *The media library.* It lives on the `media` volume: back that up as you
+  back up your files. The packaged streams beside it are made again by the
+  pipeline.
+- Kafka's topics and Valkey's cache, which the platform makes again.
+
 ### The media pipeline (`spec.pipeline`)
 
 `features.pipeline` runs the workers that make a title playable everywhere:

@@ -142,11 +142,19 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		_ = r.patchStatus(ctx, &z)
 		return ctrl.Result{}, err
 	}
+	// A restore of the bundled Postgres stops every client of the database for
+	// as long as it runs; whether one is in flight, or starts, is decided
+	// before the render for the same reason (restore.go).
+	restoreDump := r.planRestore(ctx, &z, db.copying)
+	if restoreDump != "" {
+		db.start = false
+	}
 	vals := templates.NewValues(&z)
 	vals.OpenShift = openShift
 	vals.Version = decision.RenderTag
 	vals.PostgresVolume = db.volume
 	vals.PostgresMigrate = db.migrate
+	vals.RestoreDump = restoreDump
 	rendered, err := templates.Render(vals)
 	if err != nil {
 		r.setApplied(&z, metav1.ConditionFalse, "RenderFailed", err.Error())
@@ -212,6 +220,11 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	// The restore in flight takes its step now that its clients were applied
+	// stopped, and the backups are read.
+	restoreInFlight := r.stepRestore(ctx, &z, objs, tests)
+	r.reportBackups(ctx, &z, objs)
+
 	// Refresh component readiness from the live Deployments and roll status up.
 	allReady, err := r.refreshComponents(ctx, &z, objs)
 	if err != nil {
@@ -232,6 +245,15 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	z.Status.Controller = r.controllerReport(ctx, &z, channelTarget)
 
 	switch {
+	case restoreInFlight:
+		// The database's clients are stopped on purpose: not Ready, and not
+		// "still working on it" either.
+		z.Status.Phase = "Restoring"
+		msg := "restoring the bundled Postgres"
+		if rs := restoreStatus(&z); rs != nil && rs.Message != "" {
+			msg = rs.Message
+		}
+		r.setReady(&z, metav1.ConditionFalse, "Restoring", msg)
 	case allReady:
 		z.Status.Phase = "Ready"
 		r.setReady(&z, metav1.ConditionTrue, "AllComponentsReady", "all components are ready")
@@ -256,6 +278,9 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if db.copying {
 		hold = "the bundled Postgres is being copied onto its claim"
 	}
+	if restoreInFlight {
+		hold = "the bundled Postgres is being restored"
+	}
 	configuring := r.configureRealm(ctx, &z, objs, tests, hold)
 
 	// The platform's self-test, after every update that leaves it Ready and on
@@ -265,14 +290,14 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Job may end the master token the check's account preparation holds.
 	// Nor does it start while the database is being copied: what it wrote
 	// would not be carried across, and the Postgres is about to restart.
-	verifying := r.verify(ctx, &z, vals.Version, objs, tests, allReady && !configuring && !db.copying)
+	verifying := r.verify(ctx, &z, vals.Version, objs, tests, allReady && !configuring && !db.copying && !restoreInFlight)
 
 	if err := r.patchStatus(ctx, &z); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
-	if verifying || configuring || db.copying {
+	if verifying || configuring || db.copying || restoreInFlight {
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -382,8 +407,10 @@ func (r *ZaentrumReconciler) resolveUpdate(ctx context.Context, z *zaentrumv1alp
 // reclaims ownership of fields a prior manager (e.g. kubectl) touched.
 func (r *ZaentrumReconciler) applyAll(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, objs []*unstructured.Unstructured) error {
 	for _, obj := range objs {
-		// Own namespaced resources so they cascade-delete with the CR.
-		if obj.GetNamespace() != "" {
+		// Own namespaced resources so they cascade-delete with the CR — but
+		// what the chart marks to be kept when the platform goes (the claim
+		// with the backups), which Helm keeps on an uninstall too.
+		if obj.GetNamespace() != "" && obj.GetAnnotations()["helm.sh/resource-policy"] != "keep" {
 			if err := controllerutil.SetControllerReference(z, obj, r.Scheme); err != nil {
 				return fmt.Errorf("set owner ref on %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 			}
