@@ -26,6 +26,8 @@ image, one port, nothing else to install; the first boot pulls the platform's im
 - **linux/amd64 only.** No arm64 image is published yet.
 - **This machine only.** Phones, TVs and other computers need https — see
   [phones and TVs](#phones-and-tvs).
+- **Keep the container.** The library and the database live in its volume, and replacing the
+  container starts an empty platform — see [persistence](deploy/allinone/README.md#persistence).
 
 The appliance in detail: [deploy/allinone/README.md](deploy/allinone/README.md).
 

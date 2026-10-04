@@ -118,31 +118,59 @@ Once Keycloak has restarted, the realm's own console is
 
 ## Persistence
 
-Postgres (users, watch state, the catalog), the media library and the HLS cache
-live on PersistentVolumeClaims backed by k3s's `local-path` StorageClass, so
-they outlive a pod's restart or reschedule and a `docker restart`. They are
-still inside the container, though: `docker rm` takes them with it. To keep
-them across a re-created container, keep the whole k3s state on a volume, and
-give the container a fixed host name — k3s names its node after it, and a
-`local-path` volume belongs to the node it was made on:
+The platform keeps its data on two claims, which k3s's `local-path`
+StorageClass makes directories under `/var/lib/rancher/k3s/storage` — inside
+the Docker volume the image declares for `/var/lib/rancher/k3s`:
+
+- `media` — the library, and with the pipeline on, its packaged streams;
+- `postgres-data` — the bundled Postgres: users and their watch state, the
+  catalog, Keycloak's accounts and the portal's settings. A new install starts
+  its Postgres on this claim (`spec.storage.postgres`).
+
+Kafka's log and the HLS cache are `emptyDir`s, which last as long as their
+pods.
+
+- **A restart keeps the platform.** `docker stop` / `docker start`, a Docker
+  restart, or a reboot with `--restart unless-stopped` bring back the same
+  cluster with its data, and so do pods restarted or rescheduled inside it.
+- **Replacing the container starts a new, empty platform.** `docker rm` and a
+  new `docker run` start a new cluster in a new volume, whose claims get new
+  directories — `local-path` names each one after its claim's UID — so even a
+  volume mounted at k3s's storage path keeps the old files without attaching
+  them. The old volume stays behind, unattached.
+
+To be able to re-create the container, keep the whole k3s state on a named
+volume from the first `docker run`, and give the container a fixed host name —
+k3s names its node after it, and a `local-path` volume belongs to the node it
+was made on:
 
 ```bash
-docker run -d --privileged --name zaentrum -h zaentrum -p 80:80 \
+docker run -d --privileged --restart unless-stopped --name zaentrum -h zaentrum -p 80:80 \
   -v zaentrum:/var/lib/rancher/k3s \
   ghcr.io/zaentrum/appliance:latest
 ```
 
-The volume then also keeps the operator install the first container brought.
-To take a newer one from a newer image, copy it over before you re-create:
+A container re-created on that volume with the same host name comes back as
+the same cluster, its database and its generated Secrets included. The volume
+then also keeps the operator install the first container brought. To take a
+newer one from a newer image, copy it over before you re-create:
 
 ```bash
 docker run --rm -v zaentrum:/state --entrypoint sh ghcr.io/zaentrum/appliance:latest \
   -c 'cp /var/lib/rancher/k3s/server/manifests/10-operator.yaml /state/server/manifests/'
 ```
 
-An appliance made before Postgres moved onto a claim keeps it on an emptyDir
-until it is copied over: see
-[the operator's README](../../operator/README.md#the-bundled-postgres-keeps-its-data-specstoragepostgres).
+An appliance made before Postgres moved onto a claim keeps it on an
+`emptyDir` — which anything that recreates its pod empties — until a copy
+moves it
+([the operator's README](../../operator/README.md#the-bundled-postgres-keeps-its-data-specstoragepostgres)):
+
+```bash
+docker exec zaentrum kubectl -n zaentrum patch zaentrum zaentrum --type merge \
+  -p '{"spec":{"storage":{"postgres":{"migrate":true}}}}'
+docker exec zaentrum kubectl -n zaentrum get zaentrum zaentrum \
+  -o jsonpath='{.status.conditions[?(@.type=="DatabasePersistent")].message}'; echo
+```
 
 ## What's inside
 
@@ -249,3 +277,7 @@ and to pass its own verification.
 ```bash
 docker rm -f zaentrum
 ```
+
+That leaves the container's volume — the cluster, the library, the database —
+behind, unattached; `docker rm -fv zaentrum` removes it with the container. A
+named volume (`-v zaentrum:…`) stays until `docker volume rm zaentrum`.
