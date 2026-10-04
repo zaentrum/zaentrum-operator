@@ -290,6 +290,10 @@ spec:
             - apiGroups: ["batch"]
               resources: ["cronjobs"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            # The platform's certificate from cert-manager (a Certificate).
+            - apiGroups: ["cert-manager.io"]
+              resources: ["certificates"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
             # Ingress (provisionIngress profiles).
             - apiGroups: ["networking.k8s.io"]
               resources: ["ingresses"]

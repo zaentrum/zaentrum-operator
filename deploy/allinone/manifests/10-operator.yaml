@@ -1311,6 +1311,11 @@ rules:
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The platform's certificate from cert-manager (spec.tls.issuerRef): the
+  # chart's Certificate, which the operator applies and reads the readiness of.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Ingress (plain-Kubernetes exposure; provisionIngress profiles).
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]

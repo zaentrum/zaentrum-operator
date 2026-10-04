@@ -228,7 +228,8 @@ func TestEveryClusterRoleHoldsWhatVerificationUses(t *testing.T) {
 
 // What backups need, every ClusterRole shipped with an operator that renders
 // them allows: the chart's CronJob is applied, read and, with backups turned
-// off, deleted; the restore is a Job like the other runs. The pinned install
+// off, deleted; the restore is a Job like the other runs. So does what a
+// certificate from cert-manager needs: the Certificate. The pinned install
 // (deploy/operator-install.yaml) pins an operator that renders no CronJob, and
 // gains the rule with the next re-pin, as its CRD gains sinceThePin.
 func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
@@ -245,6 +246,9 @@ func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 			assert.True(t, ruleHolds(rules, "batch", "jobs", verb), "%s: no %s on batch jobs", file, verb)
 		}
 		assert.True(t, ruleHolds(rules, "", "persistentvolumeclaims", "patch"), file)
+		for _, verb := range []string{"get", "create", "patch", "update"} {
+			assert.True(t, ruleHolds(rules, "cert-manager.io", "certificates", verb), "%s: no %s on cert-manager.io certificates", file, verb)
+		}
 	}
 	assert.False(t, ruleHolds(managerRules(t, pinnedInstall), "batch", "cronjobs", "create"),
 		"%s holds the CronJob rule: it was re-pinned, so empty sinceThePin and fold it into the loop above", pinnedInstall)
