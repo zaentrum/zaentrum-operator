@@ -416,6 +416,11 @@ stays), then, once it succeeded, one with `storage.postgres.current=postgres-dat
 and `migrate=false` (the switch). Without `current`, an upgrade looks at the
 running Postgres and keeps it where it is.
 
+On a cluster without dynamic provisioning the claim cannot come by itself:
+make a PersistentVolume and a claim bound to it, as for `storage.kafkaPvc`,
+and name the claim in `claimName` — the chart then creates none, and the copy
+and the Postgres follow the volume to its node.
+
 With `databases.mode: external` the databases are the tenant's: no claim, no
 copy, no condition.
 
