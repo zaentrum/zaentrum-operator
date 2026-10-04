@@ -39,14 +39,7 @@ const canonicalCRD = "../../config/crd/zaentrum.io_zaentrums.yaml"
 // the test.
 const pinnedInstall = "../../../deploy/operator-install.yaml"
 
-var sinceThePin = []string{
-	"spec.identity.mobileClientId",
-	"spec.identity.tvClientId",
-	"spec.backup",
-	"spec.pipeline",
-	"spec.tls",
-	"status.backup",
-}
+var sinceThePin = []string{}
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted
 // paths below openAPIV3Schema, such as "spec.identity.tvClientId" — removed.
@@ -229,13 +222,12 @@ func TestEveryClusterRoleHoldsWhatVerificationUses(t *testing.T) {
 // What backups need, every ClusterRole shipped with an operator that renders
 // them allows: the chart's CronJob is applied, read and, with backups turned
 // off, deleted; the restore is a Job like the other runs. So does what a
-// certificate from cert-manager needs: the Certificate. The pinned install
-// (deploy/operator-install.yaml) pins an operator that renders no CronJob, and
-// gains the rule with the next re-pin, as its CRD gains sinceThePin.
+// certificate from cert-manager needs: the Certificate.
 func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 	for _, file := range []string{
 		"../../config/rbac/role.yaml",
 		"../../bundle/manifests/zaentrum-operator.clusterserviceversion.yaml",
+		pinnedInstall,
 		"../../../deploy/allinone/manifests/10-operator.yaml",
 	} {
 		rules := managerRules(t, file)
@@ -250,8 +242,6 @@ func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 			assert.True(t, ruleHolds(rules, "cert-manager.io", "certificates", verb), "%s: no %s on cert-manager.io certificates", file, verb)
 		}
 	}
-	assert.False(t, ruleHolds(managerRules(t, pinnedInstall), "batch", "cronjobs", "create"),
-		"%s holds the CronJob rule: it was re-pinned, so empty sinceThePin and fold it into the loop above", pinnedInstall)
 }
 
 // spec.pipeline.ladder is checked where it is written: the CRD's pattern takes
