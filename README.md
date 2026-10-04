@@ -195,31 +195,38 @@ the docs describe.
 
 ## Repository layout
 
-This is the platform **meta-repo**: the operator, the deploy manifests, and the two
-platform-owned images that have no repo of their own. The application/service **sources**
-live in their own repos at `github.com/zaentrum/<svc>` and publish flat
-`ghcr.io/zaentrum/<svc>` images; the manifests here just reference those images.
+This is the platform **meta-repo**: the operator, the chart it renders, its install bundles and
+the appliance image. The application/service **sources** live in their own repos at
+`github.com/zaentrum/<svc>` and publish flat `ghcr.io/zaentrum/<svc>` images; the chart here
+just references those images.
 
 ```
-operator/         the controller-manager — reconciles the Zaentrum CR into the deploy set
-deploy/           allinone (k3s-in-one) · base (real cluster) · compose · overlays  ← source of truth for deploy
-apps/admin/       the /manage admin UI            → ghcr.io/zaentrum/admin     (built here)
-platform/keycloak/ bundled identity provider      → ghcr.io/zaentrum/keycloak  (built here)
-                  (deployment docs live in the front-door repo: github.com/zaentrum/zaentrum/docs)
+operator/                     the controller-manager: reconciles a Zaentrum into the platform → ghcr.io/zaentrum/operator
+operator/platform/chart/      the platform's Helm chart, embedded in the operator (or helm install it)
+operator/bundle/              the OLM bundle (OperatorHub, OpenShift)
+deploy/operator-install.yaml  the pinned cluster install: CRDs, RBAC, the controller
+deploy/allinone/              the appliance: k3s + the operator install + a Zaentrum  → ghcr.io/zaentrum/appliance
+deploy/{base,compose,k3s,overlays}/  older profiles, not supported
+apps/admin/, platform/keycloak/      images CI still builds (admin, keycloak); only those profiles use them
+                              (deployment docs live in the front-door repo: github.com/zaentrum/zaentrum/docs)
 ```
 
-Service images the manifests pull (each owned by its own `github.com/zaentrum` repo):
-`chino-web` · `chino-api` · `chino-stream` · `katalog-api` · `katalog-manager`.
+Service images the chart pulls, each built in a `github.com/zaentrum` service repo:
+`zaentrum-portal` · `portal-api` · `chino-web` · `chino-api` · `chino-stream` · `katalog-api` ·
+`katalog-manager` · `katalog-manager-ui` · `zae`, and with the pipeline `analyzer` · `packager` ·
+`transcoder` · `katalog-ingest`.
 
 ## What is deliberately **not** here
 
 Zaentrum is content-neutral. It catalogs and streams a library you already own; it never
 fetches content, and how files arrive on disk is out of scope. There are no built-in
 downloaders, no indexer integrations, and no automation that reaches out for media — by
-design and forever. See [docs/architecture.md](docs/architecture.md#scope).
+design and forever. See the scope section of the front door's
+[architecture](https://github.com/zaentrum/zaentrum/blob/main/docs/architecture.md).
 
 ## License
 
 [**MPL-2.0**](LICENSE) — file-level copyleft that protects the platform while staying
-distributable on mobile app stores (which matters for the iOS client). Rationale in
-[docs/architecture.md](docs/architecture.md#license).
+distributable on mobile app stores (which matters for the iOS client). Rationale in the
+license section of the front door's
+[architecture](https://github.com/zaentrum/zaentrum/blob/main/docs/architecture.md).
