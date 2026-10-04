@@ -241,11 +241,13 @@ costs the box:
   when they are not.
 
 Turn it off — titles are then served as chino-stream finds them, transcoded on
-the fly for a client that needs it — with:
+the fly for a client that needs it — and, as the operator removes nothing it no
+longer renders, delete the workers it ran:
 
 ```bash
 docker exec zaentrum kubectl -n zaentrum patch zaentrum zaentrum --type merge \
   -p '{"spec":{"features":{"pipeline":false}}}'
+docker exec zaentrum kubectl -n zaentrum delete deploy,svc analyzer transcoder packager katalog-ingest
 ```
 
 ## Where the images come from
