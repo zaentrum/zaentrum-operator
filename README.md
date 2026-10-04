@@ -31,9 +31,6 @@ image, one port, nothing else to install; the first boot pulls the platform's im
 
 The appliance in detail: [deploy/allinone/README.md](deploy/allinone/README.md).
 
-**Scale out:** the exact same manifests run on any real Kubernetes cluster —
-`kubectl apply -k deploy/base`.
-
 ---
 
 ## First run
@@ -93,6 +90,42 @@ Or publish it on the public host with `spec.identity.exposeAdminConsole: true`. 
 [operator/README.md](operator/README.md#the-admin-console); the appliance's variant:
 [deploy/allinone/README.md](deploy/allinone/README.md#keycloaks-admin-console).
 
+## Run it on a cluster
+
+The same platform runs on any Kubernetes cluster through the **operator**, which reconciles the
+whole stack from a single `Zaentrum` resource. Install it once, as cluster-admin, from its
+pinned install manifest — the CRDs, the cluster RBAC and the controller, pinned to one immutable
+`operator:sha-<commit>` image — then apply a `Zaentrum`:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/zaentrum/zaentrum-operator/main/deploy/operator-install.yaml
+kubectl create namespace zaentrum
+kubectl apply -f zaentrum.yaml     # your Zaentrum resource
+kubectl -n zaentrum get zaentrum   # PHASE Ready once it is up
+```
+
+On OpenShift or any OLM cluster, the [OLM bundle](operator/bundle) is the alternative; without
+the operator, `helm install` the chart it renders,
+[`operator/platform/chart`](operator/platform/chart).
+
+`spec.hostname` is the name the platform answers at: the operator derives the OIDC issuer,
+Keycloak's `KC_HOSTNAME` and the Ingress host from it. Serve that name over https — TLS
+terminated in front of the Ingress, `identity.issuerScheme: https`, and
+`network.issuerHostAliasIP` so in-cluster token validation reaches the https issuer. A minimal
+resource and every field:
+[self-hosting](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#b-self-host-with-the-operator),
+[operator & CR reference](https://github.com/zaentrum/zaentrum/blob/main/docs/operator.md).
+
+**After every update the platform checks itself** — outside-in through its public
+URL, with a real sign-in — and the operator reports the verdict in
+`status.verification` (`kubectl get zaentrum`, `zae platform status`). What runs,
+when, the test account and how to ask for a run:
+[operator/README.md](operator/README.md#the-platform-checks-itself-statusverification).
+
+`deploy/base`, `deploy/compose`, `deploy/k3s` and `deploy/overlays` are older profiles kept in
+the tree; they do not bring up a working platform and are not supported
+([why](https://github.com/zaentrum/zaentrum/blob/main/docs/self-hosting.md#d-k3s-and-compose-profiles)).
+
 ---
 
 ## Route map
@@ -132,38 +165,14 @@ Zaentrum is the platform; the clients are skins over one shared core.
 | **katalog-api** + processing (transcoder, packager, enricher, analyzer, artwork) | Neutral catalog core | Real |
 | **musig** / **tv** | Music / live clients | Planned — slots reserved |
 
-## Deploy
-
-`deploy/` is the single source of truth.
-
-```bash
-# All-in-one appliance — k3s in one container, everything bundled
-docker run -d --privileged -p 80:80 --name zaentrum ghcr.io/zaentrum/appliance:latest
-# then: open http://zaentrum.localhost
-
-# Scale out — the same manifests on a real cluster
-kubectl apply -k deploy/base
-```
-
-**After every update the platform checks itself** — outside-in through its public
-URL, with a real sign-in — and the operator reports the verdict in
-`status.verification` (`kubectl get zaentrum`, `zae platform status`). What runs,
-when, the test account and how to ask for a run:
-[operator/README.md](operator/README.md#the-platform-checks-itself-statusverification).
-
-**Running under a different name** (a LAN host, a public domain, or the box's IP):
-the issuer host must equal the host you reach Zaentrum at, so set it in all four places —
-`deploy/base/ingress.yaml` host, `zaentrum-env` `OIDC_ISSUER`, `zaentrum-keycloak-config`
-`KC_HOSTNAME`, and (on the appliance) the `STUBE_ISSUER_HOST` env var on the container.
-
-## Deploying
+## Documentation
 
 **Deployment & operations documentation lives in the front-door repo:
 [github.com/zaentrum/zaentrum → `docs/`](https://github.com/zaentrum/zaentrum/tree/main/docs).**
 It routes by audience and covers every path (prerequisites, self-hosting, the
 operator + `Zaentrum` CR reference, a worked GitOps deploy, day-2 updates, and
-troubleshooting). This repo holds the operator, chart, and deploy templates the
-docs describe.
+troubleshooting). This repo holds the operator, the chart, and the install bundles
+the docs describe.
 
 ## Repository layout
 
