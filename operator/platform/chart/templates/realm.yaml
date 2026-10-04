@@ -5,11 +5,12 @@
 # that exists keeps what was imported when it was made, so this Job writes the
 # platform's own sign-in redirects (z.realmClients) and the flows each of those
 # clients allows (z.realmSettings) into it, makes one of them the realm lacks
-# as the import has it (z.realmImport), and writes where the admin console
-# signs in (z.adminConsoleURL) into the master realm, through the in-cluster
-# admin API, from the very image the platform's Keycloak runs. See
-# files/realm-config.sh. It changes nothing else, and leaves alone what is
-# already so.
+# as the import has it (z.realmImport), keeps the client the People page
+# manages people with to its secret and its three roles (z.peopleClient), and
+# writes where the admin console signs in (z.adminConsoleURL) into the master
+# realm, through the in-cluster admin API, from the very image the platform's
+# Keycloak runs. See files/realm-config.sh. It changes nothing else, and leaves
+# alone what is already so.
 #
 # A Helm hook, so a plain Helm install runs it after every install and upgrade.
 # The operator never applies it with the platform: it starts it itself, as a
@@ -77,6 +78,25 @@ spec:
 {{- range $client, $c := include "z.realmClients" . | fromJson }}
                 {{ $client }} {{ index $reps $client | toJson }}
 {{- end }}
+{{- $people := include "z.peopleClient" $import | fromJson }}
+            # The client portal-api manages the realm's people with (z.peopleClient):
+            # made as the import makes it when the realm lacks it, signing in as
+            # the import says, with the secret in Secret zaentrum-people, and its
+            # service account holding exactly these realm-management roles and no
+            # other role.
+            - name: PEOPLE_CLIENT
+              value: {{ $people.clientId }}
+            - name: PEOPLE_CLIENT_JSON
+              value: {{ $people.representation | toJson | quote }}
+            - name: PEOPLE_SETTINGS
+              value: {{ $people.settings | quote }}
+            - name: PEOPLE_ROLES
+              value: {{ $people.roles | quote }}
+            - name: PEOPLE_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: zaentrum-people, key: client-secret, optional: true } }
+            # The realm's password policy, where it has none.
+            - name: PASSWORD_POLICY
+              value: {{ $import.passwordPolicy | quote }}
             # What a demo user still signing in with the import's placeholder
             # password gets instead.
             - name: DEMO_USER_PASSWORD

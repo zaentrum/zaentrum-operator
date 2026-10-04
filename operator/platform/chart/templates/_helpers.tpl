@@ -166,7 +166,8 @@ z.realmImport — the bundled realm as a new one is imported, as JSON:
 files/keycloak-realm.json with the redirects, web origins and post-logout
 redirect URIs of z.realmClients filled in. The import (keycloak-realm.yaml)
 writes it into a new realm; the realm Job (realm.yaml) makes a client an
-existing realm lacks from it, and sets what z.realmSettings reads from it.
+existing realm lacks from it, and sets what z.realmSettings and z.peopleClient
+read from it.
 */}}
 {{- define "z.realmImport" -}}
 {{- $realm := .Files.Get "files/keycloak-realm.json" | fromJson }}
@@ -180,6 +181,28 @@ existing realm lacks from it, and sets what z.realmSettings reads from it.
 {{- end }}
 {{- end }}
 {{- toJson $realm -}}
+{{- end -}}
+
+{{/*
+z.peopleClient — the client portal-api manages the realm's people with (the
+People page and its invites, server/internal/people in zaentrum-portal), as
+JSON: its clientId, its representation in the realm import, the settings the
+realm Job keeps (name=value, as z.realmSettings), and the realm-management
+roles its service account holds — those three and nothing else. Pass the
+realm import (z.realmImport, parsed).
+*/}}
+{{- define "z.peopleClient" -}}
+{{- $import := . -}}
+{{- $rep := dict -}}
+{{- range $import.clients }}{{ if eq .clientId "zaentrum-people" }}{{ $rep = . }}{{ end }}{{ end -}}
+{{- $roles := list -}}
+{{- range $import.users }}{{ if eq (.serviceAccountClientId | default "") "zaentrum-people" }}{{ $roles = index .clientRoles "realm-management" }}{{ end }}{{ end -}}
+{{- $settings := list -}}
+{{- range $field := list "publicClient" "serviceAccountsEnabled" "standardFlowEnabled" "implicitFlowEnabled" "directAccessGrantsEnabled" -}}
+{{- $settings = append $settings (printf "%s=%v" $field (index $rep $field)) -}}
+{{- end -}}
+{{- $settings = append $settings (printf "oauth2.device.authorization.grant.enabled=%s" (index $rep.attributes "oauth2.device.authorization.grant.enabled")) -}}
+{{- dict "clientId" $rep.clientId "representation" $rep "settings" (join " " $settings) "roles" (join " " (sortAlpha $roles)) | toJson -}}
 {{- end -}}
 
 {{/*

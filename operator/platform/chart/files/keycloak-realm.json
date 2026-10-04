@@ -12,6 +12,7 @@
   "verifyEmail": false,
   "rememberMe": true,
   "bruteForceProtected": true,
+  "passwordPolicy": "length(8) and notUsername and notEmail",
   "accessTokenLifespan": 300,
   "accessTokenLifespanForImplicitFlow": 900,
   "ssoSessionIdleTimeout": 1800,
@@ -49,7 +50,7 @@
       },
       {
         "name": "zaentrum-admin",
-        "description": "Zaentrum administrator. Opens the Catalog and Catalog Management consoles and the operator console from the portal, and may use the catalog's and the portal's management APIs. Accounts are made in Keycloak's admin console.",
+        "description": "Zaentrum administrator. Opens the Catalog and Catalog Management consoles, the operator console and the People page from the portal, and may use the catalog's and the portal's management APIs. People are added on the People page.",
         "composite": false,
         "clientRole": false
       },
@@ -439,6 +440,29 @@
         "roles",
         "web-origins"
       ]
+    },
+    {
+      "clientId": "zaentrum-people",
+      "name": "Zaentrum People",
+      "description": "Confidential service-account client portal-api manages the realm's people with (the People page, invites): view-users, query-users and manage-users of realm-management, nothing else. Not for interactive login; the realm Job sets its secret.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "bearerOnly": false,
+      "frontchannelLogout": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "use.refresh.tokens": "false",
+        "client_credentials.use_refresh_token": "false"
+      },
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
     }
   ],
   "users": [
@@ -499,6 +523,18 @@
           "view-users",
           "query-users",
           "view-realm"
+        ]
+      }
+    },
+    {
+      "username": "service-account-zaentrum-people",
+      "enabled": true,
+      "serviceAccountClientId": "zaentrum-people",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "query-users",
+          "view-users"
         ]
       }
     }

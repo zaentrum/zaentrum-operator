@@ -16,6 +16,18 @@
 # One the realm lacks — a realm imported before the chart had it, or one
 # deleted since — is made as the import makes it (REALM_CLIENT_JSON).
 #
+# Then the client portal-api manages the realm's people with (PEOPLE_CLIENT):
+# made as the import makes it when the realm lacks it, signing in as the import
+# says (PEOPLE_SETTINGS: confidential, the client credentials grant and no
+# other), with the secret in Secret zaentrum-people when there is one, and its
+# service account holding exactly the realm-management roles PEOPLE_ROLES
+# (view-users, query-users, manage-users) — no other client role, no realm
+# role but the realm's default roles. A role someone granted it by hand goes.
+#
+# Then the realm stops asking people at sign-in to complete their profile (the
+# required action VERIFY_PROFILE): a person here may have no email, and a child
+# no last name. And a realm without a password policy gets PASSWORD_POLICY.
+#
 # Then the demo user. A realm imported without Secret zaentrum-demo-user gave it
 # the password "${DEMO_USER_PASSWORD}" — Keycloak leaves a placeholder it cannot
 # resolve as it is — the same on every such install. If it still signs in with
@@ -46,6 +58,12 @@
 #                    with a dot in its name, an attribute
 #   REALM_CLIENT_JSON  one line per client: <clientId> <its representation, as
 #                    the realm import has it>, for a client the realm lacks
+#   PEOPLE_CLIENT    the people client's clientId; unset: no such client
+#   PEOPLE_CLIENT_JSON  its representation, as the realm import has it
+#   PEOPLE_SETTINGS  how it signs in, as REALM_CLIENTS' settings
+#   PEOPLE_ROLES     its service account's realm-management roles, by name
+#   PEOPLE_CLIENT_SECRET  from Secret zaentrum-people, when there is one
+#   PASSWORD_POLICY  the password policy of a realm that has none
 #   MASTER_FRONTEND_URL  the master realm's frontend URL; empty unsets it.
 #                    Not set at all: left as it is.
 #   DEMO_USER_PASSWORD   from Secret zaentrum-demo-user, when there is one
@@ -121,6 +139,44 @@ until kc config credentials --server "$KC_SERVER" --realm master --user "$KC_ADM
 	sleep 5
 done
 
+# keep_settings makes the client $1 (id $2) sign people in as the settings $3
+# say: space-separated name=value, a client field or, with a dot in its name,
+# an attribute. A field reads as true or false; an attribute the client does
+# not have reads as empty, which for a switch means off. What differs is set
+# with one merge — what is named changes, nothing else — and said in
+# $changed, which is empty when the client was so already.
+keep_settings() {
+	local client=$1 id=$2 settings=$3 setting name value have fields="" attrs="" body
+	changed=""
+	for setting in $settings; do
+		name=${setting%%=*} value=${setting#*=}
+		case $name in
+		*.*) have=$(kc get "clients/$id" -r "$realm" --fields "attributes($name)" --format csv --noquotes) ;;
+		*) have=$(kc get "clients/$id" -r "$realm" --fields "$name" --format csv --noquotes) ;;
+		esac || fail "cannot read the client $client: $(why)"
+		if [ "$have" = "$value" ] || { [ -z "$have" ] && [ "$value" = false ]; }; then
+			continue
+		fi
+		case $name in
+		*.*) attrs+="${attrs:+,}$(js "$name"):$(js "$value")" ;;
+		*) fields+="${fields:+,}$(js "$name"):$value" ;;
+		esac
+		changed+="${changed:+; }$name ${have:-unset} -> $value"
+	done
+	if [ -n "$changed" ]; then
+		body="{${fields}${fields:+${attrs:+,}}${attrs:+\"attributes\":{$attrs}}}"
+		printf '%s' "$body" | kc update "clients/$id" -r "$realm" -f - -m ||
+			fail "cannot set how the client $client signs in: $(why)"
+	fi
+}
+
+# client_id prints the id of the client $1 in the realm, or nothing when the
+# realm has none of that clientId.
+client_id() {
+	kc get clients -r "$realm" -q "clientId=$1" --fields id --format csv --noquotes ||
+		fail "cannot look up the client $1 in realm $realm: $(why)"
+}
+
 # imported prints the realm import's representation of a client, or fails.
 imported() {
 	local want=$1 name rep
@@ -152,30 +208,10 @@ while IFS='|' read -r client redirects origins logout settings; do
 		continue
 	fi
 
-	# How the client signs people in. A field reads as true or false; an
-	# attribute the client does not have reads as empty, which for a switch
-	# means off.
-	flows="" fields="" attrs=""
-	for setting in $settings; do
-		name=${setting%%=*} value=${setting#*=}
-		case $name in
-		*.*) have=$(kc get "clients/$id" -r "$realm" --fields "attributes($name)" --format csv --noquotes) ;;
-		*) have=$(kc get "clients/$id" -r "$realm" --fields "$name" --format csv --noquotes) ;;
-		esac || fail "cannot read the client $client: $(why)"
-		if [ "$have" = "$value" ] || { [ -z "$have" ] && [ "$value" = false ]; }; then
-			continue
-		fi
-		case $name in
-		*.*) attrs+="${attrs:+,}$(js "$name"):$(js "$value")" ;;
-		*) fields+="${fields:+,}$(js "$name"):$value" ;;
-		esac
-		flows+="${flows:+; }$name ${have:-unset} -> $value"
-	done
+	# How the client signs people in.
+	keep_settings "$client" "$id" "$settings"
+	flows=$changed
 	if [ -n "$flows" ]; then
-		# A merge, as below: what is named changes, nothing else.
-		body="{${fields}${fields:+${attrs:+,}}${attrs:+\"attributes\":{$attrs}}}"
-		printf '%s' "$body" | kc update "clients/$id" -r "$realm" -f - -m ||
-			fail "cannot set how the client $client signs in: $(why)"
 		echo "realm-config: $client: $flows"
 		set_flows+=("$client")
 	fi
@@ -210,6 +246,145 @@ $(sorted "$have_logout" '##')"
 	echo "realm-config: $client: redirect URIs [${have_redirects}] -> [${redirects// /,}]; web origins [${have_origins}] -> [${origins// /,}]; post-logout [${have_logout}] -> [${logout}]"
 	set_clients+=("$client")
 done <<<"$REALM_CLIENTS"
+
+# The people client: portal-api manages the realm's people with it, and with
+# nothing more than that.
+people=() people_secret=""
+if [ -n "${PEOPLE_CLIENT:-}" ]; then
+	client=$PEOPLE_CLIENT
+	id=$(client_id "$client")
+	if [ -z "$id" ]; then
+		[ -n "${PEOPLE_CLIENT_JSON:-}" ] || fail "PEOPLE_CLIENT_JSON holds no representation of the client $client"
+		printf '%s' "$PEOPLE_CLIENT_JSON" | kc create clients -r "$realm" -f - >/dev/null ||
+			fail "cannot make the client $client: $(why)"
+		id=$(client_id "$client")
+		[ -n "$id" ] || fail "the client $client was made, and cannot be found"
+		echo "realm-config: $client: made, as the realm import makes it"
+		people+=("made")
+	fi
+
+	keep_settings "$client" "$id" "${PEOPLE_SETTINGS:-}"
+	if [ -n "$changed" ]; then
+		echo "realm-config: $client: $changed"
+		people+=("set how it signs in")
+	fi
+
+	# The secret portal-api signs in with. Read and compared here, never
+	# printed; it reaches Keycloak as a JSON body on stdin, written by shell
+	# builtins. Without the Secret the client keeps a secret nobody holds,
+	# and the People page answers that it is not set up.
+	if [ -n "${PEOPLE_CLIENT_SECRET:-}" ]; then
+		have=$(kc get "clients/$id/client-secret" -r "$realm" --fields value --format csv --noquotes) ||
+			fail "cannot read the secret of the client $client: $(why)"
+		if [ "$have" != "$PEOPLE_CLIENT_SECRET" ]; then
+			printf '{"secret":%s}' "$(js "$PEOPLE_CLIENT_SECRET")" | kc update "clients/$id" -r "$realm" -f - -m ||
+				fail "cannot set the secret of the client $client: $(why)"
+			echo "realm-config: $client: its secret is the one in Secret zaentrum-people now"
+			people+=("set its secret")
+		fi
+		have=""
+	else
+		people_secret="no Secret zaentrum-people holds the secret of $client"
+		echo "realm-config: $client: $people_secret"
+	fi
+
+	# Its service account: PEOPLE_ROLES of realm-management, no other client
+	# role, and no realm role but the realm's default roles.
+	sa=$(kc get "clients/$id/service-account-user" -r "$realm" --fields id --format csv --noquotes) ||
+		fail "cannot read the service account of the client $client: $(why)"
+	[ -n "$sa" ] || fail "the client $client has no service account"
+	granted=$(kc get-roles -r "$realm" --uid "$sa" --cclientid realm-management --fields name --format csv --noquotes) ||
+		fail "cannot read the realm-management roles of the client $client: $(why)"
+	add=() drop=() roles_changed=""
+	for role in ${PEOPLE_ROLES:-}; do
+		if ! grep -qxF -- "$role" <<<"$granted"; then
+			add+=(--rolename "$role")
+			roles_changed+="${roles_changed:+, }+$role"
+		fi
+	done
+	while IFS= read -r role; do
+		[ -n "$role" ] || continue
+		case " ${PEOPLE_ROLES:-} " in
+		*" $role "*) ;;
+		*)
+			drop+=(--rolename "$role")
+			roles_changed+="${roles_changed:+, }-$role"
+			;;
+		esac
+	done <<<"$granted"
+	if [ ${#add[@]} -gt 0 ]; then
+		kc add-roles -r "$realm" --uid "$sa" --cclientid realm-management "${add[@]}" ||
+			fail "cannot grant the client $client its realm-management roles: $(why)"
+	fi
+	if [ ${#drop[@]} -gt 0 ]; then
+		kc remove-roles -r "$realm" --uid "$sa" --cclientid realm-management "${drop[@]}" ||
+			fail "cannot remove the extra realm-management roles of the client $client: $(why)"
+	fi
+	realm_roles=$(kc get-roles -r "$realm" --uid "$sa" --fields name --format csv --noquotes) ||
+		fail "cannot read the realm roles of the client $client: $(why)"
+	drop=()
+	while IFS= read -r role; do
+		case $role in
+		"" | "default-roles-$realm") ;;
+		*)
+			drop+=(--rolename "$role")
+			roles_changed+="${roles_changed:+, }-$role"
+			;;
+		esac
+	done <<<"$realm_roles"
+	if [ ${#drop[@]} -gt 0 ]; then
+		kc remove-roles -r "$realm" --uid "$sa" "${drop[@]}" ||
+			fail "cannot remove the realm roles of the client $client: $(why)"
+	fi
+	mappings=$(kc get "users/$sa/role-mappings" -r "$realm") ||
+		fail "cannot read the role mappings of the client $client: $(why)"
+	others=$(printf '%s\n' "$mappings" | grep -o '"client" *: *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)
+	while IFS= read -r other; do
+		[ -n "$other" ] && [ "$other" != realm-management ] || continue
+		names=$(kc get-roles -r "$realm" --uid "$sa" --cclientid "$other" --fields name --format csv --noquotes) ||
+			fail "cannot read the $other roles of the client $client: $(why)"
+		drop=()
+		while IFS= read -r role; do
+			if [ -n "$role" ]; then
+				drop+=(--rolename "$role")
+				roles_changed+="${roles_changed:+, }-$other/$role"
+			fi
+		done <<<"$names"
+		if [ ${#drop[@]} -gt 0 ]; then
+			kc remove-roles -r "$realm" --uid "$sa" --cclientid "$other" "${drop[@]}" ||
+				fail "cannot remove the $other roles of the client $client: $(why)"
+		fi
+	done <<<"$others"
+	if [ -n "$roles_changed" ]; then
+		echo "realm-config: $client: its service account's roles: $roles_changed"
+		people+=("set its roles ($roles_changed)")
+	fi
+fi
+
+# A person here may have no email and a child no last name: the realm does
+# not stop them at sign-in to ask for either.
+verify=""
+have=$(kc get authentication/required-actions/VERIFY_PROFILE -r "$realm" --fields enabled --format csv --noquotes) ||
+	fail "cannot read the required action VERIFY_PROFILE of realm $realm: $(why)"
+if [ "$have" = true ]; then
+	kc update authentication/required-actions/VERIFY_PROFILE -r "$realm" -s enabled=false ||
+		fail "cannot turn off the required action VERIFY_PROFILE: $(why)"
+	verify="sign-in no longer asks to complete a profile (VERIFY_PROFILE off)"
+	echo "realm-config: $verify"
+fi
+
+# A realm without a password policy gets the platform's.
+policy=""
+if [ -n "${PASSWORD_POLICY:-}" ]; then
+	have=$(kc get "realms/$realm" --fields passwordPolicy --format csv --noquotes) ||
+		fail "cannot read realm $realm: $(why)"
+	if [ -z "$have" ]; then
+		kc update "realms/$realm" -s "passwordPolicy=$PASSWORD_POLICY" ||
+			fail "cannot set the password policy of realm $realm: $(why)"
+		policy="the password policy is $PASSWORD_POLICY"
+		echo "realm-config: $policy"
+	fi
+fi
 
 demo=""
 placeholder='${DEMO_USER_PASSWORD}'
@@ -252,6 +427,13 @@ summary=""
 [ ${#set_flows[@]} -eq 0 ] || summary+="${summary:+; }set the sign-in flows of ${set_flows[*]}"
 [ ${#same[@]} -eq 0 ] || summary+="${summary:+; }already so: ${same[*]}"
 [ ${#missing[@]} -eq 0 ] || summary+="${summary:+; }not in realm $realm: ${missing[*]}"
+if [ ${#people[@]} -gt 0 ]; then
+	list=$(printf '%s, ' "${people[@]}")
+	summary+="${summary:+; }${PEOPLE_CLIENT}: ${list%, }"
+fi
+[ -z "$people_secret" ] || summary+="${summary:+; }$people_secret"
+[ -z "$verify" ] || summary+="${summary:+; }$verify"
+[ -z "$policy" ] || summary+="${summary:+; }$policy"
 [ -z "$demo" ] || summary+="${summary:+; }$demo"
 [ -z "$console" ] || summary+="${summary:+; }$console"
 echo "realm-config: $summary"
