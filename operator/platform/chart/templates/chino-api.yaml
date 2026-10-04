@@ -89,7 +89,11 @@ spec:
           value: http://chino-stream
         - name: ARTWORK_BASE_URL
           value: http://katalog-manager-api
-        - name: ANALYZER_BASE_URL
+        # katalog-manager, the catalog's writer: the admin packaging routes
+        # (/api/v1/admin/items/{id}/package) forward to it with the admin's
+        # bearer. chino-api reads ANALYZER_BASE_URL, its former name, only
+        # where this is unset.
+        - name: KATALOG_MANAGER_URL
           value: http://katalog-manager-api
         # Portal registry — addon UI-extension slots (/api/v1/extensions).
         # Neutral: empty registry => no extra UI.
@@ -104,8 +108,6 @@ spec:
         - name: ACCOUNT_DELETION_TOKEN
           valueFrom: { secretKeyRef: { name: zaentrum-people, key: deletion-token, optional: true } }
 {{- end }}
-        - name: ADMIN_SUBJECTS
-          value: ""
         - name: DB_USER
           valueFrom:
             secretKeyRef:

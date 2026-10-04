@@ -98,3 +98,27 @@ func TestAPIConfigNamesAnExternalProvidersClientsOnlyWhenTold(t *testing.T) {
 	assert.Equal(t, "media-mobile", env["OIDC_CLIENT_ID_MOBILE"])
 	assert.NotContains(t, env, "OIDC_CLIENT_ID_TV")
 }
+
+// chino-api finds katalog-manager, where the admin packaging routes go, by the
+// name it reads first, KATALOG_MANAGER_URL — never by ANALYZER_BASE_URL, its
+// former name, which it reads only where that is unset — and is told no admin
+// by subject: ADMIN_SUBJECTS is deprecated, and an empty one let nobody
+// through. Every profile, bundled and external.
+func TestChinoAPIFindsKatalogManagerByItsName(t *testing.T) {
+	ext := base("zaentrum-beta")
+	ext.Spec.Identity.Mode = zaentrumv1alpha1.IdentityExternal
+	ext.Spec.Identity.Issuer = "https://sso.example.org/realms/example"
+	ext.Spec.Databases.Mode = "external"
+	ext.Spec.Databases.External.Host = "postgres.example.org"
+	for name, objs := range map[string][]*unstructured.Unstructured{
+		"operator":     renderCR(t, base("zaentrum")),
+		"demo":         renderCR(t, demoCR("zaentrum-demo")),
+		"external":     renderCR(t, ext),
+		"helm install": helmRender(t, nil),
+	} {
+		env := chinoAPIEnv(t, objs)
+		assert.Equal(t, "http://katalog-manager-api", env["KATALOG_MANAGER_URL"], name)
+		assert.NotContains(t, env, "ANALYZER_BASE_URL", "%s: the former name stays unset", name)
+		assert.NotContains(t, env, "ADMIN_SUBJECTS", "%s: admins are the realm role's", name)
+	}
+}
