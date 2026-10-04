@@ -217,39 +217,24 @@ docker exec zaentrum kubectl -n zaentrum logs deploy/katalog-manager-api
 
 ## Where the images come from
 
-Application images are pulled from **`ghcr.io/zaentrum/<service>`** on first
-boot (`chino-web`, `chino-api`, `chino-stream`, `katalog-api`,
-`katalog-manager-api`, `admin`), plus the upstream `postgres`, `valkey`, and
-`apache/kafka` images. The box needs outbound network for the first start;
-after that the images are cached in the container's containerd store.
+Pods pull their images as they start: the operator's
+`ghcr.io/zaentrum/operator`; the platform's `ghcr.io/zaentrum/<service>`
+images — `zaentrum-portal`, `portal-api`, `chino-web`, `chino-api`,
+`chino-stream`, `katalog-api`, `katalog-manager`, `katalog-manager-ui`, and
+`zae` for the platform's check of itself; and the upstream `postgres`,
+`valkey/valkey`, `apache/kafka` and `quay.io/keycloak/keycloak` images.
 
-## Offline / airgap
+The `ghcr.io/zaentrum` images run on the moving tag `latest`, so the box needs
+`ghcr.io` for longer than the first start. The operator re-resolves each of
+them to its current digest as it reconciles, and rolls a component whose
+digest moved; the platform's services are pulled with
+`imagePullPolicy: Always` whenever their pods start; and the operator's own pod
+pulls `:latest` again whenever it restarts. The appliance follows every push to
+`latest`.
 
-To run with **no registry access**, bake the image tarball into the k3s airgap
-directory. k3s imports anything in `/var/lib/rancher/k3s/agent/images/` before
-it tries to pull:
-
-```bash
-# 1. Collect the images this release uses (on a connected machine):
-imgs="ghcr.io/zaentrum/chino-web:latest \
-ghcr.io/zaentrum/chino-api:latest \
-ghcr.io/zaentrum/chino-stream:latest \
-ghcr.io/zaentrum/katalog-api:latest \
-ghcr.io/zaentrum/katalog-manager:latest \
-ghcr.io/zaentrum/admin:latest \
-postgres:16-alpine valkey/valkey:8-alpine apache/kafka:3.8.0"
-for i in $imgs; do docker pull "$i"; done
-docker save $imgs -o zaentrum-airgap.tar
-
-# 2. Bake it into a custom all-in-one image:
-mkdir -p deploy/allinone/airgap && mv zaentrum-airgap.tar deploy/allinone/airgap/
-#    then add to the Dockerfile, before the ENTRYPOINT line:
-#      COPY airgap/zaentrum-airgap.tar /var/lib/rancher/k3s/agent/images/
-./deploy/allinone/build.sh
-```
-
-The resulting image is large (it carries every layer) but starts with zero
-registry traffic.
+There is no offline or air-gapped mode today: an image tarball in k3s's airgap
+directory is not enough, as `Always` asks the registry before a container
+starts.
 
 ## Build
 
