@@ -388,6 +388,10 @@ spec:
         - name: LADDER
           value: {{ . | quote }}
 {{- end }}
+{{- with .Values.pipeline.extraLadder }}
+        - name: EXTRA_LADDER
+          value: {{ . | quote }}
+{{- end }}
 {{- with .Values.pipeline.segmentSeconds }}
         - name: SEGMENT_SECONDS
           value: {{ . | quote }}

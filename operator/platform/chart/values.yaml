@@ -46,6 +46,7 @@ pipeline:
   # a browser-friendly H.264 is copied too, unless ladder is "source:hevc".
   encoder: gpu
   ladder: ""               # extra renditions, e.g. "source,720p" (LADDER); "source:hevc": HEVC only; empty: one per title
+  extraLadder: ""          # the extras' (trailers, featurettes) ladder (EXTRA_LADDER); "source:hevc": HEVC only; empty: 720p and 480p H.264
   segmentSeconds: 0        # HLS segment length 1..30 (SEGMENT_SECONDS); 0: the workers' 6
   surroundAudio: ""        # off | eac3 | ac3 — a 5.1 rendition per surround track; empty: off
   hlsSubtitles: false      # name the WebVTT renditions in the HLS master

@@ -206,6 +206,7 @@ func (v Values) chartValues() map[string]interface{} {
 		"pipeline": map[string]interface{}{
 			"encoder":            orDefault(spec.Pipeline.Encoder, "gpu"),
 			"ladder":             spec.Pipeline.Ladder,
+			"extraLadder":        spec.Pipeline.ExtraLadder,
 			"segmentSeconds":     int(spec.Pipeline.SegmentSeconds),
 			"surroundAudio":      spec.Pipeline.SurroundAudio,
 			"hlsSubtitles":       spec.Pipeline.HLSSubtitles,

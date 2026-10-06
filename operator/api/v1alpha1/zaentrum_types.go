@@ -296,6 +296,13 @@ type PipelineSpec struct {
 	// +optional
 	Ladder string `json:"ladder,omitempty"`
 
+	// ExtraLadder is the ladder for a title's extras (trailers, featurettes)
+	// (EXTRA_LADDER); empty: the transcoder's default, 720p and 480p H.264.
+	// "source:hevc" packages extras like titles, HEVC only.
+	// +kubebuilder:validation:Pattern=`^(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*(, ?(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*)*$`
+	// +optional
+	ExtraLadder string `json:"extraLadder,omitempty"`
+
 	// SegmentSeconds is the length of an HLS segment, and so the transcoder's
 	// keyframe interval: SEGMENT_SECONDS of both workers. Empty: theirs, 6.
 	// +kubebuilder:validation:Minimum=1

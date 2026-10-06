@@ -109,11 +109,11 @@ func TestPipelineOnTheCPUAsksForNoGPU(t *testing.T) {
 }
 
 // What spec.pipeline sets reaches the workers that read it — the transcoder
-// its ladder and keyframe interval, the packager its segments, surround audio,
-// HLS subtitles and language order — and nothing set leaves every worker its
-// own default.
+// its ladder, its extras' ladder and keyframe interval, the packager its
+// segments, surround audio, HLS subtitles and language order — and nothing set
+// leaves every worker its own default.
 func TestPipelineSettingsReachTheWorkers(t *testing.T) {
-	settings := []string{"LADDER", "SEGMENT_SECONDS", "SURROUND_AUDIO", "HLS_SUBTITLES", "PREFERRED_LANGUAGES"}
+	settings := []string{"LADDER", "EXTRA_LADDER", "SEGMENT_SECONDS", "SURROUND_AUDIO", "HLS_SUBTITLES", "PREFERRED_LANGUAGES"}
 	for _, encoder := range []string{"gpu", "cpu"} {
 		objs := renderCR(t, pipelineCR(encoder))
 		for _, dep := range []string{"transcoder", "packager"} {
@@ -125,6 +125,7 @@ func TestPipelineSettingsReachTheWorkers(t *testing.T) {
 
 		z := pipelineCR(encoder)
 		z.Spec.Pipeline.Ladder = "source,720p"
+		z.Spec.Pipeline.ExtraLadder = "source:hevc"
 		z.Spec.Pipeline.SegmentSeconds = 4
 		z.Spec.Pipeline.SurroundAudio = "eac3"
 		z.Spec.Pipeline.HLSSubtitles = true
@@ -132,6 +133,7 @@ func TestPipelineSettingsReachTheWorkers(t *testing.T) {
 		objs = renderCR(t, z)
 		tc := envByName(typedDeployment(t, objs, "transcoder").Spec.Template.Spec.Containers[0])
 		assert.Equal(t, "source,720p", tc["LADDER"].Value, encoder)
+		assert.Equal(t, "source:hevc", tc["EXTRA_LADDER"].Value, encoder)
 		assert.Equal(t, "4", tc["SEGMENT_SECONDS"].Value, encoder)
 		for _, s := range []string{"SURROUND_AUDIO", "HLS_SUBTITLES", "PREFERRED_LANGUAGES"} {
 			assert.NotContains(t, tc, s, "%s: the packager's, not the transcoder's", encoder)
@@ -142,7 +144,20 @@ func TestPipelineSettingsReachTheWorkers(t *testing.T) {
 		assert.Equal(t, "true", pk["HLS_SUBTITLES"].Value, encoder)
 		assert.Equal(t, "de,en", pk["PREFERRED_LANGUAGES"].Value, encoder)
 		assert.NotContains(t, pk, "LADDER", encoder)
+		assert.NotContains(t, pk, "EXTRA_LADDER", encoder)
 	}
+
+	// As helm renders it: values.yaml's empty extraLadder passes nothing on,
+	// and one set reaches the transcoder.
+	tc := envByName(typedDeployment(t, helmRender(t, map[string]interface{}{
+		"features": map[string]interface{}{"pipeline": true},
+	}), "transcoder").Spec.Template.Spec.Containers[0])
+	assert.NotContains(t, tc, "EXTRA_LADDER", "helm: the transcoder's own default")
+	tc = envByName(typedDeployment(t, helmRender(t, map[string]interface{}{
+		"features": map[string]interface{}{"pipeline": true},
+		"pipeline": map[string]interface{}{"extraLadder": "source:hevc"},
+	}), "transcoder").Spec.Template.Spec.Containers[0])
+	assert.Equal(t, "source:hevc", tc["EXTRA_LADDER"].Value, "helm")
 
 	// "off" said out loud is passed on, so a later default of the packager's
 	// cannot turn it on.
@@ -155,6 +170,7 @@ func TestPipelineSettingsReachTheWorkers(t *testing.T) {
 	z = base("zaentrum")
 	z.Spec.Pipeline.Encoder = "cpu"
 	z.Spec.Pipeline.Ladder = "source,720p"
+	z.Spec.Pipeline.ExtraLadder = "source:hevc"
 	objs := renderCR(t, z)
 	assert.Nil(t, find(t, objs, "Deployment", "transcoder"))
 	assert.False(t, strings.Contains(fmt.Sprintf("%v", objs), "LADDER"))

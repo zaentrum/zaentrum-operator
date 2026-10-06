@@ -675,6 +675,7 @@ spec:
   pipeline:
     encoder: gpu               # gpu | cpu
     ladder: ""                 # e.g. "source,720p" (the transcoder's LADDER)
+    extraLadder: ""            # e.g. "source:hevc" (the transcoder's EXTRA_LADDER)
     segmentSeconds: 6          # 1..30 (SEGMENT_SECONDS of both workers)
     surroundAudio: "off"       # off | eac3 | ac3
     hlsSubtitles: false
@@ -685,6 +686,7 @@ spec:
 |---|---|---|
 | `encoder` | `gpu` | `gpu`: NVENC — the transcoder asks for `nvidia.com/gpu: 1` and is placed on a node labelled `nvidia.com/gpu.present=true`, tolerating the GPU taint, as before this field existed. `cpu`: libx264/libx265 on any node, no GPU asked for, tolerated or looked for, the transcoder asking for 500m CPU and 1Gi (limits 4 CPUs, 8Gi) |
 | `ladder` | one rendition a title | extra renditions, `<source\|NNNp>[:<hevc\|h264>][:<maxrate>]` separated by commas; `source:hevc` is HEVC only, one rendition at the source's size, on the CPU too; checked by the CRD, as the transcoder would refuse a typo at its start |
+| `extraLadder` | 720p and 480p H.264 | the ladder for a title's extras (trailers, featurettes), written and checked as `ladder` is; `source:hevc` packages extras like titles, HEVC only |
 | `segmentSeconds` | the workers' 6 | the HLS segment length and the transcoder's keyframe interval |
 | `surroundAudio` | off | a 5.1 rendition beside each surround track's stereo one; leave it off until chino-stream keeps it from players that cannot decode it |
 | `hlsSubtitles` | false | name the WebVTT renditions in the HLS master; the clients draw the sidecars themselves |

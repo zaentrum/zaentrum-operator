@@ -42,7 +42,9 @@ const canonicalCRD = "../../config/crd/zaentrum.io_zaentrums.yaml"
 // the test.
 const pinnedInstall = "../../../deploy/operator-install.yaml"
 
-var sinceThePin = []string{}
+var sinceThePin = []string{
+	"spec.pipeline.extraLadder",
+}
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted
 // paths below openAPIV3Schema, such as "spec.identity.tvClientId" — removed.
@@ -283,15 +285,21 @@ func TestEveryClusterRoleHoldsWhatPruningUses(t *testing.T) {
 // spec.pipeline.ladder is checked where it is written: the CRD's pattern takes
 // the ladders the transcoder parses — rungs source or NNNp, each with an
 // optional codec and maxrate in either order — and refuses what the transcoder
-// would refuse at its start, where a typo becomes a crash loop.
+// would refuse at its start, where a typo becomes a crash loop. The extras'
+// ladder, spec.pipeline.extraLadder, the transcoder parses alike, and the CRD
+// checks it alike.
 func TestLadderPatternTakesWhatTheTranscoderTakes(t *testing.T) {
 	versions, _ := dig(zaentrumCRDSpec(t, canonicalCRD), "versions").([]any)
 	pattern, _ := dig(versions[0], "schema", "openAPIV3Schema", "properties", "spec", "properties",
 		"pipeline", "properties", "ladder", "pattern").(string)
 	require.NotEmpty(t, pattern)
+	extra, _ := dig(versions[0], "schema", "openAPIV3Schema", "properties", "spec", "properties",
+		"pipeline", "properties", "extraLadder", "pattern").(string)
+	assert.Equal(t, pattern, extra, "spec.pipeline.extraLadder is checked as spec.pipeline.ladder is")
 	re := regexp.MustCompile(pattern)
 	for _, ok := range []string{"source", "source,720p", "source, 720p", "source,720p,480p",
-		"720p:h264:2500k", "source:hevc", "1080p:3M:h264", "source,720p:h264:2.5M", "2160p:hevc:14m"} {
+		"720p:h264:2500k", "source:hevc", "1080p:3M:h264", "source,720p:h264:2.5M", "2160p:hevc:14m",
+		"720p:h264,480p:h264"} {
 		assert.True(t, re.MatchString(ok), "the CRD refuses a ladder the transcoder takes: %q", ok)
 	}
 	for _, bad := range []string{"720", "1080i", "source,,720p", "source;720p", "720p:av1", "720p:", "source,",

@@ -301,6 +301,14 @@ spec:
                     - gpu
                     - cpu
                     type: string
+                  extraLadder:
+                    description: |-
+                      ExtraLadder is the ladder for a title's extras (trailers, featurettes)
+                      (EXTRA_LADDER); empty: the transcoder's default, 720p and 480p H.264.
+                      "source:hevc" packages extras like titles, HEVC only.
+                    pattern: ^(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*(,
+                      ?(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*)*$
+                    type: string
                   hlsSubtitles:
                     description: |-
                       HLSSubtitles names the WebVTT subtitle renditions in the HLS master
