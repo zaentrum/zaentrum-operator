@@ -308,13 +308,14 @@ The appliance's `Zaentrum` turns the pipeline on with `pipeline.encoder: cpu`
 no GPU is asked for, and the transcoder encodes with libx264/libx265. What it
 costs the box:
 
-- **Time.** A title whose video the clients play as it is — HEVC, or H.264 a
-  browser decodes (8-bit 4:2:0, up to High), as most files are — passes
-  through: a remux, minutes. Anything else (MPEG-2, VC-1, AV1, 10-bit H.264)
-  is an x265 encode, hours a title on a few cores. One title is prepared at a
-  time. A packaged title starts at once and costs next to nothing to play;
-  until a title is packaged, chino-stream transcodes it on the fly while it
-  plays, at the cost of the CPU then.
+- **Time.** A title whose video the clients play as it is — HEVC Main or
+  Main 10 (4:2:0, up to 10-bit), or H.264 a browser decodes (8-bit 4:2:0, up
+  to High), as most files are — passes through: a remux, minutes. Anything
+  else (MPEG-2, VC-1, AV1, 10-bit H.264) is an x265 encode, hours a title on
+  a few cores. One title is prepared at a time. A packaged title starts at
+  once and costs next to nothing to play; until a title is packaged,
+  chino-stream transcodes it on the fly while it plays, at the cost of the
+  CPU then.
 - **Disk.** Every title is packaged as HLS beside the library on the `media`
   volume, which then holds about twice the library.
 - **First boot.** About 3.9 GiB more of images to pull, compressed — the

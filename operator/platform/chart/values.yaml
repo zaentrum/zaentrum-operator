@@ -41,10 +41,11 @@ features:
 # leave each worker's own default.
 pipeline:
   # gpu: NVENC — the transcoder asks for nvidia.com/gpu and runs on a node with
-  # an NVIDIA GPU. cpu: libx264/libx265 on any node, no GPU. Either way a source
-  # the clients play as it is (HEVC, browser-friendly H.264) is passed through.
+  # an NVIDIA GPU. cpu: libx264/libx265 on any node, no GPU. Either way HEVC
+  # every device decodes (Main or Main 10, 4:2:0, up to 10-bit) is copied; on cpu
+  # a browser-friendly H.264 is copied too, unless ladder is "source:hevc".
   encoder: gpu
-  ladder: ""               # extra renditions, e.g. "source,720p" (LADDER); empty: one per title
+  ladder: ""               # extra renditions, e.g. "source,720p" (LADDER); "source:hevc": HEVC only; empty: one per title
   segmentSeconds: 0        # HLS segment length 1..30 (SEGMENT_SECONDS); 0: the workers' 6
   surroundAudio: ""        # off | eac3 | ac3 — a 5.1 rendition per surround track; empty: off
   hlsSubtitles: false      # name the WebVTT renditions in the HLS master

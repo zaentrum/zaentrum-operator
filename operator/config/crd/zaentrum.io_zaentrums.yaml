@@ -292,9 +292,10 @@ spec:
                     description: |-
                       Encoder is where the transcoder encodes. gpu, the default: NVENC, so the
                       transcoder asks for an NVIDIA GPU (nvidia.com/gpu) and is placed on a node
-                      that has one. cpu: libx264 and libx265 on any node, no GPU asked for. A
-                      source the clients play as it is — HEVC, or H.264 a browser decodes
-                      (8-bit 4:2:0, up to High) — is passed through either way; on the CPU
+                      that has one. cpu: libx264 and libx265 on any node, no GPU asked for. HEVC
+                      every device decodes (Main or Main 10, 4:2:0, up to 10-bit) is passed
+                      through either way. On the CPU, H.264 a browser decodes (8-bit 4:2:0, up
+                      to High) is passed through too unless the ladder is "source:hevc", and
                       anything else costs an x265 encode, which takes hours a title.
                     enum:
                     - gpu
@@ -311,7 +312,8 @@ spec:
                       Ladder adds renditions per title (the transcoder's LADDER): rungs
                       separated by commas, each source or a height such as 720p, optionally
                       with a codec (hevc, h264) and a maxrate (2500k, 3M), e.g. "source,720p".
-                      Every rung is stored beside the library. Empty: one rendition a title.
+                      "source:hevc" is HEVC only: one rendition at the source's size, on a CPU
+                      too. Every rung is stored beside the library. Empty: one rendition a title.
                     pattern: ^(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*(,
                       ?(source|[0-9]{3,4}p)(:(hevc|h264|[0-9]+(\.[0-9]+)?[kKmM]))*)*$
                     type: string

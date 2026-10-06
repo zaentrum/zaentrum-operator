@@ -684,7 +684,7 @@ spec:
 | Field | Default | |
 |---|---|---|
 | `encoder` | `gpu` | `gpu`: NVENC — the transcoder asks for `nvidia.com/gpu: 1` and is placed on a node labelled `nvidia.com/gpu.present=true`, tolerating the GPU taint, as before this field existed. `cpu`: libx264/libx265 on any node, no GPU asked for, tolerated or looked for, the transcoder asking for 500m CPU and 1Gi (limits 4 CPUs, 8Gi) |
-| `ladder` | one rendition a title | extra renditions, `<source\|NNNp>[:<hevc\|h264>][:<maxrate>]` separated by commas; checked by the CRD, as the transcoder would refuse a typo at its start |
+| `ladder` | one rendition a title | extra renditions, `<source\|NNNp>[:<hevc\|h264>][:<maxrate>]` separated by commas; `source:hevc` is HEVC only, one rendition at the source's size, on the CPU too; checked by the CRD, as the transcoder would refuse a typo at its start |
 | `segmentSeconds` | the workers' 6 | the HLS segment length and the transcoder's keyframe interval |
 | `surroundAudio` | off | a 5.1 rendition beside each surround track's stereo one; leave it off until chino-stream keeps it from players that cannot decode it |
 | `hlsSubtitles` | false | name the WebVTT renditions in the HLS master; the clients draw the sidecars themselves |
@@ -692,8 +692,9 @@ spec:
 
 An empty field is not passed on, so each worker keeps its own default and an
 install that sets nothing renders its workers exactly as before. Either
-encoder passes through a source the clients play as it is — HEVC, or H.264 a
-browser decodes (8-bit 4:2:0, up to High) — which costs a remux. Anything else
+encoder passes through HEVC every device decodes — Main or Main 10, 4:2:0, up
+to 10-bit — which costs a remux; on the CPU so does H.264 a browser decodes
+(8-bit 4:2:0, up to High), unless `ladder` is `source:hevc`. Anything else
 (MPEG-2, VC-1, AV1, 10-bit H.264) is an encode: minutes on NVENC, hours a
 title with x265 on a few cores, one title at a time. The packaged streams live
 beside the library on the `media` volume, about as large again as what they
