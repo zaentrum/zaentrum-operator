@@ -260,10 +260,6 @@
             value: p5
           - name: NVENC_CQ
             value: "23"
-          - name: NVENC_MAXRATE_1080P_MBPS
-            value: "8"
-          - name: NVENC_MAXRATE_2160P_MBPS
-            value: "14"
           - name: LD_LIBRARY_PATH
             value: /usr/local/nvidia/lib64:/usr/local/nvidia/lib
           image: ghcr.io/zaentrum/transcoder:latest

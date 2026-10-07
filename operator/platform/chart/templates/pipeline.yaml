@@ -367,7 +367,7 @@ spec:
           value: "30"
 {{- if $cpu }}
         # No GPU: libx264 and libx265, never an NVENC probe. HEVC Main or Main 10
-        # (4:2:0, up to 10-bit) passes through untouched, and so does
+        # (4:2:0, up to 10-bit) within its bitrate cap passes through untouched, and so does
         # browser-friendly H.264 unless pipeline.ladder is "source:hevc";
         # anything else is an x265 encode, hours a title.
         - name: ENCODER
@@ -377,10 +377,6 @@ spec:
           value: p5
         - name: NVENC_CQ
           value: "23"
-        - name: NVENC_MAXRATE_1080P_MBPS
-          value: "8"
-        - name: NVENC_MAXRATE_2160P_MBPS
-          value: "14"
         - name: LD_LIBRARY_PATH
           value: /usr/local/nvidia/lib64:/usr/local/nvidia/lib
 {{- end }}
