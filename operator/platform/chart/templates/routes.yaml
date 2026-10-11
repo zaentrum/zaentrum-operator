@@ -22,10 +22,13 @@ spec:
   to: { kind: Service, name: zaentrum-portal, weight: 100 }
   port: { targetPort: http }
   {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
+{{- if ne (include "z.chinoBase" .) "/" }}
 ---
 # chino product (launched from the portal tile). Its image is built for Vite
 # base=/chino/, so it serves /chino/ + /chino/assets/; a sign-in returns to the
-# site root's /auth/callback (the auth-callback route below).
+# site root's /auth/callback (the auth-callback route below). Not on a host of
+# its own (routing.mode=subdomains): the SPA is laid out at / there, and under
+# /chino here it would answer a page whose assets this host does not have.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -38,6 +41,7 @@ spec:
   to: { kind: Service, name: chino-web, weight: 100 }
   port: { targetPort: http }
   {{- include "z.routeTLS" (dict "root" $ "policy" "Allow") | nindent 2 }}
+{{- end }}
 ---
 # /portal → the zaentrum launchpad shell (login → spaces/tiles). The SPA is built with
 # Vite base=/portal/ and its OIDC redirect is /portal/auth/callback (served by this route),
@@ -181,8 +185,9 @@ spec:
 
 {{- if and .Values.routing.provisionRoutes (eq .Values.routing.mode "subdomains") .Values.routing.hosts.chino }}
 # ── chino subdomain (routing.mode=subdomains): the chino SPA at / on its own
-# host, its API + OIDC callback beside it. The main-host routes above stay —
-# this is ADDITIVE (the launchpad tile flips to this host via the registry). ──
+# host, its API + OIDC callback beside it. The main-host routes above stay,
+# but for /chino, which this host replaces (the launchpad tile flips to this
+# host via the registry). ──
 ---
 apiVersion: route.openshift.io/v1
 kind: Route

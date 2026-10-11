@@ -120,6 +120,7 @@ func TestRenderDemoProfile(t *testing.T) {
 	assert.NotNil(t, find(t, objs, "Deployment", "analyzer"), "pipeline on")
 	assert.NotNil(t, find(t, objs, "Deployment", "transcoder"), "pipeline on")
 	assert.Greater(t, count(objs, "Route"), 0, "OpenShift Routes")
+	assert.NotNil(t, find(t, objs, "Route", "zaentrum-demo-chino"), "chino under /chino of the one host")
 	assert.Equal(t, 0, count(objs, "Ingress"), "no Ingress in demo")
 	assert.Equal(t, 0, count(objs, "Secret"), "external secrets → none rendered")
 	assert.Nil(t, find(t, objs, "PersistentVolumeClaim", "media"), "external media PVC")
@@ -246,6 +247,9 @@ func TestRenderSharedBetaProfile(t *testing.T) {
 	assert.Nil(t, find(t, objs, "Deployment", "keycloak"), "external identity")
 	assert.NotNil(t, find(t, objs, "Route", "chino-sub-root"), "chino subdomain route")
 	assert.NotNil(t, find(t, objs, "Route", "chino-sub-api"), "chino subdomain api route")
+	// On a host of its own the SPA is laid out at /: under /chino of the main
+	// host it would answer a page whose assets that host does not have.
+	assert.Nil(t, find(t, objs, "Route", "zaentrum-demo-chino"), "no /chino on the main host beside chino's own")
 
 	dep := find(t, objs, "Deployment", "chino-api")
 	require.NotNil(t, dep)

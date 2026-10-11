@@ -29,6 +29,20 @@ func typedIngress(t *testing.T, objs []*unstructured.Unstructured, name string) 
 	return &ing
 }
 
+// ingressPaths is every path an Ingress routes, of all its hosts.
+func ingressPaths(ing *networkingv1.Ingress) []string {
+	var out []string
+	for _, r := range ing.Spec.Rules {
+		if r.HTTP == nil {
+			continue
+		}
+		for _, p := range r.HTTP.Paths {
+			out = append(out, p.Path)
+		}
+	}
+	return out
+}
+
 // routeTLS is every Route's tls, by name.
 func routeTLS(objs []*unstructured.Unstructured) map[string]map[string]interface{} {
 	out := map[string]map[string]interface{}{}
@@ -77,6 +91,7 @@ func TestTLSFromASecretServesTheHostsOverHTTPS(t *testing.T) {
 
 	ing := typedIngress(t, objs, "zaentrum")
 	require.Len(t, ing.Spec.TLS, 1)
+	assert.Contains(t, ingressPaths(ing), "/chino", "chino under /chino of the one host")
 	assert.Equal(t, networkingv1.IngressTLS{Hosts: []string{"media.example.org"}, SecretName: "zaentrum-tls"}, ing.Spec.TLS[0])
 	assert.Equal(t, "https://media.example.org/auth/realms/zaentrum", envValue(t, objs, "chino-api", "OIDC_ISSUER"))
 	cm := find(t, objs, "ConfigMap", "zaentrum-keycloak-config")
@@ -96,6 +111,8 @@ func TestTLSFromASecretServesTheHostsOverHTTPS(t *testing.T) {
 	z.Spec.Routing.Hosts.Chino = "watch.example.org"
 	objs = renderCR(t, z)
 	assert.Equal(t, "media-cert", typedIngress(t, objs, "zaentrum").Spec.TLS[0].SecretName)
+	assert.NotContains(t, ingressPaths(typedIngress(t, objs, "zaentrum")), "/chino",
+		"no /chino on the main host beside chino's own")
 	sub := typedIngress(t, objs, "chino-subdomain")
 	require.Len(t, sub.Spec.TLS, 1)
 	assert.Equal(t, networkingv1.IngressTLS{Hosts: []string{"watch.example.org"}, SecretName: "media-cert"}, sub.Spec.TLS[0])

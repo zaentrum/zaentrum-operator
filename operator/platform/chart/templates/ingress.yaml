@@ -52,6 +52,9 @@ spec:
                 name: katalog-manager-ui
                 port:
                   number: 80
+{{- if ne (include "z.chinoBase" .) "/" }}
+          # Not when chino has a host of its own (routing.mode=subdomains):
+          # the SPA is laid out at / there.
           - path: /chino
             pathType: Prefix
             backend:
@@ -59,6 +62,7 @@ spec:
                 name: chino-web
                 port:
                   number: 80
+{{- end }}
           - path: /portal
             pathType: Prefix
             backend:
