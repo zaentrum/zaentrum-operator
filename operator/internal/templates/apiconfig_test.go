@@ -99,6 +99,41 @@ func TestAPIConfigNamesAnExternalProvidersClientsOnlyWhenTold(t *testing.T) {
 	assert.NotContains(t, env, "OIDC_CLIENT_ID_TV")
 }
 
+// Every service takes a token for one audience, and with an external provider
+// it is the one the CR names: a shared realm's client makes its tokens for
+// what its realm says, and a chart that asked for "chino" whatever the CR said
+// had every service refuse the very sign-in it had sent the apps to — 401 on
+// every request, in the browser and in the phone app. Nothing named, chino, as
+// before. The bundled realm makes its own tokens for chino, so the chart
+// refuses another audience there rather than render services nobody can
+// sign in to.
+func TestServicesTakeTheAudienceTheCRNames(t *testing.T) {
+	services := map[string]string{
+		"chino-api": "OIDC_AUDIENCE", "chino-stream": "OIDC_AUDIENCE", "portal-api": "OIDC_AUDIENCE",
+		"katalog-api": "KATALOG_API_OIDC_AUDIENCE", "katalog-manager-api": "KATALOG_AUDIENCE",
+	}
+	ext := func(audience string) []*unstructured.Unstructured {
+		z := base("zaentrum")
+		z.Spec.Identity.Mode = zaentrumv1alpha1.IdentityExternal
+		z.Spec.Identity.Issuer = "https://sso.example.org/realms/example"
+		z.Spec.Identity.ClientID = "media"
+		z.Spec.Identity.Audience = audience
+		return renderCR(t, z)
+	}
+	bundled, unnamed, named := renderCR(t, base("zaentrum")), ext(""), ext("media-web")
+	for deployment, name := range services {
+		assert.Equal(t, "chino", envValue(t, bundled, deployment, name), "%s with the bundled realm", deployment)
+		assert.Equal(t, "chino", envValue(t, unnamed, deployment, name), "%s with an external provider and no audience named", deployment)
+		assert.Equal(t, "media-web", envValue(t, named, deployment, name), "%s with the audience the CR names", deployment)
+	}
+
+	z := base("zaentrum")
+	z.Spec.Identity.Audience = "media-web"
+	_, err := Render(NewValues(z))
+	require.Error(t, err, "the bundled realm's tokens are for chino")
+	assert.Contains(t, err.Error(), "the bundled realm makes its tokens for chino")
+}
+
 // chino-api finds katalog-manager, where the admin packaging routes go, by the
 // name it reads first, KATALOG_MANAGER_URL — never by ANALYZER_BASE_URL, its
 // former name, which it reads only where that is unset — and is told no admin

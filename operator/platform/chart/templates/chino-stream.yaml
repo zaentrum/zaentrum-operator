@@ -62,7 +62,7 @@ spec:
         - name: OIDC_ISSUER
           value: {{ include "z.issuer" . }}
         - name: OIDC_AUDIENCE
-          value: chino
+          value: {{ include "z.audience" . | quote }}
         - name: AUTH_ENABLED
           value: "true"
         - name: STREAM_SIGNING_KEY

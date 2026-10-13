@@ -88,7 +88,7 @@ spec:
         - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
           value: {{ include "z.issuer" . }}
         - name: KATALOG_AUDIENCE
-          value: chino
+          value: {{ include "z.audience" . | quote }}
         - name: SPRING_DATASOURCE_URL
 {{- if eq .Values.databases.mode "external" }}
           value: jdbc:postgresql://{{ include "z.pgHost" . }}/{{ .Values.databases.katalog }}?sslmode={{ include "z.pgSSLMode" . }}

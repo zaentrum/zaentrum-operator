@@ -41,7 +41,7 @@ spec:
         - name: KATALOG_API_OIDC_ISSUER
           value: {{ include "z.issuer" . }}
         - name: KATALOG_API_OIDC_AUDIENCE
-          value: chino
+          value: {{ include "z.audience" . | quote }}
         - name: DB_USER
           valueFrom:
             secretKeyRef:

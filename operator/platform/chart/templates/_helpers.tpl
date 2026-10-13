@@ -267,6 +267,21 @@ realm import (z.realmImport, parsed).
 {{- end -}}
 
 {{/*
+z.audience — the audience every service takes a token for. With an external
+provider it is identity.audience, what that realm's clients make their tokens
+for (chino where nothing is said). The bundled realm makes its own for chino
+(z.audienceMapper), so another value there would have every service refuse
+every sign-in: the chart says so instead.
+*/}}
+{{- define "z.audience" -}}
+{{- $audience := .Values.identity.audience | default "chino" -}}
+{{- if and (ne .Values.identity.mode "external") (ne $audience "chino") -}}
+{{- fail (printf "identity.audience is %q: the bundled realm makes its tokens for chino, and another audience is an external provider's (identity.mode: external)" $audience) -}}
+{{- end -}}
+{{- $audience -}}
+{{- end -}}
+
+{{/*
 z.realmSettings — how a client of the realm import signs people in, as the
 realm Job sets it: space-separated name=value, a client field or, with a dot
 in its name, an attribute. Pass the client's representation. A public client

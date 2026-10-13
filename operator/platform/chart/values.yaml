@@ -24,6 +24,9 @@ identity:
   # or with an external provider chino-api's default, "chino".
   tvClientId: ""
   mobileClientId: ""
+  # The audience every service takes a token for. With an external provider:
+  # what its realm's clients make their tokens for. The bundled realm makes
+  # its own for chino, and the chart refuses another value there.
   audience: chino
   loginTheme: ""           # bundled Keycloak login theme name (demo: zaentrum)
   # The bundled Keycloak's admin console and admin API on the public host

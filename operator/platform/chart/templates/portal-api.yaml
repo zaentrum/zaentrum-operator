@@ -75,7 +75,7 @@ spec:
         - name: OIDC_ISSUER
           value: {{ include "z.issuer" . }}
         - name: OIDC_AUDIENCE
-          value: chino
+          value: {{ include "z.audience" . | quote }}
         - name: PORTAL_ADMIN_ROLE
           value: zaentrum-admin
 {{- if eq .Values.identity.mode "external" }}
