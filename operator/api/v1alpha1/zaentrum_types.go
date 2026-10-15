@@ -340,6 +340,36 @@ type NetworkSpec struct {
 	IssuerHostAliasIP string `json:"issuerHostAliasIP,omitempty"`
 }
 
+// VPNSpec names the platform's VPN, a service of its own that addons use:
+// WireGuard gateways behind a SOCKS5 proxy Service. An addon assigns a pod to
+// it with the label zaentrum.io/vpn: "true" on the pod template of a Deployment
+// or a Job — the gateways admit only such pods — and its program reaches the
+// internet through the proxy, zaentrum.vpn.proxy in the addon's values. A
+// NetworkPolicy the operator renders lets such a pod connect directly only to
+// ClusterCIDRs: with the VPN down it has no internet, rather than a way around
+// the VPN. No platform pod uses it.
+// +kubebuilder:validation:XValidation:rule="!has(self.proxy) || size(self.proxy) == 0 || (has(self.clusterCIDRs) && size(self.clusterCIDRs) > 0)",message="clusterCIDRs is required when proxy is set"
+type VPNSpec struct {
+	// Proxy is the VPN's SOCKS5 proxy: a socks5:// or socks5h:// URL with a
+	// host — a DNS name, an IPv4 address or an IPv6 one in brackets — and a
+	// port, and nothing else (no credentials: every addon is handed it), e.g.
+	// socks5h://vpn.vpn.svc.cluster.local:1080 (socks5h: the proxy resolves
+	// names too). Every addon gets it as zaentrum.vpn.proxy. Empty: the
+	// platform has no VPN, and an addon that assigns a pod to it is refused.
+	// +kubebuilder:validation:Pattern=`^socks5h?://([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)*\.?|\[[0-9a-fA-F.]*:[0-9a-fA-F:.]*\]):([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$`
+	// +optional
+	Proxy string `json:"proxy,omitempty"`
+
+	// ClusterCIDRs are the cluster's pod and service networks, e.g. k3s's
+	// 10.42.0.0/16 and 10.43.0.0/16: the only addresses a pod assigned to the
+	// VPN may connect to directly, on any port. Required with a proxy; a /0,
+	// every address, is refused.
+	// +kubebuilder:validation:items:Format=cidr
+	// +kubebuilder:validation:items:Pattern=`/[1-9][0-9]{0,2}$`
+	// +optional
+	ClusterCIDRs []string `json:"clusterCIDRs,omitempty"`
+}
+
 // RoutingSpec selects how the platform is exposed.
 type RoutingSpec struct {
 	// ProvisionIngress renders a plain-Kubernetes Ingress. Default true.
@@ -540,6 +570,11 @@ type ZaentrumSpec struct {
 	// Network configures split-horizon / hostAliases.
 	// +optional
 	Network NetworkSpec `json:"network,omitempty"`
+
+	// VPN names the platform's VPN, which addons assign pods to; no platform
+	// pod uses it. Unset: the platform has no VPN.
+	// +optional
+	VPN VPNSpec `json:"vpn,omitempty"`
 
 	// Routing selects Ingress vs OpenShift Routes.
 	// +optional
