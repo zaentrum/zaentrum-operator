@@ -863,6 +863,9 @@ may run:
 - Chart fetch (https + OCI, redirects included) refuses loopback, link-local,
   the cloud-metadata addresses and the in-cluster API server (SSRF), checked at
   the dialer so DNS rebinding cannot bypass it.
+- A chart renders no NetworkPolicy. The kill switch of the pods it assigns to
+  the platform VPN is the operator's to render
+  ([below](#the-platform-vpn-specvpn)).
 
 The chart-rendered `portal-api` Role is granted `secrets` **create only**. Each
 secret write creates a new immutable Secret (`generateName`
@@ -879,6 +882,51 @@ finalizer strips their owner references and labels them `zaentrum.io/keep=true`)
 Keep relies on the default (background) deletion propagation. If the operator is
 no longer running, that finalizer has to be removed by hand for a removal to
 finish.
+
+### The platform VPN (`spec.vpn`)
+
+The platform's VPN is a service of its own, WireGuard gateways behind a SOCKS5
+proxy Service, which addons use and no platform pod does. The Zaentrum names it:
+
+```yaml
+spec:
+  vpn:
+    proxy: socks5h://vpn.vpn.svc.cluster.local:1080   # socks5:// or socks5h://, a host and a port, nothing else
+    clusterCIDRs: [10.42.0.0/16, 10.43.0.0/16]         # the pod and service networks, here k3s's
+```
+
+Without a `proxy` the platform has no VPN; with one, `clusterCIDRs` is
+required. The CRD checks both, the pair with a CEL rule, and the addon
+reconciler holds whatever served the Zaentrum to the same rules: a `spec.vpn`
+it refuses fails every addon's plan, as a broken platform value does.
+`clusterCIDRs` is all a pod in the VPN may reach directly, the cluster's DNS
+included: its Service is in the service network, but a node-local DNS cache
+answers on an address of its own, which then joins the list.
+
+- **The value.** Every addon gets `zaentrum.vpn.proxy` in the reserved
+  `zaentrum` block: the proxy, `""` without a VPN.
+- **The label.** A chart assigns a pod to the VPN with `zaentrum.io/vpn: "true"`
+  on the pod template of a Deployment or a Job (the gateways admit only such
+  pods) and has its program use `zaentrum.vpn.proxy`. Any other value of the
+  label is refused, and so is `"true"` on a platform without a VPN, where the
+  pod would have no internet.
+- **The kill switch.** For an addon that assigns any pod, the operator renders,
+  applies and owns one NetworkPolicy, `zaentrum-addon-<addon>-vpn`. It selects
+  the pods labelled `zaentrum.io/addon: <addon>` and `zaentrum.io/vpn: "true"`,
+  that addon's pods in the VPN and no other, and, of policy type Egress alone,
+  lets them connect to `clusterCIDRs` and nowhere else, on any port. With the
+  VPN down such a pod has no internet rather than a way around it. The policy
+  is applied before the workloads, so no pod assigned to the VPN starts
+  without it, and none starts when it cannot be applied. Once no pod template
+  carries the label it is no longer rendered and is pruned like the addon's
+  other objects, after the last pod assigned to the VPN has stopped; removing
+  the addon removes it with the rest.
+
+A chart whose pods must never run outside the VPN can also require the proxy
+in its `values.schema.json`:
+`"zaentrum": {"required": ["vpn"], "properties": {"vpn": {"required": ["proxy"], "properties": {"proxy": {"type": "string", "minLength": 1}}}}}`.
+An operator from before the VPN, which renders no kill switch, then refuses to
+install it, and so does one on a platform without a VPN.
 
 ## Build / test
 
@@ -901,8 +949,10 @@ paths=./api/... output:crd:dir=config/crd`, `controller-gen object
 paths=./api/...`). A few descriptions of the committed copy are shortened by
 hand, so a new field's block is spliced into it and copied to
 `bundle/manifests`; `build.sh render` carries it into the appliance.
-`deploy/operator-install.yaml` changes only when it is re-pinned
-(`sinceThePin`).
+`deploy/operator-install.yaml`'s CRD changes only when it is re-pinned
+(`sinceThePin`). Its ClusterRole gains a rule ahead of the re-pin where the
+next operator would fail every pass without it, as the addons' NetworkPolicy
+rule: the re-pin then needs no new rule.
 
 ## Layout
 
