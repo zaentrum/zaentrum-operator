@@ -298,6 +298,11 @@ spec:
             - apiGroups: ["networking.k8s.io"]
               resources: ["ingresses"]
               verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+            # The kill switch of an addon's pods assigned to the platform VPN:
+            # a NetworkPolicy the operator renders for the addon itself.
+            - apiGroups: ["networking.k8s.io"]
+              resources: ["networkpolicies"]
+              verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
             # OpenShift Routes (provisionRoutes profiles, e.g. the demo).
             - apiGroups: ["route.openshift.io"]
               resources: ["routes"]

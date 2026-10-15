@@ -282,6 +282,41 @@ func TestEveryClusterRoleHoldsWhatPruningUses(t *testing.T) {
 	}
 }
 
+// What the addon controller does with each kind it applies for an addon — the
+// chart's, and the NetworkPolicy that is the kill switch of the pods it assigns
+// to the platform VPN — every shipped ClusterRole allows: get (the collision
+// check), list (the inventory, of every addon on every pass, whether it uses
+// the VPN or not), create and patch (server-side apply) and delete (prune). The
+// pinned install's too: an operator re-pinned without the NetworkPolicy rule
+// would have every addon's inventory refused, so the pinned install holds the
+// rule ahead of spec.vpn, which its CRD serves from that re-pin on
+// (sinceThePin).
+func TestEveryClusterRoleHoldsWhatAddonsUse(t *testing.T) {
+	resources := map[schema.GroupKind]string{
+		{Kind: "ServiceAccount"}:                            "serviceaccounts",
+		{Kind: "Secret"}:                                    "secrets",
+		{Kind: "ConfigMap"}:                                 "configmaps",
+		{Kind: "PersistentVolumeClaim"}:                     "persistentvolumeclaims",
+		{Kind: "Service"}:                                   "services",
+		{Group: "networking.k8s.io", Kind: "NetworkPolicy"}: "networkpolicies",
+		{Group: "apps", Kind: "Deployment"}:                 "deployments",
+		{Group: "batch", Kind: "Job"}:                       "jobs",
+	}
+	for _, file := range []string{
+		"../../config/rbac/role.yaml",
+		"../../bundle/manifests/zaentrum-operator.clusterserviceversion.yaml",
+		pinnedInstall,
+		"../../../deploy/allinone/manifests/10-operator.yaml",
+	} {
+		rules := managerRules(t, file)
+		for gk, resource := range resources {
+			for _, verb := range []string{"get", "list", "create", "patch", "delete"} {
+				assert.True(t, ruleHolds(rules, gk.Group, resource, verb), "%s: no %s on %q %s", file, verb, gk.Group, resource)
+			}
+		}
+	}
+}
+
 // spec.pipeline.ladder is checked where it is written: the CRD's pattern takes
 // the ladders the transcoder parses — rungs source or NNNp, each with an
 // optional codec and maxrate in either order — and refuses what the transcoder

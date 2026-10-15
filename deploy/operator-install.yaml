@@ -1367,6 +1367,12 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The kill switch of an addon's pods assigned to the platform VPN (spec.vpn):
+  # a NetworkPolicy the operator renders for the addon itself — no chart may —
+  # and applies, lists back and prunes with the addon's other objects.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # OpenShift Routes (single-origin exposure; provisionRoutes profiles, e.g. the
   # demo). Without this the SSA apply of the rendered Routes is forbidden.
   - apiGroups: ["route.openshift.io"]
