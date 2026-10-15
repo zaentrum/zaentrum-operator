@@ -48,6 +48,7 @@ func platformValues() map[string]interface{} {
 			"tlsSecret":   "kafka-mtls",
 		},
 		"media": map[string]interface{}{"claimName": "media"},
+		"vpn":   map[string]interface{}{"proxy": ""},
 	}
 }
 

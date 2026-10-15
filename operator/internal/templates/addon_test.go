@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
 )
 
 // envValue returns the value of env var name on the first container of a
@@ -48,6 +50,7 @@ func TestAddonPlatformValuesSelfHost(t *testing.T) {
 			"tlsSecret":   "",
 		},
 		"media": map[string]interface{}{"claimName": "media"},
+		"vpn":   map[string]interface{}{"proxy": ""},
 	}, vals)
 
 	objs, err := Render(NewValues(z))
@@ -90,6 +93,32 @@ func TestAddonPlatformValuesShared(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, vals["events"].(map[string]interface{})["brokers"], envValue(t, objs, "portal-api", "KAFKA_BROKERS"))
 	assert.Equal(t, vals["events"].(map[string]interface{})["topicPrefix"], envValue(t, objs, "portal-api", "KAFKA_TOPIC_PREFIX"))
+}
+
+// The platform's VPN reaches every addon as zaentrum.vpn.proxy, as the CR names
+// it, and "" without one — and nothing of it reaches the platform's own render:
+// no platform pod uses the VPN.
+func TestAddonPlatformValuesVPN(t *testing.T) {
+	without := base("zaentrum")
+	vals, err := AddonPlatformValues(without)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]interface{}{"proxy": ""}, vals["vpn"], "no VPN: an empty proxy")
+
+	with := base("zaentrum")
+	with.Spec.VPN = zaentrumv1alpha1.VPNSpec{
+		Proxy:        "socks5h://vpn.vpn.svc.cluster.local:1080",
+		ClusterCIDRs: []string{"10.42.0.0/16", "10.43.0.0/16"},
+	}
+	vals, err = AddonPlatformValues(with)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]interface{}{"proxy": "socks5h://vpn.vpn.svc.cluster.local:1080"}, vals["vpn"],
+		"the proxy as the CR names it, and nothing else of spec.vpn")
+
+	plain, err := Render(NewValues(without))
+	require.NoError(t, err)
+	vpn, err := Render(NewValues(with))
+	require.NoError(t, err)
+	assert.Equal(t, plain, vpn, "the platform renders byte for byte as without a VPN")
 }
 
 // A cert secret on the bundled broker is ignored by the platform (plaintext),

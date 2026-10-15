@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 
+	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
+	"github.com/zaentrum/zaentrum-operator/operator/internal/addon"
 	"github.com/zaentrum/zaentrum-operator/operator/internal/templates"
 )
 
@@ -302,6 +305,7 @@ func TestEveryClusterRoleHoldsWhatAddonsUse(t *testing.T) {
 		{Group: "apps", Kind: "Deployment"}:                 "deployments",
 		{Group: "batch", Kind: "Job"}:                       "jobs",
 	}
+	require.Len(t, addon.AppliedKinds, len(resources), "a kind the addon controller applies, and no rule checked for it here")
 	for _, file := range []string{
 		"../../config/rbac/role.yaml",
 		"../../bundle/manifests/zaentrum-operator.clusterserviceversion.yaml",
@@ -309,12 +313,81 @@ func TestEveryClusterRoleHoldsWhatAddonsUse(t *testing.T) {
 		"../../../deploy/allinone/manifests/10-operator.yaml",
 	} {
 		rules := managerRules(t, file)
-		for gk, resource := range resources {
+		for _, gvk := range addon.AppliedKinds {
+			resource, ok := resources[gvk.GroupKind()]
+			require.True(t, ok, "%s: which resource?", gvk)
 			for _, verb := range []string{"get", "list", "create", "patch", "delete"} {
-				assert.True(t, ruleHolds(rules, gk.Group, resource, verb), "%s: no %s on %q %s", file, verb, gk.Group, resource)
+				assert.True(t, ruleHolds(rules, gvk.Group, resource, verb), "%s: no %s on %q %s", file, verb, gvk.Group, resource)
 			}
 		}
 	}
+}
+
+// spec.vpn is checked where it is written, and the operator, which holds
+// whatever served the Zaentrum to the same rules (addon.PlatformVPN), agrees
+// with the CRD on each example here: a proxy is a socks5:// or socks5h:// URL
+// of a host and a port alone, a cluster CIDR is one net.ParseCIDR reads — the
+// API server's format cidr — with a prefix length of at least 1, and a proxy
+// needs a CIDR (a CEL rule, which only a cluster runs). An IPv4-mapped IPv6
+// network is the one CIDR only the operator refuses.
+func TestVPNSchemaChecksWhatTheOperatorChecks(t *testing.T) {
+	versions, _ := dig(zaentrumCRDSpec(t, canonicalCRD), "versions").([]any)
+	vpn := dig(versions[0], "schema", "openAPIV3Schema", "properties", "spec", "properties", "vpn")
+	require.NotNil(t, vpn, "spec.vpn")
+
+	pattern, _ := dig(vpn, "properties", "proxy", "pattern").(string)
+	require.NotEmpty(t, pattern)
+	proxy := regexp.MustCompile(pattern)
+	operatorTakes := func(spec zaentrumv1alpha1.VPNSpec) bool {
+		_, err := addon.PlatformVPN(spec)
+		return err == nil
+	}
+	for _, ok := range []string{
+		"socks5h://vpn.vpn.svc.cluster.local:1080", "socks5://vpn:1080", "socks5h://vpn.vpn.svc.cluster.local.:1080",
+		"socks5h://10.43.0.10:1080", "socks5h://[fd00:10:43::10]:1080", "socks5h://[::1]:1", "socks5://VPN.example.org:65535",
+	} {
+		assert.True(t, proxy.MatchString(ok), "the CRD refuses a proxy the operator takes: %q", ok)
+		assert.True(t, operatorTakes(zaentrumv1alpha1.VPNSpec{Proxy: ok, ClusterCIDRs: []string{"10.42.0.0/16"}}), "the operator refuses %q", ok)
+	}
+	for _, bad := range []string{
+		"http://vpn:1080", "socks4://vpn:1080", "SOCKS5://vpn:1080", "socks5:vpn:1080", "socks5://vpn", "socks5://vpn:",
+		"socks5://:1080", "socks5://vpn:0", "socks5://vpn:01080", "socks5://vpn:65536", "socks5://vpn:99999",
+		"socks5://vpn:1080/", "socks5://vpn:1080/x", "socks5://vpn:1080?x=1", "socks5://vpn:1080#x",
+		"socks5://user:secret@vpn:1080", "socks5://user@vpn:1080", "socks5h://fd00::10:1080", "socks5h://[fd00::10%25eth0]:1080",
+		"socks5h://[1.2.3.4]:1080", "socks5://vpn_x:1080", "socks5://-vpn:1080", "socks5://vpn..x:1080", " socks5://vpn:1080",
+	} {
+		assert.False(t, proxy.MatchString(bad), "the CRD takes a proxy the operator refuses: %q", bad)
+		assert.False(t, operatorTakes(zaentrumv1alpha1.VPNSpec{Proxy: bad, ClusterCIDRs: []string{"10.42.0.0/16"}}), "the operator takes %q", bad)
+	}
+
+	items := dig(vpn, "properties", "clusterCIDRs", "items")
+	assert.Equal(t, "cidr", dig(items, "format"))
+	itemPattern, _ := dig(items, "pattern").(string)
+	require.NotEmpty(t, itemPattern)
+	cidr := regexp.MustCompile(itemPattern)
+	crdTakes := func(c string) bool {
+		_, _, err := net.ParseCIDR(c)
+		return err == nil && cidr.MatchString(c)
+	}
+	for _, ok := range []string{"10.42.0.0/16", "10.43.0.0/16", "10.42.0.1/16", "fd00:10:42::/56", "192.168.0.0/24", "10.0.0.1/32", "fd00::1/128"} {
+		assert.True(t, crdTakes(ok), "the CRD refuses a CIDR the operator takes: %q", ok)
+		assert.True(t, operatorTakes(zaentrumv1alpha1.VPNSpec{ClusterCIDRs: []string{ok}}), "the operator refuses %q", ok)
+	}
+	for _, bad := range []string{"0.0.0.0/0", "::/0", "10.42.0.0", "10.42.0.0/33", "fd00::/129", "10.0.0.0/016", "010.42.0.0/16",
+		"10.42.0.0/16 ", "fe80::%eth0/64", "cluster"} {
+		assert.False(t, crdTakes(bad), "the CRD takes a CIDR the operator refuses: %q", bad)
+		assert.False(t, operatorTakes(zaentrumv1alpha1.VPNSpec{ClusterCIDRs: []string{bad}}), "the operator takes %q", bad)
+	}
+	assert.True(t, crdTakes("::ffff:10.42.0.0/112"))
+	assert.False(t, operatorTakes(zaentrumv1alpha1.VPNSpec{ClusterCIDRs: []string{"::ffff:10.42.0.0/112"}}))
+
+	assert.Equal(t, []any{map[string]any{
+		"rule":    "!has(self.proxy) || size(self.proxy) == 0 || (has(self.clusterCIDRs) && size(self.clusterCIDRs) > 0)",
+		"message": "clusterCIDRs is required when proxy is set",
+	}}, dig(vpn, "x-kubernetes-validations"), "a proxy needs a CIDR")
+	assert.False(t, operatorTakes(zaentrumv1alpha1.VPNSpec{Proxy: "socks5h://vpn:1080"}), "nor does the operator take a proxy without one")
+	assert.True(t, operatorTakes(zaentrumv1alpha1.VPNSpec{}), "no VPN")
+	assert.True(t, operatorTakes(zaentrumv1alpha1.VPNSpec{ClusterCIDRs: []string{"10.42.0.0/16"}}), "networks without a proxy: no VPN either")
 }
 
 // spec.pipeline.ladder is checked where it is written: the CRD's pattern takes

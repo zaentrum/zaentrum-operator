@@ -18,6 +18,9 @@ import (
 // own helpers and the same CR-derived values the platform renders with, so an
 // addon sees exactly the issuer, brokers, topic prefix and claim the platform
 // services are configured with — never a second derivation that can drift.
+// The VPN is the addons' alone, no platform service is configured with it:
+// vpn.proxy is spec.vpn.proxy as the CR has it ("" without a VPN), handed to
+// this render only (AddonPlatformValues).
 const addonPlatformTemplate = `namespace: {{ .Release.Namespace | toJson }}
 hostname: {{ .Values.global.hostname | toJson }}
 issuer: {{ include "z.issuer" . | toJson }}
@@ -30,6 +33,8 @@ events:
   tlsSecret: {{ include "z.kafkaCertSecret" . | toJson }}
 media:
   claimName: {{ include "z.mediaClaimName" . | toJson }}
+vpn:
+  proxy: {{ .Values.vpn.proxy | toJson }}
 `
 
 const addonPlatformTemplateName = "templates/zaentrum-addon-platform.yaml"
@@ -51,8 +56,10 @@ func AddonPlatformValues(z *zaentrumv1alpha1.Zaentrum) (map[string]interface{}, 
 	chrt.Templates = append(tpls, &chart.File{Name: addonPlatformTemplateName, Data: []byte(addonPlatformTemplate)})
 
 	v := NewValues(z)
+	chartVals := v.chartValues()
+	chartVals["vpn"] = map[string]interface{}{"proxy": z.Spec.VPN.Proxy}
 	relOpts := chartutil.ReleaseOptions{Name: "zaentrum", Namespace: v.Namespace}
-	renderVals, err := chartutil.ToRenderValues(chrt, v.chartValues(), relOpts, nil)
+	renderVals, err := chartutil.ToRenderValues(chrt, chartVals, relOpts, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build render values: %w", err)
 	}

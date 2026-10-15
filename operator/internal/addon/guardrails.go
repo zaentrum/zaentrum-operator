@@ -17,13 +17,36 @@ import (
 // AllowedKinds are the only kinds an addon chart may render, in the order the
 // controller applies them: what pods consume first, workloads last. Addon UIs
 // are reached through the portal proxy, so there is no Route or Ingress; and
-// no RBAC, CRDs or cluster-scoped objects.
+// no RBAC, CRDs, NetworkPolicies or cluster-scoped objects.
 var AllowedKinds = []schema.GroupVersionKind{
 	{Version: "v1", Kind: "ServiceAccount"},
 	{Version: "v1", Kind: "Secret"},
 	{Version: "v1", Kind: "ConfigMap"},
 	{Version: "v1", Kind: "PersistentVolumeClaim"},
 	{Version: "v1", Kind: "Service"},
+	{Group: "apps", Version: "v1", Kind: "Deployment"},
+	{Group: "batch", Version: "v1", Kind: "Job"},
+}
+
+// OperatorKinds are the kinds the operator renders for an addon itself, which
+// no chart may: the NetworkPolicy that is the kill switch of the addon's pods
+// assigned to the VPN (VPNPolicy).
+var OperatorKinds = []schema.GroupVersionKind{
+	{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy"},
+}
+
+// AppliedKinds are every kind the operator applies for an addon — the chart's
+// (AllowedKinds) and its own (OperatorKinds) — and so lists back and prunes, in
+// the order it applies them. The NetworkPolicy comes before the workloads, so
+// that no pod assigned to the VPN starts without its kill switch, and none
+// does when that policy cannot be applied.
+var AppliedKinds = []schema.GroupVersionKind{
+	{Version: "v1", Kind: "ServiceAccount"},
+	{Version: "v1", Kind: "Secret"},
+	{Version: "v1", Kind: "ConfigMap"},
+	{Version: "v1", Kind: "PersistentVolumeClaim"},
+	{Version: "v1", Kind: "Service"},
+	{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy"},
 	{Group: "apps", Version: "v1", Kind: "Deployment"},
 	{Group: "batch", Version: "v1", Kind: "Job"},
 }
@@ -81,15 +104,26 @@ func allowedKind(kind string) (schema.GroupVersionKind, bool) {
 	return schema.GroupVersionKind{}, false
 }
 
-// ApplyOrder sorts objects into apply order (AllowedKinds), stable within a kind.
+// appliedKind reports whether the operator applies objects of the kind for an
+// addon (AppliedKinds).
+func appliedKind(kind string) bool {
+	for _, gvk := range AppliedKinds {
+		if gvk.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyOrder sorts objects into apply order (AppliedKinds), stable within a kind.
 func ApplyOrder(objs []*unstructured.Unstructured) {
 	rank := func(o *unstructured.Unstructured) int {
-		for i, gvk := range AllowedKinds {
+		for i, gvk := range AppliedKinds {
 			if gvk.Kind == o.GetKind() {
 				return i
 			}
 		}
-		return len(AllowedKinds)
+		return len(AppliedKinds)
 	}
 	sort.SliceStable(objs, func(i, j int) bool { return rank(objs[i]) < rank(objs[j]) })
 }
@@ -113,6 +147,9 @@ type GuardInput struct {
 	// PullSecrets is zaentrum.imagePullSecrets: platform Secrets a pod may use
 	// as imagePullSecrets, and reference, without rendering them.
 	PullSecrets []string
+	// VPNProxy is zaentrum.vpn.proxy: the platform VPN's proxy, "" when the
+	// platform has no VPN — and a pod template assigned to it is refused.
+	VPNProxy string
 }
 
 // Violations checks every rendered object against the addon guardrails.
@@ -190,6 +227,7 @@ func Violations(objs []*unstructured.Unstructured, in GuardInput) []string {
 		case "PersistentVolumeClaim":
 			out = append(out, pvcViolations(o, id)...)
 		case "Deployment", "Job":
+			out = append(out, vpnViolations(o, id, in.VPNProxy)...)
 			out = append(out, podViolations(o, id, refs)...)
 		}
 	}
@@ -573,11 +611,12 @@ type OwnerLookup func(obj *unstructured.Unstructured) (exists bool, controller *
 
 // Collisions refuses rendered objects whose name is taken by an object this
 // addon does not control — a platform object, another addon's, one made by
-// hand. The operator never forces its way over those.
+// hand. The operator never forces its way over those. Objects of a kind it
+// does not apply (AppliedKinds) are refused already, and never looked up.
 func Collisions(objs []*unstructured.Unstructured, addonUID types.UID, lookup OwnerLookup) ([]string, error) {
 	var out []string
 	for _, o := range objs {
-		if _, ok := allowedKind(o.GetKind()); !ok || o.GetName() == "" {
+		if !appliedKind(o.GetKind()) || o.GetName() == "" {
 			continue
 		}
 		exists, controller, err := lookup(o)

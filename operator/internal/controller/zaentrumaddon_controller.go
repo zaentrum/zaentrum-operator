@@ -90,6 +90,9 @@ type ZaentrumAddonReconciler struct {
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;patch;delete
+// The kill switch of an addon's pods assigned to the platform VPN, which the
+// operator renders, applies, lists back and prunes itself (addon.VPNPolicy).
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile plans the addon — fetch, values, render, guardrails — and, unless
 // it is suspended, applies the plan with server-side apply, prunes what the
@@ -303,6 +306,14 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 		notPlanned(a, zaentrumv1alpha1.AddonFailed, "NoPlatform", problem)
 		return r.withoutApply(ctx, a, applied, addonRequeueRetry)
 	}
+	// The VPN every addon is told about, and whose cluster networks the kill
+	// switch of a pod assigned to it allows. The CRD checks spec.vpn already;
+	// this holds whatever served the Zaentrum to the same rules.
+	vpn, err := addon.PlatformVPN(z.Spec.VPN)
+	if err != nil {
+		notPlanned(a, zaentrumv1alpha1.AddonFailed, "PlatformValues", "platform values: "+err.Error())
+		return r.withoutApply(ctx, a, applied, addonRequeueRetry)
+	}
 	platform, err := templates.AddonPlatformValues(z)
 	if err != nil {
 		notPlanned(a, zaentrumv1alpha1.AddonFailed, "PlatformValues", "platform values: "+err.Error())
@@ -359,8 +370,11 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 		Values:    addon.LayerValues(generated, user, platform),
 	})
 	plan.ValuesErrors = append(plan.ValuesErrors, errs...)
+	// What the operator applies: the chart's objects and, when the chart
+	// assigns pods to the VPN, their kill switch — the operator's own object,
+	// which no chart may render.
+	var objs []*unstructured.Unstructured
 	if rendered != nil {
-		plan.Objects, plan.Workloads = addon.Summarize(rendered.Objects)
 		plan.Violations = append(plan.Violations, addon.Violations(rendered.Objects, addon.GuardInput{
 			Namespace:       a.Namespace,
 			MediaClaim:      platformString(platform, "media", "claimName"),
@@ -368,13 +382,19 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 			Reserved:        reserved,
 			EventsTLSSecret: platformString(platform, "events", "tlsSecret"),
 			PullSecrets:     platformStrings(platform, "imagePullSecrets"),
+			VPNProxy:        platformString(platform, "vpn", "proxy"),
 		})...)
-		collisions, err := addon.Collisions(rendered.Objects, a.UID, r.ownerLookup(ctx, a.Namespace))
+		objs = rendered.Objects
+		if policy := addon.VPNPolicy(objs, a.Name, a.Namespace, vpn.ClusterCIDRs); policy != nil {
+			objs = append(objs[:len(objs):len(objs)], policy)
+		}
+		plan.Objects, plan.Workloads = addon.Summarize(objs)
+		collisions, err := addon.Collisions(objs, a.UID, r.ownerLookup(ctx, a.Namespace))
 		if err != nil {
 			return r.errored(a, err)
 		}
 		plan.Violations = append(plan.Violations, collisions...)
-		plan.Changes = addon.Changes(rendered.Objects, liveObjects(applied))
+		plan.Changes = addon.Changes(objs, liveObjects(applied))
 	}
 	recordPlan(a, plan)
 
@@ -396,17 +416,18 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 		return r.withoutApply(ctx, a, applied, addonRequeueSettled)
 	}
 
-	addon.Decorate(rendered.Objects, addon.Decoration{
+	addon.Decorate(objs, addon.Decoration{
 		Name:      a.Name,
 		Namespace: a.Namespace,
 		PartOf:    platformString(platform, "partOf"),
 		Checksum:  rendered.Checksum,
 	})
-	addon.ApplyOrder(rendered.Objects)
-	if err := r.apply(ctx, a, rendered.Objects); err != nil {
+	addon.ApplyOrder(objs)
+	if err := r.apply(ctx, a, objs); err != nil {
 		return r.errored(a, err)
 	}
-	if err := r.prune(ctx, applied, rendered.Objects); err != nil {
+	killSwitchHeld, err := r.prune(ctx, a, applied, objs)
+	if err != nil {
 		return r.errored(a, err)
 	}
 	a.Status.LastAppliedChart = &zaentrumv1alpha1.AddonChart{
@@ -416,7 +437,7 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 	}
 
 	var deployments []string
-	for _, o := range rendered.Objects {
+	for _, o := range objs {
 		if o.GetKind() == "Deployment" {
 			deployments = append(deployments, o.GetName())
 		}
@@ -429,7 +450,7 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 	switch {
 	case state.allReady:
 		a.Status.Phase = zaentrumv1alpha1.AddonReady
-		a.Status.Message = fmt.Sprintf("applied %d objects; all %d components ready", len(rendered.Objects), len(deployments))
+		a.Status.Message = fmt.Sprintf("applied %d objects; all %d components ready", len(objs), len(deployments))
 		setAddonCondition(a, condTypeReady, metav1.ConditionTrue, "AllComponentsReady", a.Status.Message)
 	case len(state.stalled) > 0:
 		// Like the platform: a rollout Kubernetes gave up on is not "still
@@ -448,8 +469,13 @@ func (r *ZaentrumAddonReconciler) reconcileAddon(ctx context.Context, a *zaentru
 		setAddonCondition(a, condTypeReady, metav1.ConditionFalse, "ComponentsNotReady", a.Status.Message)
 		requeue = addonRequeueRollout
 	}
+	if killSwitchHeld {
+		// Look again soon: the policy goes once the last pod assigned to the
+		// VPN has stopped, which no watch reports.
+		requeue = sooner(requeue, addonRequeueRollout)
+	}
 	logger.Info("reconciled addon", "phase", a.Status.Phase, "chart", plan.Chart.Name, "version", plan.Chart.Version,
-		"objects", len(rendered.Objects))
+		"objects", len(objs))
 	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
@@ -679,12 +705,13 @@ func reservedObjects(a *zaentrumv1alpha1.ZaentrumAddon) map[string]bool {
 	return reserved
 }
 
-// inventory lists what is applied for the addon: objects of the allowed kinds
-// labelled for it and managed by the operator, controlled by this very
-// ZaentrumAddon, minus its values objects.
+// inventory lists what is applied for the addon: objects of the kinds the
+// operator applies for it — the chart's and its own — labelled for it and
+// managed by the operator, controlled by this very ZaentrumAddon, minus its
+// values objects.
 func (r *ZaentrumAddonReconciler) inventory(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon, reserved map[string]bool) ([]*unstructured.Unstructured, error) {
 	var out []*unstructured.Unstructured
-	for _, gvk := range addon.AllowedKinds {
+	for _, gvk := range addon.AppliedKinds {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
 		if err := r.reader().List(ctx, list, client.InNamespace(a.Namespace), client.MatchingLabels{
@@ -922,8 +949,12 @@ func (r *ZaentrumAddonReconciler) apply(ctx context.Context, a *zaentrumv1alpha1
 	return nil
 }
 
-// prune deletes the applied objects the chart no longer renders.
-func (r *ZaentrumAddonReconciler) prune(ctx context.Context, applied, rendered []*unstructured.Unstructured) error {
+// prune deletes the applied objects the chart no longer renders. The kill
+// switch of the addon's pods assigned to the VPN is one of them once no pod
+// template carries the label — but it goes only after the last such pod has
+// stopped, so that a pod rolling out of the VPN is never without it. Until
+// then it stays, and held says so.
+func (r *ZaentrumAddonReconciler) prune(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon, applied, rendered []*unstructured.Unstructured) (held bool, err error) {
 	stale := map[string]bool{}
 	for _, l := range addon.Prune(rendered, liveObjects(applied)) {
 		stale[l.Kind+"/"+l.Name] = true
@@ -932,13 +963,38 @@ func (r *ZaentrumAddonReconciler) prune(ctx context.Context, applied, rendered [
 		if !stale[addon.Key(obj)] {
 			continue
 		}
+		if addon.IsVPNPolicy(obj, a.Name) {
+			running, err := r.vpnPodsRunning(ctx, a)
+			if err != nil {
+				return held, err
+			}
+			if running {
+				held = true
+				continue
+			}
+		}
 		uid := obj.GetUID()
 		err := r.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationBackground), client.Preconditions{UID: &uid})
 		if err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("prune %s: %w", addon.Key(obj), err)
+			return held, fmt.Errorf("prune %s: %w", addon.Key(obj), err)
 		}
 	}
-	return nil
+	return held, nil
+}
+
+// vpnPodsRunning reports whether a pod of the addon assigned to the VPN has
+// not stopped yet: one the kill switch selects that is not Succeeded or Failed.
+func (r *ZaentrumAddonReconciler) vpnPodsRunning(ctx context.Context, a *zaentrumv1alpha1.ZaentrumAddon) (bool, error) {
+	var pods corev1.PodList
+	if err := r.reader().List(ctx, &pods, client.InNamespace(a.Namespace), client.MatchingLabels(addon.VPNPodSelector(a.Name))); err != nil {
+		return false, fmt.Errorf("list the pods assigned to the VPN: %w", err)
+	}
+	for _, p := range pods.Items {
+		if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // componentState is the readiness roll-up of an addon's Deployments.
