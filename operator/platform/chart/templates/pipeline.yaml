@@ -76,7 +76,7 @@ spec:
         # PLAINTEXT bundled broker; item_id keys per-item ordering.
 {{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
-          value: analyzer-workers
+          value: {{ include "z.kafkaGroup" (dict "root" $ "name" "analyzer-workers") }}
         - name: CONSUME_TOPIC
           value: {{ include "z.topicPrefix" . }}catalog.item.enriched
         - name: PRODUCE_TOPIC
@@ -208,7 +208,10 @@ spec:
         # Pure Kafka triggers: consume transcoded -> package -> terminal (no emit).
 {{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
-          value: packager-workers
+          value: {{ include "z.kafkaGroup" (dict "root" $ "name" "packager-workers") }}
+        # The extras' (trailers, featurettes) group, beside the titles'.
+        - name: EXTRAS_GROUP_ID
+          value: {{ include "z.kafkaGroup" (dict "root" $ "name" "packager-extras") }}
         - name: CONSUME_TOPIC
           value: {{ include "z.topicPrefix" . }}catalog.item.transcoded
         - name: CLAIM_BATCH_SIZE
@@ -356,7 +359,10 @@ spec:
         # Pure Kafka triggers: consume analyzed -> transcode -> emit transcoded.
 {{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
-          value: transcoder-workers
+          value: {{ include "z.kafkaGroup" (dict "root" $ "name" "transcoder-workers") }}
+        # The extras' (trailers, featurettes) group, beside the titles'.
+        - name: EXTRAS_GROUP_ID
+          value: {{ include "z.kafkaGroup" (dict "root" $ "name" "transcoder-extras") }}
         - name: CONSUME_TOPIC
           value: {{ include "z.topicPrefix" . }}catalog.item.analyzed
         - name: PRODUCE_TOPIC

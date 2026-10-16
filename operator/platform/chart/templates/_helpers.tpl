@@ -469,6 +469,14 @@ imagePullSecrets:
 {{/* z.topicPrefix — per-tenant Kafka topic namespace. */}}
 {{- define "z.topicPrefix" -}}{{ .Values.eventStreaming.topicPrefix | default "stube." }}{{- end -}}
 
+{{/* z.kafkaGroup — a consumer group's name on the broker, quoted: the
+     instance's eventStreaming.groupPrefix, then the group's own name, so
+     instances that share a broker never share a group. An empty prefix leaves
+     the name as it was. Call with (dict "root" $ "name" "<group>"). */}}
+{{- define "z.kafkaGroup" -}}
+{{- printf "%s%s" (.root.Values.eventStreaming.groupPrefix | default "") .name | quote -}}
+{{- end -}}
+
 {{/* z.kafkaCertSecret — the secret holding the shared cluster's mTLS material
      (user.crt/user.key/ca.crt), or empty: the bundled broker is plaintext. */}}
 {{- define "z.kafkaCertSecret" -}}

@@ -142,6 +142,9 @@ spec:
 {{ include "z.kafkaEnv" . | indent 8 }}
         - name: KAFKA_GROUP_ID
           value: zaentrum-demo
+        # The group the enricher reads discovered items in.
+        - name: KAFKA_ENRICHER_GROUP
+          value: {{ include "z.kafkaGroup" (dict "root" $ "name" "katalog-enricher") }}
         - name: KAFKA_TLS_CA
           value: ""
         - name: KAFKA_TLS_CERT

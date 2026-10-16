@@ -37,8 +37,11 @@ func pipelineCR(encoder string) *zaentrumv1alpha1.Zaentrum {
 
 // An install that runs the pipeline and says nothing of the encoder runs it as
 // before: on the GPU, its workers byte for byte what the demo's were before
-// spec.pipeline existed (testdata/pipeline-gpu.yaml), so not one of them rolls.
-// "gpu" said out loud renders the same.
+// spec.pipeline existed (testdata/pipeline-gpu.yaml), so not one of them rolls —
+// but for EXTRAS_GROUP_ID, which the transcoder and the packager gained with
+// spec.eventStreaming.groupPrefix: it names the extras' groups their own
+// defaults named, so each rolls once and consumes where it did. "gpu" said out
+// loud renders the same.
 func TestPipelineOnTheGPURendersAsBefore(t *testing.T) {
 	raw, err := os.ReadFile("testdata/pipeline-gpu.yaml")
 	require.NoError(t, err)
@@ -174,4 +177,93 @@ func TestPipelineSettingsReachTheWorkers(t *testing.T) {
 	objs := renderCR(t, z)
 	assert.Nil(t, find(t, objs, "Deployment", "transcoder"))
 	assert.False(t, strings.Contains(fmt.Sprintf("%v", objs), "LADDER"))
+}
+
+// groupEnv is every environment variable of a render's Deployments named for a
+// consumer group, "<deployment> <name>" to its value.
+func groupEnv(objs []*unstructured.Unstructured) map[string]string {
+	out := map[string]string{}
+	for _, o := range objs {
+		if o.GetKind() != "Deployment" {
+			continue
+		}
+		for _, key := range []string{"initContainers", "containers"} {
+			containers, _, _ := unstructured.NestedSlice(o.Object, "spec", "template", "spec", key)
+			for _, c := range containers {
+				env, _, _ := unstructured.NestedSlice(c.(map[string]interface{}), "env")
+				for _, e := range env {
+					m := e.(map[string]interface{})
+					if name, _ := m["name"].(string); strings.Contains(name, "GROUP") {
+						value, _ := m["value"].(string)
+						out[o.GetName()+" "+name] = value
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// sharedBrokerCR is an instance with the pipeline on a broker it shares with
+// others: a topic prefix and an mTLS user of its own, and groupPrefix.
+func sharedBrokerCR(groupPrefix string) *zaentrumv1alpha1.Zaentrum {
+	z := pipelineCR("cpu")
+	z.Spec.EventStreaming.Mode = "external"
+	z.Spec.EventStreaming.Bootstrap = "broker.events.svc:9093"
+	z.Spec.EventStreaming.CertSecret = "kafka-mtls"
+	z.Spec.EventStreaming.TopicPrefix = "tenant."
+	z.Spec.EventStreaming.GroupPrefix = groupPrefix
+	return z
+}
+
+// Instances that share a broker never share a consumer group: every group the
+// pipeline's workers and the catalog enricher consume in carries
+// spec.eventStreaming.groupPrefix. A group two instances shared would be led by
+// one of them, which cannot see the other's topics, and the other's workers
+// would be given no partition and process nothing. Without a prefix each group
+// keeps exactly the name it had, and with it its committed offsets — through
+// the operator and through helm, bundled or on a shared broker. What the
+// prefix does not name stays as it was: katalog-ingest's group, a legacy
+// scheduler's on other topics, and katalog-manager-api's KAFKA_GROUP_ID, which
+// katalog-manager does not read. Nor does the prefix reach a topic.
+func TestGroupPrefixNamesTheInstancesConsumerGroups(t *testing.T) {
+	consumers := []struct{ deployment, env, unprefixed, prefixed string }{
+		{"analyzer", "KAFKA_GROUP_ID", "analyzer-workers", "tenant-analyzer-workers"},
+		{"transcoder", "KAFKA_GROUP_ID", "transcoder-workers", "tenant-transcoder-workers"},
+		{"transcoder", "EXTRAS_GROUP_ID", "transcoder-extras", "tenant-transcoder-extras"},
+		{"packager", "KAFKA_GROUP_ID", "packager-workers", "tenant-packager-workers"},
+		{"packager", "EXTRAS_GROUP_ID", "packager-extras", "tenant-packager-extras"},
+		{"katalog-manager-api", "KAFKA_ENRICHER_GROUP", "katalog-enricher", "tenant-katalog-enricher"},
+	}
+	helmPrefixed := helmRender(t, map[string]interface{}{
+		"features":       map[string]interface{}{"pipeline": true},
+		"eventStreaming": map[string]interface{}{"groupPrefix": "tenant-"},
+	})
+	for name, tc := range map[string]struct {
+		objs     []*unstructured.Unstructured
+		prefixed bool
+	}{
+		"operator, bundled":           {renderCR(t, pipelineCR("gpu")), false},
+		"operator, shared, no prefix": {renderCR(t, sharedBrokerCR("")), false},
+		"operator, shared, tenant-":   {renderCR(t, sharedBrokerCR("tenant-")), true},
+		"helm, values.yaml":           {helmRender(t, map[string]interface{}{"features": map[string]interface{}{"pipeline": true}}), false},
+		"helm, groupPrefix tenant-":   {helmPrefixed, true},
+	} {
+		want := map[string]string{
+			"katalog-ingest KAFKA_GROUP_ID":      "zaentrum-demo",
+			"katalog-manager-api KAFKA_GROUP_ID": "zaentrum-demo",
+		}
+		for _, c := range consumers {
+			want[c.deployment+" "+c.env] = c.unprefixed
+			if tc.prefixed {
+				want[c.deployment+" "+c.env] = c.prefixed
+			}
+		}
+		assert.Equal(t, want, groupEnv(tc.objs), name)
+	}
+
+	objs := renderCR(t, sharedBrokerCR("tenant-"))
+	assert.Equal(t, "tenant.catalog.item.enriched", envValue(t, objs, "analyzer", "CONSUME_TOPIC"))
+	assert.Equal(t, "tenant.", envValue(t, objs, "katalog-manager-api", "KAFKA_TOPIC_PREFIX"))
+	assert.Equal(t, "stube.catalog.item.analyzed", envValue(t, helmPrefixed, "transcoder", "CONSUME_TOPIC"))
 }

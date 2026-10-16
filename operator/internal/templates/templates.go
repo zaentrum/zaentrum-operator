@@ -244,6 +244,7 @@ func (v Values) chartValues() map[string]interface{} {
 			"bootstrap":   spec.EventStreaming.Bootstrap,
 			"certSecret":  spec.EventStreaming.CertSecret,
 			"topicPrefix": orDefault(spec.EventStreaming.TopicPrefix, "stube."),
+			"groupPrefix": spec.EventStreaming.GroupPrefix,
 		},
 		// The chart never renders the platform's Secrets for the operator: with
 		// spec.secrets.external CI makes them, and otherwise the operator

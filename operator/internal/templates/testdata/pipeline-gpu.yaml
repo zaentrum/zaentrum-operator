@@ -153,6 +153,8 @@
             value: stube.
           - name: KAFKA_GROUP_ID
             value: packager-workers
+          - name: EXTRAS_GROUP_ID
+            value: packager-extras
           - name: CONSUME_TOPIC
             value: stube.catalog.item.transcoded
           - name: CLAIM_BATCH_SIZE
@@ -248,6 +250,8 @@
             value: stube.
           - name: KAFKA_GROUP_ID
             value: transcoder-workers
+          - name: EXTRAS_GROUP_ID
+            value: transcoder-extras
           - name: CONSUME_TOPIC
             value: stube.catalog.item.analyzed
           - name: PRODUCE_TOPIC
