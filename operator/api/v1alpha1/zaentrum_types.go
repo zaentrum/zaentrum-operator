@@ -425,6 +425,17 @@ type EventStreamingSpec struct {
 	// +kubebuilder:default="stube."
 	// +optional
 	TopicPrefix string `json:"topicPrefix,omitempty"`
+
+	// GroupPrefix is the per-instance consumer-group namespace on a shared
+	// broker (e.g. "tenant-"): the pipeline workers' and the catalog
+	// enricher's consumer groups carry it, so instances sharing a broker never
+	// share a group. Empty: the groups keep their unprefixed names, as before,
+	// and an instance that already consumes keeps its committed offsets. A
+	// group a prefix newly names has no offsets yet and starts at the earliest
+	// one retained (the workers' auto.offset.reset=earliest), so setting it on
+	// an instance re-reads what its topics retain.
+	// +optional
+	GroupPrefix string `json:"groupPrefix,omitempty"`
 }
 
 // SecretsSpec controls secret provisioning.

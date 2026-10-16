@@ -45,7 +45,9 @@ const canonicalCRD = "../../config/crd/zaentrum.io_zaentrums.yaml"
 // the test.
 const pinnedInstall = "../../../deploy/operator-install.yaml"
 
-var sinceThePin = []string{}
+var sinceThePin = []string{
+	"spec.eventStreaming.groupPrefix",
+}
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted
 // paths below openAPIV3Schema, such as "spec.identity.tvClientId" — removed.
