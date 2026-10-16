@@ -702,6 +702,55 @@ title with x265 on a few cores, one title at a time. The packaged streams live
 beside the library on the `media` volume, about as large again as what they
 were made from, and more with a ladder.
 
+### A broker shared with other instances (`spec.eventStreaming`)
+
+The services and the pipeline's workers pass their events through Kafka: the
+platform's own single-node broker by default, or a broker several instances
+share, each with topics, consumer groups and a broker user of its own:
+
+```yaml
+spec:
+  eventStreaming:
+    mode: external                      # bundled | external
+    bootstrap: kafka.example.org:9093   # the shared broker's bootstrap servers
+    certSecret: kafka-mtls              # the instance's broker user, for mTLS
+    topicPrefix: tenant.                # the instance's topics
+    groupPrefix: tenant-                # the instance's consumer groups
+```
+
+| Field | Default | |
+|---|---|---|
+| `mode` | `bundled` | `external`: no bundled broker (`features.kafka` is ignored); the platform connects to `bootstrap` |
+| `bootstrap` | | the broker's bootstrap servers; required with `external` |
+| `certSecret` | plaintext | with `external`, a Secret in the platform's namespace with `user.crt`, `user.key` and `ca.crt`: the instance's broker user |
+| `topicPrefix` | `stube.` | the start of every topic the platform names |
+| `groupPrefix` | none | the start of every consumer group the pipeline's workers and the catalog enricher consume in |
+
+On a shared broker every instance needs a topic prefix and a group prefix of
+its own, and a user whose ACLs allow its own topics and groups — on those
+prefixes, typically — and nothing of another's. A group two instances share is
+led by one member, which cannot see the other instance's topics: the other's
+workers are assigned no partition and process nothing, and nothing says so.
+With `groupPrefix: tenant-` the groups are
+
+| Deployment | Variable | Group |
+|---|---|---|
+| analyzer | `KAFKA_GROUP_ID` | `tenant-analyzer-workers` |
+| transcoder | `KAFKA_GROUP_ID`, `EXTRAS_GROUP_ID` | `tenant-transcoder-workers`, `tenant-transcoder-extras` |
+| packager | `KAFKA_GROUP_ID`, `EXTRAS_GROUP_ID` | `tenant-packager-workers`, `tenant-packager-extras` |
+| katalog-manager-api | `KAFKA_ENRICHER_GROUP` | `tenant-katalog-enricher` |
+
+and without it the same names without `tenant-`, as before the field existed.
+chino-api's and katalog-manager-api's other groups are each pod's own, named
+after the pod.
+
+`groupPrefix` has no default, so an instance that already consumes keeps its
+groups and their committed offsets. Setting it moves the workers to groups
+that have none: they start at the earliest offset the topics retain (the
+workers' `auto.offset.reset=earliest`), and every event the topics still hold
+is handled again. Set it before an instance first consumes, or while its
+topics hold little.
+
 ### Sign-in redirects, and the realm Job
 
 The clients people sign in through return only to the platform's own origins
