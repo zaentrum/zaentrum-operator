@@ -417,6 +417,19 @@ kubectl -n $ns rollout restart deploy -l 'app!=postgres'
 With `secrets.external` (the demo, beta) the operator makes, reads and reports
 none of them.
 
+### Optional Secrets you provide
+
+Two features need a credential only you have. The operator never makes these
+Secrets; when one is missing, its feature is off and nothing fails:
+
+| Secret | Keys | Turns on |
+|---|---|---|
+| `katalog-tmdb` | `api-key` | metadata from TMDB for what is discovered (katalog-manager) |
+| `zaentrum-feedback` | `url`, `token`, `project-id`, `bug-type-id` | bug reports from the players (chino-api `POST /api/v1/feedback`): each becomes a work package of that type in that OpenProject project, filed with that API token; `GET /api/config` then says `features.feedback: true` and the players show their bug-report entry points |
+
+Both are read when the service starts: after you create or change one, restart
+what reads it (`kubectl -n $ns rollout restart deploy/chino-api`).
+
 ### The bundled Postgres keeps its data (`spec.storage.postgres`)
 
 ```yaml

@@ -126,14 +126,19 @@ spec:
               name: zaentrum-stream-signing
               key: key
               optional: true
+        # Bug reports (POST /api/v1/feedback) become work packages in an
+        # OpenProject project when the optional Secret zaentrum-feedback holds
+        # its settings; without it chino-api answers 503 there and /api/config
+        # says features.feedback false. Read at start: a changed Secret needs
+        # a restart.
         - name: OPENPROJECT_URL
-          value: ""
+          valueFrom: { secretKeyRef: { name: zaentrum-feedback, key: url, optional: true } }
         - name: OPENPROJECT_TOKEN
-          value: ""
+          valueFrom: { secretKeyRef: { name: zaentrum-feedback, key: token, optional: true } }
         - name: OPENPROJECT_PROJECT_ID
-          value: ""
+          valueFrom: { secretKeyRef: { name: zaentrum-feedback, key: project-id, optional: true } }
         - name: OPENPROJECT_BUG_TYPE_ID
-          value: ""
+          valueFrom: { secretKeyRef: { name: zaentrum-feedback, key: bug-type-id, optional: true } }
         livenessProbe:
           httpGet:
             path: /api/healthz
