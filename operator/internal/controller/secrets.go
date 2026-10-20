@@ -84,8 +84,16 @@ type platformSecret struct {
 	name string
 	// bundled marks a Secret only the bundled Keycloak needs.
 	bundled bool
-	keys    []secretKey
+	// needed, when set, says whether the platform reads it at all (a feature
+	// the CR turns on).
+	needed func(*zaentrumv1alpha1.Zaentrum) bool
+	keys   []secretKey
 }
+
+// liveWorkerSecretName holds the live worker's bearer token (spec.liveWorker).
+const liveWorkerSecretName = "zaentrum-live-worker"
+
+func liveWorkerEnabled(z *zaentrumv1alpha1.Zaentrum) bool { return z.Spec.LiveWorker.Enabled }
 
 func fixed(v string) func() ([]byte, error) {
 	return func() ([]byte, error) { return []byte(v), nil }
@@ -118,6 +126,12 @@ var platformSecrets = []platformSecret{
 			"ZGV2LW9ubHktY2hhbmdlLW1lLXN0cmVhbS1zaWduaW5nLWtleQ==",
 			"ZGV2LW9ubHktY2hhbmdlLW1lLW5vdC1mb3ItcHJvZCE=",
 		}},
+	}},
+	// The live worker's bearer token: chino-stream sends it, the worker asks
+	// for it on its /v1/ API, so no other pod of the cluster has the library
+	// encoded for it.
+	{name: liveWorkerSecretName, needed: liveWorkerEnabled, keys: []secretKey{
+		{name: "token", make: random(43)},
 	}},
 	// The zaentrum-manager client's secret: the realm import's
 	// ${ZAENTRUM_MANAGER_SECRET}, and what katalog-manager-api and the pipeline
@@ -163,6 +177,9 @@ func (r *ZaentrumReconciler) ensureSecrets(ctx context.Context, z *zaentrumv1alp
 	provided := false
 	for _, ps := range platformSecrets {
 		if ps.bundled && !bundledIdentity(z) {
+			continue
+		}
+		if ps.needed != nil && !ps.needed(z) {
 			continue
 		}
 		names = append(names, ps.name)

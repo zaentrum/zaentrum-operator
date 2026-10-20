@@ -55,6 +55,28 @@ pipeline:
   hlsSubtitles: false      # name the WebVTT renditions in the HLS master
   preferredLanguages: []   # default audio language order, e.g. [de, en]; empty: the catalog's list
 
+# The live worker (templates/live-worker.yaml): the service that makes, segment
+# by segment, the live encodes chino-stream ran on its own ffmpeg — a supervisor
+# of warm worker processes, one per encode slot, on a GPU. chino-stream is told
+# where it is (LIVE_WORKER_URL) and how far to use it (LIVE_WORKER_MODE).
+liveWorker:
+  enabled: false
+  # off: every session on chino-stream's own ffmpeg, the worker without traffic;
+  # shadow: chino-stream also asks the worker for what it served, checking and
+  # dropping it; on: new on-the-fly sessions go to the worker. Quote off: bare,
+  # YAML reads it as false.
+  mode: "off"
+  slots:
+    gpu: 4                 # LIVE_WORKER_GPU_SLOTS: video encodes at once, a hardware encode session each
+    cpu: 2                 # LIVE_WORKER_CPU_SLOTS: audio and subtitle jobs at once
+  resources: {}            # the container's; empty: the chart's (with the GPU nvidia.com/gpu: 1, as the transcoder)
+  gpu:
+    # nvidia.com/gpu, the toleration and the node selector, CUDA and
+    # NVIDIA_DRIVER_CAPABILITIES=all; false: no GPU, video on the CPU.
+    enabled: true
+    nodeSelector: {}       # empty: nvidia.com/gpu.present: "true", the transcoder's
+    tolerations: []        # empty: the nvidia.com/gpu NoSchedule taint, the transcoder's
+
 storage:
   mediaSize: 50Gi
   className: ""             # optional StorageClass for platform PVCs

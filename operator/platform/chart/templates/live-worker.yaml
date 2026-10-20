@@ -1,0 +1,164 @@
+{{- if .Values.liveWorker.enabled }}
+{{- $lw := .Values.liveWorker }}
+{{- $mode := toString $lw.mode }}
+{{- if not (has $mode (list "off" "shadow" "on")) }}
+{{- fail (printf "liveWorker.mode is off, shadow or on, not %q (YAML reads a bare off as false: quote it)" $mode) }}
+{{- end }}
+{{- $gpu := ne (toString $lw.gpu.enabled) "false" }}
+{{- $gpuSlots := 0 }}
+{{- if $gpu }}{{- $gpuSlots = int $lw.slots.gpu }}{{- end }}
+{{- $cpuSlots := int $lw.slots.cpu }}
+{{- if or (lt $gpuSlots 0) (lt $cpuSlots 0) (eq (add $gpuSlots $cpuSlots) 0) }}
+{{- fail (printf "liveWorker.slots: %d on the GPU and %d on the CPU, and the worker needs one" $gpuSlots $cpuSlots) }}
+{{- end }}
+{{- $res := deepCopy ($lw.resources | default dict) }}
+{{- if not $res }}
+{{- if $gpu }}
+{{- $res = dict "requests" (dict "cpu" "1" "memory" "2Gi") "limits" (dict "cpu" "4" "memory" "8Gi") }}
+{{- else }}
+{{- $res = dict "requests" (dict "cpu" "500m" "memory" "1Gi") "limits" (dict "cpu" "4" "memory" "8Gi") }}
+{{- end }}
+{{- end }}
+{{- if $gpu }}
+{{- $limits := index $res "limits" | default dict }}
+{{- $requests := index $res "requests" | default dict }}
+{{- $n := index $limits "nvidia.com/gpu" | default (index $requests "nvidia.com/gpu") | default "1" }}
+{{- $_ := set $limits "nvidia.com/gpu" (index $limits "nvidia.com/gpu" | default $n) }}
+{{- $_ := set $requests "nvidia.com/gpu" (index $requests "nvidia.com/gpu" | default $n) }}
+{{- $_ := set $res "limits" $limits }}
+{{- $_ := set $res "requests" $requests }}
+{{- end }}
+# The live worker (ADR-0013 of the platform: live rungs beside the package, as
+# a supervised safety net). chino-stream's live encodes — a video rung's
+# segment, an original's audio, an embedded subtitle — are made here, by a
+# supervisor of warm worker processes, one per encode slot, so an encoder that
+# crashes, runs away or is killed for memory costs a retry and never reaches
+# the stream origin. It reads the library read-only, at the paths chino-stream
+# names its files by. liveWorker.gpu: on an NVIDIA GPU, placed as the
+# transcoder is with pipeline.encoder gpu; without it nothing asks for,
+# tolerates or looks for one, and video is encoded on the CPU.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: live-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: live-worker
+    role: stream
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  replicas: {{ include "z.replicas" (dict "root" $ "name" "live-worker" "def" 1) }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: live-worker
+  # One pod at a time: a new one beside the old would hold its encode sessions
+  # on top of the old one's, past what the GPU allows.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: live-worker
+        role: stream
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      {{- include "z.imagePullSecrets" . | nindent 6 }}
+{{- if $gpu }}
+      nodeSelector:
+        {{- toYaml ($lw.gpu.nodeSelector | default (dict "nvidia.com/gpu.present" "true")) | nindent 8 }}
+      tolerations:
+        {{- toYaml ($lw.gpu.tolerations | default (list (dict "effect" "NoSchedule" "key" "nvidia.com/gpu" "operator" "Exists"))) | nindent 8 }}
+{{- end }}
+      {{- include "z.podSecurity" . | nindent 6 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: live-worker
+        image: ghcr.io/zaentrum/live-worker:{{ .Values.global.version }}
+        imagePullPolicy: Always
+        env:
+        - name: LIVE_WORKER_LISTEN
+          value: ":8090"
+        # A source must lie under it: the library, where chino-stream has it.
+        - name: LIVE_WORKER_MEDIA_ROOTS
+          value: /var/lib/katalog
+        - name: LIVE_WORKER_GPU_SLOTS
+          value: {{ $gpuSlots | quote }}
+        - name: LIVE_WORKER_CPU_SLOTS
+          value: {{ $cpuSlots | quote }}
+        - name: LIVE_WORKER_HW
+          value: {{ ternary "cuda" "none" $gpu }}
+{{- if $gpu }}
+        # Compute and video (CUDA, NVDEC, NVENC), and graphics: the driver's
+        # Vulkan, which tone mapping on the GPU runs on.
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: all
+        # The image's FFmpeg libraries, then libcuda where the device plugin
+        # mounts it.
+        - name: LD_LIBRARY_PATH
+          value: /opt/ffmpeg/lib:/usr/local/nvidia/lib64:/usr/local/nvidia/lib
+{{- end }}
+        # The bearer token its /v1/ API asks for, the one chino-stream sends.
+        - name: LIVE_WORKER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-live-worker
+              key: token
+              optional: true
+        ports:
+        - name: http
+          containerPort: 8090
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          # Ready once every lane with slots has a worker process up (CUDA set
+          # up on the GPU's).
+          httpGet:
+            path: /readyz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 3
+        resources:
+          {{- toYaml $res | nindent 10 }}
+        volumeMounts:
+        # The media export read-only, at the parent dir, as chino-stream mounts it.
+        - mountPath: /var/lib/katalog
+          name: katalog-data
+          readOnly: true
+      volumes:
+      - name: katalog-data
+        persistentVolumeClaim:
+          claimName: {{ include "z.mediaClaimName" . }}
+          readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: live-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: live-worker
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+spec:
+  type: ClusterIP
+  selector:
+    app: live-worker
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: http
+{{- end }}

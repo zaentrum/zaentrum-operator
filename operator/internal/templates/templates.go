@@ -22,7 +22,9 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/engine"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
@@ -212,6 +214,7 @@ func (v Values) chartValues() map[string]interface{} {
 			"hlsSubtitles":       spec.Pipeline.HLSSubtitles,
 			"preferredLanguages": languages,
 		},
+		"liveWorker": v.liveWorkerValues(),
 		"storage": map[string]interface{}{
 			"mediaSize":       mediaSize,
 			"className":       spec.Storage.ClassName,
@@ -278,6 +281,64 @@ func (v Values) chartValues() map[string]interface{} {
 		"backup":   backup,
 		"services": services,
 	}
+}
+
+// liveWorkerValues maps spec.liveWorker onto the chart's liveWorker values:
+// an empty node selector or toleration list is the chart's own (the
+// transcoder's GPU placement), empty resources the chart's defaults.
+func (v Values) liveWorkerValues() map[string]interface{} {
+	lw := v.cr.Spec.LiveWorker
+	nodeSelector := map[string]interface{}{}
+	for k, s := range lw.GPU.NodeSelector {
+		nodeSelector[k] = s
+	}
+	tolerations := make([]interface{}, 0, len(lw.GPU.Tolerations))
+	for i := range lw.GPU.Tolerations {
+		if t, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&lw.GPU.Tolerations[i]); err == nil {
+			tolerations = append(tolerations, t)
+		}
+	}
+	return map[string]interface{}{
+		"enabled": lw.Enabled,
+		"mode":    orDefault(lw.Mode, "off"),
+		"slots": map[string]interface{}{
+			"gpu": int(derefInt32(lw.Slots.GPU, 4)),
+			"cpu": int(derefInt32(lw.Slots.CPU, 2)),
+		},
+		"resources": resourceValues(lw.Resources),
+		"gpu": map[string]interface{}{
+			"enabled":      derefBool(lw.GPU.Enabled, true),
+			"nodeSelector": nodeSelector,
+			"tolerations":  tolerations,
+		},
+	}
+}
+
+// resourceValues is a container's resources as chart values: its limits and
+// requests, each quantity as Kubernetes writes it.
+func resourceValues(r *corev1.ResourceRequirements) map[string]interface{} {
+	out := map[string]interface{}{}
+	if r == nil {
+		return out
+	}
+	for name, list := range map[string]corev1.ResourceList{"limits": r.Limits, "requests": r.Requests} {
+		if len(list) == 0 {
+			continue
+		}
+		m := map[string]interface{}{}
+		for k, q := range list {
+			m[string(k)] = q.String()
+		}
+		out[name] = m
+	}
+	return out
+}
+
+func derefInt32(p *int32, def int32) int32 {
+	if p == nil {
+		return def
+	}
+	return *p
 }
 
 // tlsValues maps spec.tls onto the chart's tls values.

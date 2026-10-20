@@ -85,6 +85,20 @@ spec:
           value: "4"
         - name: LD_LIBRARY_PATH
           value: /usr/local/nvidia/lib64:/usr/local/nvidia/lib
+{{- if .Values.liveWorker.enabled }}
+        # The live worker (templates/live-worker.yaml): where chino-stream sends
+        # its live encodes, how far (off, shadow, on), and the token it asks for.
+        - name: LIVE_WORKER_URL
+          value: http://live-worker
+        - name: LIVE_WORKER_MODE
+          value: {{ toString .Values.liveWorker.mode | quote }}
+        - name: LIVE_WORKER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: zaentrum-live-worker
+              key: token
+              optional: true
+{{- end }}
         ports:
         - containerPort: 8080
           name: http

@@ -335,3 +335,34 @@ func TestReconcileMakesTheSecretsFirst(t *testing.T) {
 		assert.False(t, strings.HasPrefix(o, "generate "), "a Secret made after the platform was applied: %s", o)
 	}
 }
+
+// The live worker's bearer token is one of the platform's Secrets while
+// spec.liveWorker is enabled: made once, random, owned by the Zaentrum, never
+// rotated; without the live worker there is none, and with external Secrets
+// it is someone else's to make.
+func TestSecretsMakeTheLiveWorkersToken(t *testing.T) {
+	ctx := context.Background()
+	z := verifyCR()
+	r, c := secretsEnv(t, z, nil)
+	require.NoError(t, r.ensureSecrets(ctx, z))
+	assert.Nil(t, liveSecret(t, c, liveWorkerSecretName), "no live worker, no token")
+
+	z.Spec.LiveWorker.Enabled = true
+	require.NoError(t, r.ensureSecrets(ctx, z))
+	sec := liveSecret(t, c, liveWorkerSecretName)
+	require.NotNil(t, sec)
+	assert.True(t, metav1.IsControlledBy(sec, z), "the token goes with the platform")
+	assert.Equal(t, "true", sec.Labels[labelGenerated])
+	token := sec.Data["token"]
+	assert.Len(t, token, 43)
+	assert.True(t, isAlnum(string(token)))
+	require.NoError(t, r.ensureSecrets(ctx, z))
+	assert.Equal(t, token, liveSecret(t, c, liveWorkerSecretName).Data["token"], "the token is never rotated")
+
+	ext := verifyCR()
+	ext.Spec.Secrets.External = true
+	ext.Spec.LiveWorker.Enabled = true
+	r, c = secretsEnv(t, ext, nil)
+	require.NoError(t, r.ensureSecrets(ctx, ext))
+	assert.Nil(t, liveSecret(t, c, liveWorkerSecretName), "external Secrets are CI's")
+}
