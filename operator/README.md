@@ -361,6 +361,7 @@ applied, and once:
 | `zaentrum-keycloak-admin` | `username` (`admin`), `password`, `realm-admin-password` | the master realm's bootstrap admin; the first administrator's one-time password (bundled identity) |
 | `zaentrum-demo-user` | `password` | the realm import's `${DEMO_USER_PASSWORD}` (bundled identity) |
 | `zaentrum-people` | `client-secret`, `deletion-token` | the `zaentrum-people` client, which portal-api manages the realm's people with; the token chino-api and portal-api delete an account with ([below](#people-and-the-rating-cap)) (bundled identity) |
+| `zaentrum-live-worker` | `token` | the live worker's bearer token, which chino-stream sends ([below](#live-encodes-specliveworker)) (with `spec.liveWorker.enabled`) |
 
 Every value comes from `crypto/rand` and is alphanumeric. Each Secret is owned
 by the Zaentrum (it goes with the platform) and labelled
@@ -714,6 +715,49 @@ to 10-bit — which costs a remux; on the CPU so does H.264 a browser decodes
 title with x265 on a few cores, one title at a time. The packaged streams live
 beside the library on the `media` volume, about as large again as what they
 were made from, and more with a ladder.
+
+### Live encodes (`spec.liveWorker`)
+
+What chino-stream encodes while a title plays — a video rung for a client
+that decodes none of the package's, an original's audio, an embedded
+subtitle — the live worker can make instead, segment by segment: a supervisor
+of warm worker processes, one per encode slot, on a GPU, so that an encoder
+that crashes, runs away or is killed for memory costs a retry and never
+reaches the stream origin (ADR-0013 of the platform, phase 1).
+
+```yaml
+spec:
+  liveWorker:
+    enabled: true
+    mode: "off"              # off | shadow | on (quote off)
+    slots: { gpu: 4, cpu: 2 }
+    resources: {}            # the container's
+    gpu:
+      enabled: true
+      nodeSelector: {}       # empty: nvidia.com/gpu.present: "true"
+      tolerations: []        # empty: the nvidia.com/gpu NoSchedule taint
+```
+
+| Field | Default | |
+|---|---|---|
+| `enabled` | `false` | the Deployment and the Service `live-worker` (`ghcr.io/zaentrum/live-worker` at `spec.version`, digest-pinned as the platform's other images), the Secret `zaentrum-live-worker` with its token, and chino-stream's `LIVE_WORKER_URL` (`http://live-worker`), `LIVE_WORKER_MODE` and `LIVE_WORKER_TOKEN`. Off, chino-stream renders as before |
+| `mode` | `off` | chino-stream's `LIVE_WORKER_MODE`. `off`: every session on chino-stream's own ffmpeg, the worker running without traffic. `shadow`: chino-stream serves as with `off` and asks the worker for the same segments at prefetch priority, checking and dropping what comes back. `on`: new on-the-fly sessions go to the worker; a session keeps the pipeline it began on whichever way the mode turns |
+| `slots.gpu` | `4` | `LIVE_WORKER_GPU_SLOTS`: video encodes at once, a hardware encode session each; the pods sharing a GPU, the transcoder's included, must stay within its session limit together (8 on current consumer drivers). 0: video in the CPU slots |
+| `slots.cpu` | `2` | `LIVE_WORKER_CPU_SLOTS`: audio and subtitle jobs at once (video too without GPU slots) |
+| `resources` | the transcoder's on the GPU (requests 1 CPU, 2Gi, limits 4 CPUs, 8Gi, `nvidia.com/gpu: 1`); without it requests 500m and 1Gi, limits 4 CPUs and 8Gi | the container's resources; with the GPU, `nvidia.com/gpu: 1` is added where they name none, in requests and limits alike |
+| `gpu.enabled` | `true` | placed as the transcoder is with `pipeline.encoder: gpu` — `nvidia.com/gpu`, the toleration and the node selector — with the CUDA backend and `NVIDIA_DRIVER_CAPABILITIES=all` (the driver's Vulkan, which HDR tone mapping on the GPU runs on). `false`: nothing asks for, tolerates or looks for a GPU, and video is encoded on the CPU, slowly |
+| `gpu.nodeSelector` | `nvidia.com/gpu.present: "true"` | the CR's own in place of the transcoder's, not merged with it |
+| `gpu.tolerations` | the `nvidia.com/gpu` `NoSchedule` taint | the CR's own in place of the transcoder's |
+
+The worker mounts the library read-only at `/var/lib/katalog`, as
+chino-stream does, and takes the sources chino-stream names under it
+(`LIVE_WORKER_MEDIA_ROOTS`). It runs one pod at a time (`Recreate`): a new pod
+beside the old would hold its encode sessions on top of the old one's. Turn it
+on in steps: `enabled` with `mode: "off"` (the worker deployed, `/readyz` and
+its metrics checked), then `shadow`, then `on`; back to `off`, new sessions
+play on chino-stream's ffmpeg again while those pinned to the worker go on
+there. Turned off, its Deployment and Service go with the next pass; the token
+stays, as every Secret does.
 
 ### A broker shared with other instances (`spec.eventStreaming`)
 
