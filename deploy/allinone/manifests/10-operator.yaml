@@ -665,6 +665,179 @@ spec:
                     description: Image is the bundled Keycloak container image.
                     type: string
                 type: object
+              liveWorker:
+                description: |-
+                  LiveWorker runs the live worker, which makes chino-stream's live encodes.
+                  Unset: none; chino-stream encodes them itself, as before.
+                properties:
+                  enabled:
+                    description: |-
+                      Enabled renders the live worker: the Deployment and the Service
+                      live-worker, and chino-stream's LIVE_WORKER_URL and LIVE_WORKER_MODE.
+                      Default false.
+                    type: boolean
+                  gpu:
+                    description: |-
+                      GPU places the live worker on an NVIDIA GPU, as pipeline.encoder gpu
+                      places the transcoder.
+                    properties:
+                      enabled:
+                        description: |-
+                          Enabled asks for the GPU, the default: nvidia.com/gpu, the toleration and
+                          the node selector below, the worker's CUDA backend and
+                          NVIDIA_DRIVER_CAPABILITIES=all (Vulkan, which tone mapping on the GPU
+                          runs on). false: no GPU asked for, tolerated or looked for, and video is
+                          encoded on the CPU (libx264), slowly — for a box without one.
+                        type: boolean
+                      nodeSelector:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          NodeSelector picks the nodes the worker runs on. Empty: the
+                          transcoder's, nvidia.com/gpu.present: "true".
+                        type: object
+                      tolerations:
+                        description: |-
+                          Tolerations are the taints it tolerates. Empty: the transcoder's, the
+                          nvidia.com/gpu NoSchedule taint.
+                        items:
+                          description: |-
+                            The pod this Toleration is attached to tolerates any taint that matches
+                            the triple <key,value,effect> using the matching operator <operator>.
+                          properties:
+                            effect:
+                              description: |-
+                                Effect indicates the taint effect to match. Empty means match all taint effects.
+                                When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                              type: string
+                            key:
+                              description: |-
+                                Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                                If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                              type: string
+                            operator:
+                              description: |-
+                                Operator represents a key's relationship to the value.
+                                Valid operators are Exists and Equal. Defaults to Equal.
+                                Exists is equivalent to wildcard for value, so that a pod can
+                                tolerate all taints of a particular category.
+                              type: string
+                            tolerationSeconds:
+                              description: |-
+                                TolerationSeconds represents the period of time the toleration (which must be
+                                of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                                it is not set, which means tolerate the taint forever (do not evict). Zero and
+                                negative values will be treated as 0 (evict immediately) by the system.
+                              format: int64
+                              type: integer
+                            value:
+                              description: |-
+                                Value is the taint value the toleration matches to.
+                                If the operator is Exists, the value should be empty, otherwise just a regular string.
+                              type: string
+                          type: object
+                        type: array
+                    type: object
+                  mode:
+                    description: |-
+                      Mode is chino-stream's LIVE_WORKER_MODE. off, the default: every
+                      session on chino-stream's own ffmpeg, the worker running without
+                      traffic. shadow: chino-stream serves as with off and asks the worker for
+                      the same segments at prefetch priority, checking what comes back and
+                      dropping it. on: new on-the-fly sessions go to the worker. A session
+                      keeps the pipeline it began on, whichever way the mode turns.
+                    enum:
+                    - "off"
+                    - shadow
+                    - "on"
+                    type: string
+                  resources:
+                    description: |-
+                      Resources of the live-worker container. Unset: requests of 1 CPU and
+                      2Gi, limits of 4 CPUs and 8Gi, with the GPU one nvidia.com/gpu (the
+                      transcoder's); without it requests of 500m and 1Gi. With the GPU,
+                      nvidia.com/gpu: 1 is added where these name none.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  slots:
+                    description: Slots are the worker processes the live worker keeps.
+                    properties:
+                      cpu:
+                        description: |-
+                          CPU is how many audio and subtitle jobs run at once
+                          (LIVE_WORKER_CPU_SLOTS); without GPU slots, video too. Default 2.
+                        format: int32
+                        maximum: 32
+                        minimum: 0
+                        type: integer
+                      gpu:
+                        description: |-
+                          GPU is how many video encodes run at once (LIVE_WORKER_GPU_SLOTS), each
+                          slot holding one hardware encode session; the pods sharing a GPU, the
+                          transcoder's included, must stay within its session limit together (8 on
+                          current consumer drivers). Default 4; 0 encodes video in the CPU slots.
+                          Without the GPU there are none.
+                        format: int32
+                        maximum: 32
+                        minimum: 0
+                        type: integer
+                    type: object
+                type: object
               network:
                 description: Network configures split-horizon / hostAliases.
                 properties:

@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -331,6 +332,89 @@ type PipelineSpec struct {
 	PreferredLanguages []string `json:"preferredLanguages,omitempty"`
 }
 
+// LiveWorkerSpec runs the live worker (ADR-0013 of the platform: live rungs
+// beside the package, as a supervised safety net): the service that makes,
+// segment by segment, the live encodes chino-stream ran itself — a
+// supervisor of warm worker processes, one per encode slot, on a GPU — and
+// tells chino-stream where it is (LIVE_WORKER_URL) and how far to use it
+// (LIVE_WORKER_MODE). Unset: no live worker; chino-stream encodes on its own
+// ffmpeg, as before.
+type LiveWorkerSpec struct {
+	// Enabled renders the live worker: the Deployment and the Service
+	// live-worker, and chino-stream's LIVE_WORKER_URL and LIVE_WORKER_MODE.
+	// Default false.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Mode is chino-stream's LIVE_WORKER_MODE. off, the default: every
+	// session on chino-stream's own ffmpeg, the worker running without
+	// traffic. shadow: chino-stream serves as with off and asks the worker for
+	// the same segments at prefetch priority, checking what comes back and
+	// dropping it. on: new on-the-fly sessions go to the worker. A session
+	// keeps the pipeline it began on, whichever way the mode turns.
+	// +kubebuilder:validation:Enum=off;shadow;on
+	// +optional
+	Mode string `json:"mode,omitempty"`
+
+	// Slots are the worker processes the live worker keeps.
+	// +optional
+	Slots LiveWorkerSlots `json:"slots,omitempty"`
+
+	// Resources of the live-worker container. Unset: requests of 1 CPU and
+	// 2Gi, limits of 4 CPUs and 8Gi, with the GPU one nvidia.com/gpu (the
+	// transcoder's); without it requests of 500m and 1Gi. With the GPU,
+	// nvidia.com/gpu: 1 is added where these name none.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// GPU places the live worker on an NVIDIA GPU, as pipeline.encoder gpu
+	// places the transcoder.
+	// +optional
+	GPU LiveWorkerGPUSpec `json:"gpu,omitempty"`
+}
+
+// LiveWorkerSlots are the live worker's worker processes: one job each at a
+// time, a crash costing that one job.
+type LiveWorkerSlots struct {
+	// GPU is how many video encodes run at once (LIVE_WORKER_GPU_SLOTS), each
+	// slot holding one hardware encode session; the pods sharing a GPU, the
+	// transcoder's included, must stay within its session limit together (8 on
+	// current consumer drivers). Default 4; 0 encodes video in the CPU slots.
+	// Without the GPU there are none.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=32
+	// +optional
+	GPU *int32 `json:"gpu,omitempty"`
+
+	// CPU is how many audio and subtitle jobs run at once
+	// (LIVE_WORKER_CPU_SLOTS); without GPU slots, video too. Default 2.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=32
+	// +optional
+	CPU *int32 `json:"cpu,omitempty"`
+}
+
+// LiveWorkerGPUSpec is where the live worker finds its GPU.
+type LiveWorkerGPUSpec struct {
+	// Enabled asks for the GPU, the default: nvidia.com/gpu, the toleration and
+	// the node selector below, the worker's CUDA backend and
+	// NVIDIA_DRIVER_CAPABILITIES=all (Vulkan, which tone mapping on the GPU
+	// runs on). false: no GPU asked for, tolerated or looked for, and video is
+	// encoded on the CPU (libx264), slowly — for a box without one.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// NodeSelector picks the nodes the worker runs on. Empty: the
+	// transcoder's, nvidia.com/gpu.present: "true".
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Tolerations are the taints it tolerates. Empty: the transcoder's, the
+	// nvidia.com/gpu NoSchedule taint.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+}
+
 // NetworkSpec configures network-level platform behaviour.
 type NetworkSpec struct {
 	// IssuerHostAliasIP adds a hostAliases entry (this IP → the public host) to
@@ -565,6 +649,11 @@ type ZaentrumSpec struct {
 	// Pipeline configures the media pipeline features.pipeline turns on.
 	// +optional
 	Pipeline PipelineSpec `json:"pipeline,omitempty"`
+
+	// LiveWorker runs the live worker, which makes chino-stream's live encodes.
+	// Unset: none; chino-stream encodes them itself, as before.
+	// +optional
+	LiveWorker LiveWorkerSpec `json:"liveWorker,omitempty"`
 
 	// Backup configures backups of the bundled Postgres.
 	// +optional
