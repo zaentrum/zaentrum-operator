@@ -1050,6 +1050,13 @@ a shared-services install — through the operator and as `helm template` and
 client; `install_bundles_test.go` holds the shipped CRD copies and
 ClusterRoles to the canonical ones.
 
+The tests read no network. Each package's `TestMain` runs its tests through
+`internal/offline`: the published `releases.json`, which a reconciler without
+a `ReleasesURL` reads, is answered with the stand-in kept there (stable v0.4.0
+and edge latest, which a release does not change); a request for this
+machine, the tests' httptest servers, goes through; any other is refused and
+fails the run, which names the request and the test that made it.
+
 The CRD is controller-gen v0.16.5 output (`controller-gen crd
 paths=./api/... output:crd:dir=config/crd`, `controller-gen object
 paths=./api/...`). A few descriptions of the committed copy are shortened by
@@ -1070,6 +1077,7 @@ internal/controller/     the reconcilers: the platform's (server-side apply) and
 internal/addon/          addon charts: fetch, render, guardrails
 internal/digest/         image digest pinning
 internal/updates/        release channels
+internal/offline/        the tests' TestMain: a stand-in releases.json, no other request leaves
 config/crd/              generated CRDs
 config/rbac/             ServiceAccount + ClusterRole/Binding
 config/manager/          operator Deployment + namespace

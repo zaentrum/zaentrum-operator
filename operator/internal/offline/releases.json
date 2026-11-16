@@ -1,0 +1,7 @@
+{
+  "channels": { "stable": "v0.4.0", "edge": "latest" },
+  "versions": {
+    "v0.4.0": { "released": "2026-10-04", "notes": "Zaentrum v0.4.0" },
+    "latest": { "notes": "Rolling: the newest build of main, which edge serves." }
+  }
+}
