@@ -7,8 +7,11 @@
 #
 # First it makes sure the dump is whole, and refuses — exit 3, nothing changed
 # — when it is not: the directory is there, SHA256SUMS names globals.sql and a
-# .dump for every database the platform has, nothing else is beside them, every
-# checksum matches, and pg_restore reads every dump's table of contents. Then
+# .dump for every database the platform has, and backup.json where the set has
+# one (a set made before sets held it has none), nothing else is beside them,
+# every checksum matches, and pg_restore reads every dump's table of contents.
+# backup.json is checked as a file of the set and read no further: the operator
+# checked the set's version before anything stopped. Then
 # it waits for every other session to leave the platform's databases, makes the
 # roles of the dump the Postgres lacks (the superuser is never touched: its
 # password stays Secret zaentrum-db's), and recreates each database from its
@@ -73,8 +76,14 @@ fi
 # A line of SHA256SUMS is a checksum, a space, a space or a star, and the
 # file's name, which may hold spaces.
 listed=$(sed -E 's/^[0-9a-fA-F]+ [ *]//' "$src/SHA256SUMS" | LC_ALL=C sort)
-want=$( (echo globals.sql; printf '%s.dump\n' "${databases[@]}") | LC_ALL=C sort)
 there=$(cd "$src" && find . -mindepth 1 -maxdepth 1 ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort)
+# backup.json belongs to the set where it is there or listed: then both have
+# to hold it.
+record=""
+if grep -qxF backup.json <<<"$listed" || grep -qxF backup.json <<<"$there"; then
+	record=backup.json
+fi
+want=$( (echo globals.sql; printf '%s.dump\n' "${databases[@]}"; [ -z "$record" ] || echo "$record") | LC_ALL=C sort)
 [ "$listed" = "$want" ] ||
 	refuse "$DUMP's SHA256SUMS lists [$(echo $listed)], not the files of the databases [$(echo $want)]"
 [ "$there" = "$want" ] ||

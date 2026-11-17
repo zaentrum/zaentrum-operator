@@ -1018,6 +1018,10 @@ func TestRC7ReconcileMeasures(t *testing.T) {
 func TestRC7ReconcileStartsNoRunWhileARestoreRuns(t *testing.T) {
 	z := verifyCR()
 	z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
+	// The set listed, of the release that runs: the restore goes on (R.C10).
+	z.Spec.Version = "v0.5.0"
+	z.Status.Backup = &zaentrumv1alpha1.BackupStatus{Sets: []zaentrumv1alpha1.BackupSet{{Name: aDump, Version: "v0.5.0", Whole: true}}}
+	listedOn(z, "backups")
 	clock := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	r, c := reconcileEnv(t, z, &clock, boundClaim("media"), boundClaim("postgres-data"), boundClaim("backups"))
 	ctx := context.Background()

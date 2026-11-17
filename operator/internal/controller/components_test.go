@@ -153,6 +153,7 @@ func TestRC6APartMeantToRunAtZeroHasNoNotReadySince(t *testing.T) {
 		first := e.clock
 		e.reconcile()
 
+		e.listOnClaim(aDump)
 		e.change(func(z *zaentrumv1alpha1.Zaentrum) {
 			z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
 		})

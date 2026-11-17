@@ -563,17 +563,45 @@ after when it began, in UTC:
 
 ```
 backups/2026-10-04T00-00-05Z/
+  backup.json     what made the set (below)
   globals.sql     the roles and their grants, but the superuser's
   chino.dump      each database, pg_dump's custom format, compressed
   katalog.dump
   keycloak.dump
   portal.dump
-  SHA256SUMS      the sha256 of each file above
+  SHA256SUMS      the sha256 of each file above, backup.json's included
 ```
 
 It is written as `.partial-<name>` and renamed once whole; then the newest
 `retention` dumps stay and the rest go. Each database's dump is one consistent
 snapshot of it; the databases are dumped one after another.
+
+`backup.json` says what made the set, `platform` its first field:
+
+```json
+{"platform":{"name":"zaentrum","operator":"v0.5.0","uid":"…","version":"v0.5.0"},
+ "v":1,"createdAt":"2026-10-04T00:00:05Z",
+ "databases":{"chino":{"tables":12,"bytes":102400},…},
+ "resource":{…the Zaentrum's spec…},
+ "secrets":["katalog-tmdb","zaentrum-tls"],
+ "addons":[{"chart":"oci://…","name":"…","version":"…"}]}
+```
+
+`platform` is the resource's name and uid, the version that runs
+(`status.currentVersion`) and the operator's (`status.controller.version`);
+`createdAt` is when the run began, and `databases` each database's tables and
+the size of its dump. `resource` is the spec as it was; `secrets` names, never
+a value, the Secrets the resource refers to and those an admin provides under a
+fixed name where they exist (`katalog-tmdb`, `zaentrum-feedback`,
+`zaentrum-worker-oidc`) — what a new install is given again, beside its own
+generated ones, which are named only with `spec.secrets.external`, where the
+admin provides them all; `addons` are the `ZaentrumAddon`s, each with its chart
+and the version installed (else the one asked for). A URL in the file, an
+addon's chart or one in the spec, is written without its user, its password and
+its query. The operator keeps all but the time and the databases in the
+ConfigMap `zaentrum-backup`, which the backup's Job mounts; without it, as under
+plain Helm, the set is made without `backup.json` and the Job's log says so. A
+restore reads none of it into the install: it changes no setting.
 
 Backups are on by default wherever the bundled Postgres keeps its data on a
 claim — every new install — and off where it still runs on an `emptyDir`
@@ -616,30 +644,73 @@ kubectl -n zaentrum get zaentrum zaentrum -o jsonpath='{.status.backup.restore}'
 
 The operator then:
 
-1. stops every client of the database — chino-api, katalog-api,
+1. **checks the set's version**, before anything stops: it reads it from
+   `status.backup.sets`, which counts only for the claim it was listed on
+   (after a change of `spec.backup.claimName` nothing listed before is
+   trusted), and for a set not listed there it has the backups' claim
+   measured first, with the set's name: 2 minutes at most for that run's
+   answer, and 15 minutes at most in all where another run has to end first
+   or the run cannot be made (the `Restore` condition is `Unknown`, `Waiting`,
+   meanwhile, and the request is not answered yet; taking the request away
+   takes the condition with it). The version rule, the tag the operator
+   renders on both sides (`status.currentVersion`, never `spec.version`):
+
+   | the set's version | the platform's | the restore |
+   |---|---|---|
+   | a release (`v0.5.0`, `v0.5.0-rc.2`) | the same release or a newer one | goes on |
+   | a release | an older release | is refused (`NewerVersion`) |
+   | any other tag (`latest`, `0.5`, a build's) | the same tag | goes on |
+   | anything else: no `backup.json`, a release against another tag, two different tags | | is refused (`VersionNotComparable`), unless `zaentrum.io/restore-any-version` holds the set's name |
+
+   Releases are compared as version numbers are: `v0.10.0` is newer than
+   `v0.9.0`, and `v0.5.0-rc.2` older than `v0.5.0`. A set made before sets held
+   `backup.json` has no version, so it needs the annotation. A claim that is
+   not there or not bound to a volume yet is refused as `NoClaim`, a set the
+   claim does not hold as `NotOnClaim`, a claim that could not be read as
+   `ClaimUnreadable`: nothing stops. Each set
+   in `status.backup.sets` says what the rule says of it now, `versionRule`
+   (`ok`, `newer`, `not-comparable`). To restore a set whose version cannot be
+   compared all the same, name it in the annotation and ask again with a new
+   value:
+
+   ```sh
+   kubectl -n zaentrum annotate zaentrum zaentrum --overwrite \
+     zaentrum.io/restore-any-version=2026-10-04T00-00-05Z \
+     zaentrum.io/restore-request=2026-10-04T00-00-05Z#2
+   ```
+
+   The operator reads the annotation and never writes or removes it: it lifts
+   the rule for every later request of that set until you remove it. It never
+   lets a set of a newer release be restored: update the platform first.
+2. stops every client of the database — chino-api, katalog-api,
    katalog-manager-api, keycloak, portal-api, and the pipeline's workers and
    katalog-ingest, which write through katalog-manager-api — and suspends the
    backups (`result: Stopping`; the phase is `Restoring`, the platform is
    down meanwhile);
-2. once none of their pods is left and no backup runs, starts
+3. once none of their pods is left and no backup runs, starts
    `postgres-restore-<suffix>` ([`files/postgres-restore.sh`](platform/chart/files/postgres-restore.sh),
    `result: Running`), which makes sure the dump is whole — the directory is
-   there, `SHA256SUMS` names `globals.sql` and a dump of every database and
-   nothing else is beside them, every checksum matches, `pg_restore` reads
-   each dump — and **refuses**, changing nothing, when it is not; waits for any
-   other session to leave the databases; makes the roles of the dump the
-   Postgres lacks (never the superuser, whose password stays Secret
-   `zaentrum-db`'s); recreates each database from its dump, stopping at the
-   first error; and checks each holds the tables its dump lists;
-3. reads the result — `Succeeded`, `Refused` (nothing was changed) or
+   there, `SHA256SUMS` names `globals.sql`, a dump of every database and
+   `backup.json` where the set has one, and nothing else is beside them,
+   every checksum matches, `pg_restore` reads each dump — and **refuses**,
+   changing nothing, when it is not; waits for any other session to leave the
+   databases; makes the roles of the dump the Postgres lacks (never the
+   superuser, whose password stays Secret `zaentrum-db`'s); recreates each
+   database from its dump, stopping at the first error; and checks each holds
+   the tables its dump lists;
+4. reads the result — `Succeeded`, `Refused` (nothing was changed) or
    `Failed` (one database may already be restored: restore again) — and starts
    the clients again; after a success the realm Job runs again over the
    restored realm.
 
-`status.backup.restore` and the `Restore` condition say where it is. A request
-is answered once: to restore the same dump again, give it a value of its own,
-`2026-10-04T00-00-05Z#2`. A value that names no dump, external databases, or
-no claim `backups` are refused at once. A restore waits for a database copy
+`status.backup.restore` and the `Restore` condition say where it is; a
+refusal's cause is the condition's reason: `NewerVersion`,
+`VersionNotComparable`, `NoClaim`, `NotOnClaim`, `ClaimUnreadable`, and
+`Refused` for the rest; a refusal ends with "; nothing was changed", kept
+whole however long its reason is. A request is answered once: to restore the same dump again, give it a
+value of its own, `2026-10-04T00-00-05Z#2`. A value that names no dump,
+external databases, and what the version check refuses are refused at once,
+before anything stops. A restore waits for a database copy
 (`spec.storage.postgres.migrate`) to end, and neither a verification nor a
 realm run starts while one runs. What was written after the dump was made is
 gone once it is restored.

@@ -107,7 +107,7 @@ func (r *ZaentrumReconciler) answerRestoreWhileRefused(ctx context.Context, z *z
 		return
 	}
 	if request := restoreRequest(z); request != "" {
-		r.refuseRestore(ctx, z, request, restoreWhileRefused)
+		r.refuseRestore(ctx, z, request, reasonRefused, restoreWhileRefused)
 	}
 }
 

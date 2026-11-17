@@ -2,11 +2,21 @@
 # ── What made the sets on the backups' claim ────────────────────────────────
 #
 # The ConfigMap zaentrum-backup holds what a Job on the backups' claim cannot
-# know about the platform: under platform, its name and its uid, the
-# resource's, and the version that runs, as status.currentVersion has it. The
-# backups' measuring Job reads the uid there, to tell a set this platform made
-# from another's (status.backup.sets[].own). The operator renders it with the
-# platform's uid (platform.uid); plain Helm renders none.
+# know about the platform:
+#   platform  its name and its uid, the resource's, the version that runs, as
+#             status.currentVersion has it, and the operator's version
+#   resource  the spec of the platform's resource as it is
+#   secrets   the names of the Secrets the resource refers to, and of those the
+#             platform reads by a fixed name that exist; never a value
+#   addons    each addon's name, chart and version
+# The backup Job (templates/backup.yaml) writes them into each set's
+# backup.json, platform first, and adds when its run began and the databases.
+# The backups' measuring Job reads the uid in platform, to tell a set this
+# platform made from another's (status.backup.sets[].own). The operator renders
+# it with the platform's uid (platform.uid); plain Helm renders none, and its
+# sets have no backup.json.
+{{- $platform := dict "name" .Values.platform.name "uid" .Values.platform.uid "version" .Values.global.version }}
+{{- with .Values.platform.operator }}{{ $_ := set $platform "operator" . }}{{ end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,5 +26,8 @@ metadata:
     app.kubernetes.io/component: database
     app.kubernetes.io/part-of: {{ .Values.global.partOf }}
 data:
-  platform: {{ dict "name" .Values.platform.name "uid" .Values.platform.uid "version" .Values.global.version | toJson | quote }}
+  platform: {{ $platform | toJson | quote }}
+  resource: {{ .Values.platform.resource | default "{}" | quote }}
+  secrets: {{ .Values.platform.secrets | default list | toJson | quote }}
+  addons: {{ .Values.platform.addons | default list | toJson | quote }}
 {{- end }}

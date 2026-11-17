@@ -415,7 +415,8 @@ func TestARestoreAskedForWhileRefusedIsRefused(t *testing.T) {
 	z := verifyCR()
 	z.Spec.Databases.Chino = "chi no"
 	z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
-	e := newPlatformEnv(t, z, nil)
+	claim := restorable(z)
+	e := newPlatformEnv(t, z, nil, claim)
 	e.reconcile()
 	rs := restoreStatus(e.zaentrum())
 	require.NotNil(t, rs)
@@ -432,6 +433,7 @@ func TestARestoreAskedForWhileRefusedIsRefused(t *testing.T) {
 
 	e.change(func(z *zaentrumv1alpha1.Zaentrum) {
 		z.Annotations[zaentrumv1alpha1.RestoreRequestAnnotation] = aDump + "#again"
+		listedOn(z, "backups")
 	})
 	e.reconcile()
 	rs = restoreStatus(e.zaentrum())
@@ -452,7 +454,8 @@ func TestARestoreInFlightIsHeldWhileRefused(t *testing.T) {
 			ctx := context.Background()
 			z := verifyCR()
 			z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
-			e := newPlatformEnv(t, z, nil)
+			claim := restorable(z)
+			e := newPlatformEnv(t, z, nil, claim)
 			e.reconcile()
 			rs := restoreStatus(e.zaentrum())
 			require.NotNil(t, rs)
@@ -557,9 +560,10 @@ func TestACorrectedPassTakesTheRefusalBackFirst(t *testing.T) {
 	t.Run("a restore in flight", func(t *testing.T) {
 		z := verifyCR()
 		z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
+		claim := restorable(z)
 		s := selfScheme(t)
 		var failing bool
-		c := fake.NewClientBuilder().WithScheme(s).WithObjects(z).
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(z, claim).
 			WithStatusSubresource(&zaentrumv1alpha1.Zaentrum{}, &appsv1.Deployment{}, &batchv1.Job{}).
 			WithInterceptorFuncs(interceptor.Funcs{
 				Patch: applyAsCreateOrUpdate,
@@ -608,4 +612,14 @@ func (m *discoveryFailing) RESTMapping(gk schema.GroupKind, versions ...string) 
 		return nil, errors.New("the discovery did not answer")
 	}
 	return m.RESTMapper.RESTMapping(gk, versions...)
+}
+
+// restorable makes the resource's restore one R.C10's check takes: the release
+// it runs, the set of that release listed on the bound claim of the backups.
+func restorable(z *zaentrumv1alpha1.Zaentrum) *corev1.PersistentVolumeClaim {
+	z.Spec.Version = "v0.5.0"
+	z.Status.Backup = &zaentrumv1alpha1.BackupStatus{Sets: []zaentrumv1alpha1.BackupSet{{Name: aDump, Version: "v0.5.0", Whole: true}}}
+	listedOn(z, "backups")
+	return &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "backups", Namespace: z.Namespace},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound}}
 }
