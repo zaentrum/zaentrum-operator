@@ -53,7 +53,7 @@ var sinceThePin = []string{
 	"spec.databases.keycloak:pattern", "spec.databases.keycloak:maxLength",
 	"spec.databases.portal:pattern", "spec.databases.portal:maxLength",
 	"spec.databases.external.host:pattern", "spec.databases.external.sslmode:enum",
-	"spec.mail", "spec.alerts", "status.certificate", "status.components.notReadySince", "status.components.stalled",
+	"spec.mail", "spec.alerts", "status.certificate", "status.components.notReadySince", "status.components.stalled", "status.backup.request", "status.backup.running",
 }
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted
@@ -249,8 +249,9 @@ func TestEveryClusterRoleHoldsWhatVerificationUses(t *testing.T) {
 
 // What backups need, every ClusterRole shipped with an operator that renders
 // them allows: the chart's CronJob is applied, read and, with backups turned
-// off, deleted; the restore is a Job like the other runs. So does what a
-// certificate from cert-manager needs: the Certificate.
+// off, deleted; the backups' Jobs are watched, and a backup asked for and the
+// restore are Jobs like the other runs. So does what a certificate from
+// cert-manager needs: the Certificate.
 func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 	for _, file := range []string{
 		"../../config/rbac/role.yaml",
@@ -262,7 +263,7 @@ func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 		for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
 			assert.True(t, ruleHolds(rules, "batch", "cronjobs", verb), "%s: no %s on batch cronjobs", file, verb)
 		}
-		for _, verb := range []string{"create", "get", "list", "delete"} {
+		for _, verb := range []string{"create", "get", "list", "watch", "delete"} {
 			assert.True(t, ruleHolds(rules, "batch", "jobs", verb), "%s: no %s on batch jobs", file, verb)
 		}
 		assert.True(t, ruleHolds(rules, "", "persistentvolumeclaims", "patch"), file)

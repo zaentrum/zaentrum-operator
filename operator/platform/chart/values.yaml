@@ -113,6 +113,10 @@ backup:
   size: 5Gi
   className: ""            # empty: the Postgres's (storage.postgres.className, else storage.className)
   claimName: ""            # an existing claim to keep the dumps on; empty: the chart provisions `backups`
+  # true: the schedule starts no run (the CronJob's suspend). The operator sets
+  # it from a backup asked for with zaentrum.io/backup-request to its answer,
+  # and while one runs.
+  suspend: false
   # A dump's name, e.g. 2026-10-04T00-00-05Z: stop every client of the
   # database and restore it (templates/postgres-restore.yaml, a post-upgrade
   # hook). Upgrade again without it to start them. The operator does both for

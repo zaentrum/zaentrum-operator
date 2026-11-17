@@ -270,3 +270,36 @@ func TestRestoreNamesAreTheCharts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), fmt.Sprintf("exit %d", RestoreRefusedExitCode), "a refusal's exit code")
 }
+
+// R.C11: the operator holds the backups' schedule still for a backup asked
+// for (BackupSuspend): the CronJob is rendered suspended, as it is while a
+// restore runs, and its job template, which the backup asked for is made
+// from, stays as it is. Under plain Helm backup.suspend does the same, for
+// true or "true" alone.
+func TestRC11TheScheduleStandsStillForABackupAskedFor(t *testing.T) {
+	z := base("zaentrum")
+	normal := backupCron(t, renderCR(t, z))
+	require.NotNil(t, normal)
+	assert.False(t, *normal.Spec.Suspend)
+
+	v := NewValues(z)
+	v.BackupSuspend = true
+	objs, err := Render(v)
+	require.NoError(t, err)
+	held := backupCron(t, objs)
+	require.NotNil(t, held)
+	assert.True(t, *held.Spec.Suspend)
+	assert.Equal(t, normal.Spec.JobTemplate, held.Spec.JobTemplate, "the job template does not move")
+	assert.Equal(t, normal.Spec.Schedule, held.Spec.Schedule)
+
+	v.RestoreDump = "2026-10-04T00-00-05Z"
+	objs, err = Render(v)
+	require.NoError(t, err)
+	assert.True(t, *backupCron(t, objs).Spec.Suspend, "and while a restore runs too")
+
+	for value, want := range map[interface{}]bool{true: true, "true": true, false: false, "false": false, "": false, "no": false} {
+		cron := backupCron(t, helmRender(t, map[string]interface{}{"backup": map[string]interface{}{"suspend": value}}))
+		assert.Equal(t, want, *cron.Spec.Suspend, "backup.suspend %#v", value)
+	}
+	assert.False(t, *backupCron(t, helmRender(t, nil)).Spec.Suspend)
+}

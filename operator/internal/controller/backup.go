@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -24,13 +25,16 @@ import (
 // The chart's CronJob (templates/backup.yaml) runs them: the operator applies
 // it with the platform, and reads what its Jobs leave behind — each run's
 // summary, the termination message of its pod, as it reads a verification
-// run's — into status.backup and the Backup condition. The Jobs are read
-// straight from the API server, as the verification's are.
+// run's — into status.backup and the Backup condition, a backup asked for
+// (backuprequest.go) among them. The Jobs are read straight from the API
+// server, as the verification's are.
 //
 // Backups are on by default wherever the bundled Postgres keeps its data on a
 // claim. Turned off, the CronJob this Zaentrum owns is removed — here, so that
 // one an operator applied before it labelled what it applies goes too, which
-// the prune (prune.go) leaves alone — and the claim with the dumps stays.
+// the prune (prune.go) leaves alone — and the claim with the dumps stays. A
+// backup asked for that runs is the Zaentrum's, not the CronJob's: it runs on,
+// and it is read, as it is while backups are on.
 
 const (
 	condTypeBackup = "Backup"
@@ -60,34 +64,41 @@ type backupDatabase struct {
 }
 
 // reportBackups writes status.backup and the Backup condition from the
-// backups' Jobs. platform is the pass's render.
+// backups' Jobs, and answers the backup asked for (answerBackupRequest). A pass
+// that cannot read the Jobs, or the pod of one it has to read, leaves the
+// status as it is: the next pass reads them. platform is the pass's render.
 func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, platform []*unstructured.Unstructured) {
 	if z.Spec.Databases.Mode == "external" {
 		// The databases are the tenant's, and so are their backups. A restore
-		// once refused here is all there is to say.
+		// once refused here and a backup asked for, which is refused at once,
+		// are all there is to say; no condition says it, as one would read as
+		// backups that are off.
 		meta.RemoveStatusCondition(&z.Status.Conditions, condTypeBackup)
-		if b := z.Status.Backup; b != nil && b.Restore != nil {
-			z.Status.Backup = &zaentrumv1alpha1.BackupStatus{Restore: b.Restore}
-		} else {
+		b := &zaentrumv1alpha1.BackupStatus{}
+		if z.Status.Backup != nil {
+			b.Restore, b.Request = z.Status.Backup.Restore, z.Status.Backup.Request
+		}
+		if request := backupRequest(z); request != "" {
+			r.answerBackup(ctx, z, b, request, "backups: the backup asked for is refused: the databases are external")
+		}
+		z.Status.Backup = b
+		if b.Restore == nil && b.Request == "" {
 			z.Status.Backup = nil
 		}
 		return
 	}
-	if !rendered(platform, "CronJob", templates.BackupCronJobName) {
+	on := rendered(platform, "CronJob", templates.BackupCronJobName)
+	if !on {
 		r.removeBackupSchedule(ctx, z)
-		msg := "the bundled Postgres keeps its data on an emptyDir and is not backed up: backups start once it is on " +
-			"its claim (spec.storage.postgres.migrate), or with spec.backup.enabled true"
-		if e := z.Spec.Backup.Enabled; e != nil && !*e {
-			msg = "the bundled Postgres is not backed up: spec.backup.enabled is false"
-		}
-		setCondition(z, condTypeBackup, metav1.ConditionFalse, "Disabled", msg)
-		return
 	}
 
 	jobs, err := r.backupJobs(ctx, z)
 	if err != nil {
 		log.FromContext(ctx).Info("backups: the runs could not be listed; status stays as it is", "error", err.Error())
 		return
+	}
+	unread := func(job *batchv1.Job, err error) {
+		log.FromContext(ctx).Info("backups: a run could not be read; status stays as it is", "job", job.Name, "error", err.Error())
 	}
 	b := &zaentrumv1alpha1.BackupStatus{}
 	if z.Status.Backup != nil {
@@ -98,21 +109,23 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 	}
 	var latest *batchv1.Job
 	var latestFailed bool
-	running := ""
+	running := runningBackup(jobs)
 	for i := range jobs {
 		job := &jobs[i]
 		done, failed := jobFinished(job)
 		if !done {
-			if running == "" {
-				running = job.Name
-			}
 			continue
 		}
 		end := metav1.NewTime(finishedAt(job))
 		if failed == nil {
 			if b.LastSuccess == nil || end.After(b.LastSuccess.Time) {
+				rep, ok, err := r.backupSummary(ctx, job)
+				if err != nil {
+					unread(job, err)
+					return
+				}
 				b.LastSuccess = &end
-				if rep, ok := r.backupSummary(ctx, job); ok {
+				if ok {
 					b.LastDump = rep.Dump
 					b.Dumps = rep.Kept
 					if len(b.Dumps) > maxBackupDumps {
@@ -127,51 +140,134 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 			latest, latestFailed = job, failed != nil
 		}
 	}
-	z.Status.Backup = b
+	b.Running = running
 
 	schedule := z.Spec.Backup.Schedule
 	if schedule == "" {
 		schedule = "@daily"
 	}
+	var status metav1.ConditionStatus
+	var reason, msg string
 	switch {
+	case !on:
 	case latest == nil:
-		msg := "no backup has run yet: the first runs on the schedule " + schedule
+		status, reason = metav1.ConditionUnknown, "Scheduled"
+		msg = "no backup has run yet: the first runs on the schedule " + schedule
 		if running != "" {
 			msg = running + " runs the first backup"
 		}
-		setCondition(z, condTypeBackup, metav1.ConditionUnknown, "Scheduled", msg)
 	case latestFailed:
-		msg := fmt.Sprintf("%s failed: %s; ", latest.Name, r.backupFailure(ctx, latest))
+		why, err := r.backupFailure(ctx, latest)
+		if err != nil {
+			unread(latest, err)
+			return
+		}
+		status, reason = metav1.ConditionFalse, "Failed"
+		msg = fmt.Sprintf("%s failed: %s; ", latest.Name, why)
 		if b.LastSuccess != nil && b.LastDump != "" {
 			msg += fmt.Sprintf("the latest that succeeded wrote %s, %s", b.LastDump, b.LastSuccess.UTC().Format("2006-01-02 15:04 MST"))
 		} else {
 			msg += "no backup has succeeded yet"
 		}
-		setCondition(z, condTypeBackup, metav1.ConditionFalse, "Failed", clip(msg, maxVerifyMessage))
 	default:
-		msg := fmt.Sprintf("%s wrote %s", latest.Name, b.LastDump)
-		if rep, ok := r.backupSummary(ctx, latest); ok {
+		rep, ok, err := r.backupSummary(ctx, latest)
+		if err != nil {
+			unread(latest, err)
+			return
+		}
+		status, reason = metav1.ConditionTrue, "Succeeded"
+		msg = fmt.Sprintf("%s wrote %s", latest.Name, b.LastDump)
+		if ok {
 			msg = fmt.Sprintf("%s: %d databases, %s; %d dumps kept, %s free", rep.Dump, len(rep.Databases),
 				bytesOf(rep.Bytes), len(rep.Kept), bytesOf(rep.Free))
 		}
-		setCondition(z, condTypeBackup, metav1.ConditionTrue, "Succeeded", clip(msg, maxVerifyMessage))
 	}
+
+	// Every run that ended has been read.
+	r.answerBackupRequest(ctx, z, b, jobs, on)
+	if on || z.Status.Backup != nil || !reflect.DeepEqual(*b, zaentrumv1alpha1.BackupStatus{}) {
+		z.Status.Backup = b
+	}
+	if !on {
+		status, reason = metav1.ConditionFalse, "Disabled"
+		msg = "the bundled Postgres keeps its data on an emptyDir and is not backed up: backups start once it is on " +
+			"its claim (spec.storage.postgres.migrate), or with spec.backup.enabled true"
+		refused := "; the backup asked for is not made"
+		if e := z.Spec.Backup.Enabled; e != nil && !*e {
+			msg = "the bundled Postgres is not backed up: spec.backup.enabled is false"
+			refused = "; the backup asked for is not made: set spec.backup.enabled to true and ask again with a new value"
+		}
+		if backupRefusalStands(z, b, jobs) {
+			msg += refused
+		}
+	}
+	setCondition(z, condTypeBackup, status, reason, clip(msg, maxVerifyMessage))
+	r.keepNewestAskedFor(ctx, z, jobs)
+}
+
+// answerBackupRequest writes into b the answer to the backup asked for, if it
+// has one now, once every run that ended has been read into b: the Job the
+// request started has ended; the Job this operator started for it is gone
+// before it was read, which answers it as not read, the Backup condition
+// keeping what it said; or backups are off (on is false) and the request
+// started none, so it is refused. A request that waits, or whose Job runs,
+// stays unanswered. jobs are the backups' Jobs, newest first.
+func (r *ZaentrumReconciler) answerBackupRequest(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, b *zaentrumv1alpha1.BackupStatus,
+	jobs []batchv1.Job, on bool) {
+	a := r.asked(z)
+	if a.job != "" {
+		for i := range jobs {
+			if done, _ := jobFinished(&jobs[i]); done && jobs[i].Name == a.job {
+				// Read: no longer one that could be gone unread.
+				r.remember(z, func(a *askedBackup) { a.request, a.job = "", "" })
+				break
+			}
+		}
+	}
+	request := backupRequest(z)
+	if request == "" {
+		return
+	}
+	switch job := askedJob(z, jobs, request); {
+	case job != nil:
+		done, failed := jobFinished(job)
+		if !done {
+			return
+		}
+		result := "succeeded"
+		if failed != nil {
+			result = "failed"
+		}
+		r.answerBackup(ctx, z, b, request, "backups: the backup asked for has ended", "job", job.Name, "result", result)
+	case a.request == request:
+		r.answerBackup(ctx, z, b, request, "backups: the backup asked for is answered as not read: its Job is gone before it was read",
+			"job", a.job)
+	case a.answered == request:
+		// Answered before; the status the pass read did not keep it.
+		r.answerBackup(ctx, z, b, request, "")
+	case !on:
+		r.answerBackup(ctx, z, b, request, "backups: the backup asked for is refused: backups are off")
+	}
+}
+
+// backupRefusalStands says whether the Backup condition, while backups are
+// off, says that the backup asked for is not made: the annotation holds the
+// value answered, and no backup Job of the platform's carries that value.
+func backupRefusalStands(z *zaentrumv1alpha1.Zaentrum, b *zaentrumv1alpha1.BackupStatus, jobs []batchv1.Job) bool {
+	request := askedValue(z)
+	return request != "" && request == b.Request && askedJob(z, jobs, request) == nil
 }
 
 // rendered says whether the render carries an object of that kind and name.
 func rendered(objs []*unstructured.Unstructured, kind, name string) bool {
-	for _, o := range objs {
-		if o.GetKind() == kind && o.GetName() == name {
-			return true
-		}
-	}
-	return false
+	return renderedObject(objs, kind, name) != nil
 }
 
 // removeBackupSchedule deletes the backup CronJob this Zaentrum owns, its Jobs
 // with it: backups were turned off. The prune removes it as well once it
 // carries the operator's label; this removes it whether or not it does. The
-// claim with the dumps stays.
+// claim with the dumps stays, and so does the Job of a backup asked for, which
+// the Zaentrum owns.
 func (r *ZaentrumReconciler) removeBackupSchedule(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) {
 	var cron batchv1.CronJob
 	err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: templates.BackupCronJobName}, &cron)
@@ -205,11 +301,12 @@ func (r *ZaentrumReconciler) backupJobs(ctx context.Context, z *zaentrumv1alpha1
 }
 
 // backupMessage is the termination message the backup container of the Job's
-// last pod left, or "".
-func (r *ZaentrumReconciler) backupMessage(ctx context.Context, job *batchv1.Job) string {
+// last pod left, or "" where none did; an error where its pods could not be
+// listed.
+func (r *ZaentrumReconciler) backupMessage(ctx context.Context, job *batchv1.Job) (string, error) {
 	pods, err := r.runPods(ctx, job)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	var last *metav1.Time
 	msg := ""
@@ -225,29 +322,39 @@ func (r *ZaentrumReconciler) backupMessage(ctx context.Context, job *batchv1.Job
 			}
 		}
 	}
-	return msg
+	return msg, nil
 }
 
-// backupSummary is a successful run's summary, when it left a readable one.
-func (r *ZaentrumReconciler) backupSummary(ctx context.Context, job *batchv1.Job) (backupReport, bool) {
-	var rep backupReport
-	if err := json.Unmarshal([]byte(r.backupMessage(ctx, job)), &rep); err != nil || rep.V != 1 || rep.Dump == "" {
-		return backupReport{}, false
+// backupSummary is a successful run's summary, when it left a readable one;
+// an error where its pods could not be listed.
+func (r *ZaentrumReconciler) backupSummary(ctx context.Context, job *batchv1.Job) (backupReport, bool, error) {
+	msg, err := r.backupMessage(ctx, job)
+	if err != nil {
+		return backupReport{}, false, err
 	}
-	return rep, true
+	var rep backupReport
+	if err := json.Unmarshal([]byte(msg), &rep); err != nil || rep.V != 1 || rep.Dump == "" {
+		return backupReport{}, false, nil
+	}
+	return rep, true, nil
 }
 
-// backupFailure is why a failed run failed: its own message, else the Job's.
-func (r *ZaentrumReconciler) backupFailure(ctx context.Context, job *batchv1.Job) string {
-	if msg := r.backupMessage(ctx, job); msg != "" {
-		return msg
+// backupFailure is why a failed run failed: its own message, else the Job's;
+// an error where its pods could not be listed.
+func (r *ZaentrumReconciler) backupFailure(ctx context.Context, job *batchv1.Job) (string, error) {
+	msg, err := r.backupMessage(ctx, job)
+	if err != nil {
+		return "", err
+	}
+	if msg != "" {
+		return msg, nil
 	}
 	for _, c := range job.Status.Conditions {
 		if c.Type == batchv1.JobFailed && c.Status == "True" {
-			return strings.TrimSuffix(c.Reason+": "+c.Message, ": ")
+			return strings.TrimSuffix(c.Reason+": "+c.Message, ": "), nil
 		}
 	}
-	return "no reason given"
+	return "no reason given", nil
 }
 
 // backupClaim is the claim the dumps are kept on.

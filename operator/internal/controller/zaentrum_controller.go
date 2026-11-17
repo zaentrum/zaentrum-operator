@@ -12,6 +12,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,8 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	zaentrumv1alpha1 "github.com/zaentrum/zaentrum-operator/operator/api/v1alpha1"
@@ -83,6 +86,11 @@ type ZaentrumReconciler struct {
 	unserved  map[schema.GroupKind]time.Time
 	clusterMu sync.Mutex
 
+	// askedBackups holds, for each platform, what this operator remembers of
+	// its backups asked for between passes (backuprequest.go).
+	askedBackups map[types.UID]*askedBackup
+	askedMu      sync.Mutex
+
 	// mailUnnamed holds, for each mail Secret the resource does not name,
 	// since when this operator has seen it so (mail.go).
 	mailUnnamed map[types.NamespacedName]unnamedMailSecret
@@ -132,13 +140,15 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// one fails, nothing is discovered, rendered, applied, pruned or started —
 	// what runs keeps running as it was — and the pass writes only the status:
 	// the Ready condition, on every pass; the controller's report, which names
-	// the operator that runs; and the refusal of a restore asked for meanwhile
-	// (refusal.go).
+	// the operator that runs; the refusal of a restore asked for meanwhile
+	// (refusal.go); and, once the backup Job status.backup.running names has
+	// ended, that it no longer runs.
 	if refused := refusals(&z); len(refused) > 0 {
 		z.Status.Controller = r.controllerWhileRefused(ctx, &z)
 		z.Status.Phase = "Error"
 		r.setReady(&z, metav1.ConditionFalse, reasonResourceRefused, refusedMessage(refused))
 		r.answerRestoreWhileRefused(ctx, &z)
+		r.backupRunEndedWhileRefused(ctx, &z)
 		if err := r.patchStatus(ctx, &z); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -204,9 +214,14 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		logger.Info("render deferred", "reason", err.Error())
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
+	// The backups' schedule stands still from a request to its answer and
+	// while a backup asked for runs; whether the CronJob is suspended is read
+	// before the apply, as the pass finds it (backuprequest.go).
+	backupAsk := r.planBackupRequest(ctx, &z)
 	vals := templates.NewValues(&z)
 	vals.MailSecretVersion = mailSecret
 	vals.OpenShift = openShift
+	vals.BackupSuspend = backupAsk.hold
 	vals.Version = decision.RenderTag
 	vals.PostgresVolume = db.volume
 	vals.PostgresMigrate = db.migrate
@@ -284,6 +299,9 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// The restore in flight takes its step now that its clients were applied
 	// stopped, and the backups are read.
 	restoreInFlight := r.stepRestore(ctx, &z, objs, tests)
+	// A backup asked for starts once nothing stands in its way, before the
+	// backups are read, so that they read it too (backuprequest.go).
+	backupWaits := r.startBackupRequest(ctx, &z, objs, backupAsk, restoreDump)
 	r.reportBackups(ctx, &z, objs)
 	r.reportTLS(ctx, &z, tlsSecret, issuing)
 	// Where the platform's mail stands, and the mail Secrets the resource no
@@ -363,7 +381,7 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
-	if verifying || configuring || db.copying || restoreInFlight {
+	if verifying || configuring || db.copying || restoreInFlight || backupWaits {
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -662,12 +680,16 @@ func setCondition(z *zaentrumv1alpha1.Zaentrum, condType string, status metav1.C
 	z.Status.Conditions = append(z.Status.Conditions, cond)
 }
 
-// SetupWithManager wires the reconciler to watch Zaentrum CRs and the Deployments
-// it owns (so readiness changes re-trigger a reconcile).
+// SetupWithManager wires the reconciler to watch Zaentrum CRs, the Deployments
+// it owns (so readiness changes re-trigger a reconcile), and the backups' Jobs,
+// the CronJob's runs among them, each mapped to the platform beside it, so
+// that status.backup.running follows a run's start and end within a pass. The
+// manager's cache holds those Jobs alone (CacheOptions), by their metadata.
 func (r *ZaentrumReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&zaentrumv1alpha1.Zaentrum{}).
 		Owns(&appsv1.Deployment{}).
+		Watches(&batchv1.Job{}, handler.EnqueueRequestsFromMapFunc(r.platformsOfBackupJob), builder.OnlyMetadata).
 		Complete(r)
 }
 

@@ -26,20 +26,22 @@ alone, client-side: no release, no Helm apply (`internal/templates`). The CR's
 spec maps onto the chart's values (`chartValues`; the keys `values.yaml`
 documents), with what the operator decides each pass: the tag to run, whether
 the cluster is OpenShift and serves cert-manager, where the bundled Postgres
-keeps its data, whether a restore runs, the platform's certificate for the
-Routes.
+keeps its data, whether a restore runs, whether a backup asked for holds the
+backups' schedule still, the platform's certificate for the Routes.
 
 ### Reconcile
 
 `internal/controller/zaentrum_controller.go`, every 30 seconds — every 10 while
-a run is in flight:
+a run is in flight or a backup asked for waits to start — and whenever the
+Zaentrum, a Deployment it owns or one of the backups' Jobs changes:
 
 1. Read the Zaentrum from the API server, not the cache: the pass starts Jobs
    from what status says about the last ones.
 2. Decide what the render needs: the release channel's tag
    (`internal/updates`), OpenShift (asked once), where the bundled Postgres
-   keeps its data (`database.go`), a restore in flight (`restore.go`), the
-   platform's certificate (`tls.go`).
+   keeps its data (`database.go`), a restore in flight (`restore.go`), a
+   backup asked for (`backuprequest.go`), the platform's certificate
+   (`tls.go`).
 3. Render the chart and split off its hooks — the verification, the realm
    Job, the database copy, the restore — which are never applied with the
    platform: the operator starts each itself, as a Job of its own, when its
@@ -56,10 +58,10 @@ a run is in flight:
    `zaentrum.io/platform: <the Zaentrum's name>`. Then what the operator
    applied and the render no longer carries is removed — but never what holds
    data ([below](#what-the-render-no-longer-carries)).
-7. Take the restore's step, read the backups and the certificate, refresh
-   `status` — `phase`, `currentVersion`, `components[]`, the conditions,
-   `status.controller` — and then keep the realm in step and verify the
-   platform.
+7. Take the restore's step, start a backup asked for, read the backups and the
+   certificate, refresh `status` — `phase`, `currentVersion`, `components[]`,
+   the conditions, `status.controller` — and then keep the realm in step and
+   verify the platform.
 
 **Release channels.** `spec.channel` resolves through the front door's
 `releases.json` (`internal/updates`) to a tag: `stable` to the newest release,
@@ -283,9 +285,10 @@ seccomp, a read-only root filesystem, no service account token, one attempt
   again every 30 seconds. A new update or a new request starts the next run.
 
 While a run is in flight the operator polls it every 10 seconds instead of 30
-(a Job watch would cache every Job in the cluster) and says in `message` what
-holds it up, if anything does — an image that does not pull, say — long before
-the deadline turns it into a verdict.
+(a watch on every Job would cache every Job in the cluster; the operator
+watches the backups' alone) and says in `message` what holds it up, if
+anything does — an image that does not pull, say — long before the deadline
+turns it into a verdict.
 
 **Passed, Failed, Error.** A readable report decides: any failed check is
 `Failed`; `Passed` takes no failed check *and* exit code 0. Without a verdict
@@ -594,6 +597,8 @@ status:
     lastFailure: 2026-10-02T00:00:40Z
     dumps: [2026-10-04T00-00-05Z, 2026-10-03T00-00-04Z, …]
     job: zaentrum-backup-29324160
+    # running: zaentrum-backup-29325600  # while a backup runs, the schedule's or one asked for
+    request: "1759536000"                # the last zaentrum.io/backup-request value answered
   conditions:
   - { type: Backup, status: "True", reason: Succeeded,
       message: "2026-10-04T00-00-05Z: 4 databases, 12.0 MiB; 7 dumps kept, 4.1 GiB free" }
@@ -601,9 +606,75 @@ status:
 
 `Backup` is `False` with reason `Failed` — the run's own reason, and the last
 dump that succeeded — when the latest run failed, `Disabled` when backups are
-off, and `Unknown` (`Scheduled`) until the first run. RBAC: the operator's
-ClusterRole holds `batch/cronjobs`; `deploy/operator-install.yaml` gains the
-rule with its next re-pin.
+off, and `Unknown` (`Scheduled`) until the first run; a backup that runs does
+not move it. RBAC: the operator's ClusterRole holds `batch/cronjobs`;
+`deploy/operator-install.yaml` gains the rule with its next re-pin.
+
+**On request.** Annotate the Zaentrum with a value not answered yet, a fresh
+one each time:
+
+```sh
+kubectl -n zaentrum annotate zaentrum zaentrum --overwrite \
+  zaentrum.io/backup-request="$(date +%s)"
+kubectl -n zaentrum get zaentrum zaentrum \
+  -o jsonpath='{.status.backup.running} {.status.backup.request}'; echo
+```
+
+The CronJob is suspended (`backup.suspend` under plain Helm, `true` or
+`"true"`) from the pass that takes the request up until it is answered, and
+for as long as a backup asked for runs, whatever has become of its request —
+the annotation removed or changed, backups turned off and on — and while the
+backups' Jobs cannot be listed, so that its run and the one asked for never
+write at once; a run the schedule missed meanwhile follows once it moves
+again, if it was due within the last six hours. The backup starts on a later
+pass, one that found the CronJob suspended before it applied anything and
+finds no backup running and no restore that stops the platform or has it
+stopped. Until then the request waits: it is never refused because a backup
+runs, and a backup that began before it does not answer it. It runs as a Job
+of the Zaentrum's, `zaentrum-backup-<five characters>`, made from the
+CronJob's job template — the same script, mounts and label
+`zaentrum.io/database: backup` — with the annotation
+`zaentrum.io/backup-request: <value>`, by which an operator that starts again
+finds it. The newest one asked for that has ended stays, for its logs
+(`kubectl logs job/zaentrum-backup-…`); the ones before it are deleted once it
+has been read. Turning backups off does not stop one that runs.
+
+The CronJob's controller may still start a run it was about to start when the
+suspension came: the operator waits one pass between suspending the CronJob
+and starting the Job, and lists the backups' Jobs then, but a controller whose
+view is older than that pass is not seen. Two operators reconciling one
+platform would each start a Job; every shipped manifest runs the operator with
+`--leader-elect`, so one leads.
+
+`status.backup.running` names the backup Job that runs, the schedule's or one
+asked for: the operator watches the backups' Jobs, by their label, so it
+follows a run's start and end within a pass; of the Jobs, its cache holds those
+alone. While the resource is refused (`ResourceRefused`) it is cleared once
+that Job has ended; a request waits until the resource is corrected.
+
+`status.backup.request` is the value answered: the backup it started has
+ended, well or not, and has been read, so `lastSuccess`, `lastFailure` and the
+`Backup` condition are that run's. A pass that cannot read a run's pod leaves
+the status as it is, and the next pass reads it. A Job asked for that is gone
+before it was read answers its request as not read, the `Backup` condition
+keeping what it said, and no second backup starts for it — unless the
+operator started again in between, which knows only the Jobs that are there
+and starts the backup once more. An ended Job of the platform's that carries
+the value counts as the answer too, so where the resource's CRD does not
+serve `status.backup.request` (an operator newer than its CRD) the schedule
+moves again and no second backup starts; the log says once that the status
+did not keep the answer. The log shows the first 64 characters of a value.
+
+Where backups are off it is answered at once, and refused: while the
+annotation holds that value and no backup carries it, the `Disabled` sentence
+ends “; the backup asked for is not made: set spec.backup.enabled to true and
+ask again with a new value” with `enabled: false`, and “; the backup asked for
+is not made” on an `emptyDir`. The Job that answered a value is what tells: if
+it is deleted by hand while backups are off and the annotation still holds
+that value, the sentence says the backup was not made, although it was. With
+external databases a request is answered and refused too, with no `Backup`
+condition; the operator's log says why. RBAC: the ClusterRole's `jobs` rule
+holds `watch`.
 
 **Restoring.** Annotate the Zaentrum with the dump's name:
 

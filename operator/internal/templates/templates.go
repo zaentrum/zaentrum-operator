@@ -101,6 +101,12 @@ type Values struct {
 	// and the restore Job is rendered among the hooks. The reconciler sets it
 	// from status.backup.restore (restore.go).
 	RestoreDump string
+	// BackupSuspend holds the backups' schedule still: no run of the CronJob
+	// starts. The reconciler sets it from a backup asked for
+	// (zaentrum.io/backup-request) to its answer, and while one runs, so that
+	// the schedule's run and the one asked for never write at once
+	// (backuprequest.go).
+	BackupSuspend bool
 	// MailSecretVersion is the resourceVersion of the Secret spec.mail.secretName
 	// names, as the reconciler read it this pass, or empty while it is not
 	// there. The chart puts it on portal-api's pod and on the realm Job, so
@@ -178,6 +184,7 @@ func (v Values) chartValues() map[string]interface{} {
 		"className": spec.Backup.ClassName,
 		"claimName": spec.Backup.ClaimName,
 		"restore":   v.RestoreDump,
+		"suspend":   v.BackupSuspend,
 	}
 	if spec.Backup.Enabled != nil {
 		backup["enabled"] = *spec.Backup.Enabled

@@ -255,6 +255,12 @@ type BackupSpec struct {
 	ClaimName string `json:"claimName,omitempty"`
 }
 
+// BackupRequestAnnotation asks for one backup now: a value status.backup.request
+// has not answered starts one from the backup CronJob's own Job once no backup
+// and no restore runs; where backups are off it is answered and refused. Set a
+// fresh value per request.
+const BackupRequestAnnotation = "zaentrum.io/backup-request"
+
 // MailSpec names the SMTP server the platform sends its mail through. Mail is
 // set up when host and from are set: the operator then gives portal-api the
 // settings (PORTAL_MAIL_*) and the platform's public address
@@ -1044,6 +1050,17 @@ type BackupStatus struct {
 	// +optional
 	Job string `json:"job,omitempty"`
 
+	// Running is the name of the backup Job that runs, the schedule's or one
+	// asked for; empty while none runs.
+	// +optional
+	Running string `json:"running,omitempty"`
+
+	// Request is the last zaentrum.io/backup-request value answered: the backup
+	// it started has ended, or it was refused because the platform makes no
+	// backups.
+	// +optional
+	Request string `json:"request,omitempty"`
+
 	// Restore is the latest restore the zaentrum.io/restore-request annotation
 	// asked for.
 	// +optional
@@ -1179,7 +1196,8 @@ type ZaentrumStatus struct {
 	Verification *VerificationStatus `json:"verification,omitempty"`
 
 	// Backup reports the bundled Postgres's backups and the latest restore.
-	// Absent with external databases.
+	// With external databases it holds no more than a restore and a backup
+	// asked for, both refused there.
 	// +optional
 	Backup *BackupStatus `json:"backup,omitempty"`
 }

@@ -49,7 +49,7 @@ func newPlatformEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum, funcs *intercept
 	}
 	f := interceptor.Funcs{Patch: applyAsCreateOrUpdate}
 	if funcs != nil {
-		f.Delete, f.List = funcs.Delete, funcs.List
+		f.Create, f.Delete, f.List = funcs.Create, funcs.Delete, funcs.List
 	}
 	e := &platformEnv{t: t, key: types.NamespacedName{Namespace: z.Namespace, Name: z.Name},
 		clock: time.Date(2026, 10, 4, 18, 0, 0, 0, time.UTC)}

@@ -75,6 +75,9 @@ func main() {
 		RenewDeadline:                 &renewDeadline,
 		RetryPeriod:                   &retryPeriod,
 		LeaderElectionReleaseOnCancel: true,
+		// Of the Jobs, the cache holds the backups' alone, which the platform's
+		// reconciler watches; it reads every Job it acts on uncached.
+		Cache: controller.CacheOptions(),
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

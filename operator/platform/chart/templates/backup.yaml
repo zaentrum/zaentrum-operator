@@ -27,7 +27,8 @@ metadata:
   annotations:
     helm.sh/resource-policy: keep
 spec:
-  # One backup at a time writes it (concurrencyPolicy Forbid).
+  # One backup at a time writes it (concurrencyPolicy Forbid; the schedule
+  # stands still while a backup asked for runs).
   accessModes: [ReadWriteOnce]
 {{- with (.Values.backup.className | default .Values.storage.postgres.className | default .Values.storage.className) }}
   storageClassName: {{ . | quote }}
@@ -51,8 +52,13 @@ spec:
   startingDeadlineSeconds: 21600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  # No backup starts while a restore has the database's clients stopped.
-  suspend: {{ if include "z.restoring" . }}true{{ else }}false{{ end }}
+  # No backup starts while a restore has the database's clients stopped, nor
+  # while backup.suspend, true or "true", holds the schedule still: the
+  # operator sets it from a backup asked for to its answer and while one runs,
+  # so that two runs never write at once.
+  suspend: {{ if or (eq (toString .Values.backup.suspend) "true") (include "z.restoring" .) }}true{{ else }}false{{ end }}
+  # A backup asked for (zaentrum.io/backup-request) is a Job the operator makes
+  # from this template, with the same label.
   jobTemplate:
     metadata:
       labels:

@@ -941,7 +941,8 @@ spec:
               backup:
                 description: |-
                   Backup reports the bundled Postgres's backups and the latest restore.
-                  Absent with external databases.
+                  With external databases it holds no more than a restore and a backup
+                  asked for, both refused there.
                 properties:
                   dumps:
                     description: |-
@@ -967,6 +968,12 @@ spec:
                     description: LastSuccess is when the latest backup that succeeded
                       ended.
                     format: date-time
+                    type: string
+                  request:
+                    description: |-
+                      Request is the last zaentrum.io/backup-request value answered: the backup
+                      it started has ended, or it was refused because the platform makes no
+                      backups.
                     type: string
                   restore:
                     description: |-
@@ -1007,6 +1014,11 @@ spec:
                     - request
                     - result
                     type: object
+                  running:
+                    description: |-
+                      Running is the name of the backup Job that runs, the schedule's or one
+                      asked for; empty while none runs.
+                    type: string
                 type: object
               certificate:
                 description: |-
