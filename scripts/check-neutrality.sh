@@ -171,8 +171,9 @@ scan "named acquisition tool" "$tool_re" -i
 
 # ── rule 2b: generic acquisition vocabulary — code and config only ───────────
 # Prose MUST be able to use these words, because stating the boundary is the
-# whole point: README.md says "no indexer integrations" and CONTRIBUTING.md
-# declines PRs that add "indexer/tracker integrations". A guard that fails on
+# whole point: README.md says "no indexer integrations", and the guide to
+# contributing (https://github.com/zaentrum/.github/blob/main/CONTRIBUTING.md)
+# declines PRs that reach out "to indexers or trackers". A guard that fails on
 # those would delete the project's own statement of what it refuses to do — the
 # first version of this script did exactly that. So generic vocabulary is only
 # a failure in code and config, where the word implies a feature rather than a
