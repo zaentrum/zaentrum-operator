@@ -54,6 +54,7 @@ var sinceThePin = []string{
 	"spec.databases.portal:pattern", "spec.databases.portal:maxLength",
 	"spec.databases.external.host:pattern", "spec.databases.external.sslmode:enum",
 	"spec.mail", "spec.alerts", "status.certificate", "status.components.notReadySince", "status.components.stalled", "status.backup.request", "status.backup.running",
+	"status.storage", "status.backup.sets",
 }
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted

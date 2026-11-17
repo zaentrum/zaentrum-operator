@@ -1019,6 +1019,43 @@ spec:
                       Running is the name of the backup Job that runs, the schedule's or one
                       asked for; empty while none runs.
                     type: string
+                  sets:
+                    description: |-
+                      Sets are the sets on the backups' claim, newest first, as its measuring
+                      found them: the newest 30, fewer where 30 do not fit its report, and one
+                      a restore asked for by name, however old.
+                    items:
+                      description: BackupSet is one set on the backups' claim.
+                      properties:
+                        bytes:
+                          description: Bytes is the size of its files.
+                          format: int64
+                          type: integer
+                        name:
+                          description: Name is the set's directory, the name to restore
+                            it by.
+                          type: string
+                        own:
+                          description: |-
+                            Own says whether this platform made it, by the uid in its backup.json;
+                            absent without one.
+                          type: boolean
+                        version:
+                          description: |-
+                            Version is the version of the platform that made it, from its
+                            backup.json; empty without one.
+                          type: string
+                        whole:
+                          description: |-
+                            Whole says that its SHA256SUMS is there; the restore checks every
+                            checksum.
+                          type: boolean
+                      required:
+                      - bytes
+                      - name
+                      - whole
+                      type: object
+                    type: array
                 type: object
               certificate:
                 description: |-
@@ -1193,6 +1230,98 @@ spec:
               phase:
                 description: Phase is a coarse human-facing lifecycle string.
                 type: string
+              storage:
+                description: |-
+                  Storage is what the measuring Jobs found: one Job for each claim the
+                  platform uses, every hour, on zaentrum.io/storage-request and, for the
+                  backups' claim, after each backup.
+                properties:
+                  databases:
+                    description: |-
+                      Databases are the bundled Postgres's platform databases and their sizes.
+                      Absent with external databases.
+                    items:
+                      description: DatabaseSize is one platform database of the bundled
+                        Postgres.
+                      properties:
+                        bytes:
+                          description: Bytes is its size, as Postgres counts it.
+                          format: int64
+                          type: integer
+                        name:
+                          description: |-
+                            Name is the database's key in spec.databases: chino, katalog, keycloak
+                            or portal.
+                          type: string
+                      required:
+                      - bytes
+                      - name
+                      type: object
+                    type: array
+                  request:
+                    description: |-
+                      Request is the last zaentrum.io/storage-request value answered: every
+                      measuring Job it started has ended.
+                    type: string
+                  volumes:
+                    description: |-
+                      Volumes are the claims the platform uses, each with the size it asks for
+                      and, once measured, the filesystem it is on.
+                    items:
+                      description: VolumeStatus is one claim the platform uses, as
+                        it was last measured.
+                      properties:
+                        claim:
+                          description: Claim is the PersistentVolumeClaim measured.
+                          type: string
+                        filesystem:
+                          description: |-
+                            Filesystem identifies the filesystem and the node it was measured on:
+                            volumes with the same one are on one disk. Volumes with different ones
+                            can still share free space, as subvolumes of one pool do. Absent where
+                            the filesystem reports no id, as a network share does: such a volume
+                            joins no other.
+                          type: string
+                        freeBytes:
+                          description: |-
+                            FreeBytes is what the platform can still write there; blocks kept for
+                            root count as used.
+                          format: int64
+                          type: integer
+                        measuredAt:
+                          description: |-
+                            MeasuredAt is when these figures were taken. They stay, with this time,
+                            when a later measuring fails.
+                          format: date-time
+                          type: string
+                        name:
+                          description: |-
+                            Name is media, postgres-data, backups or kafka, whatever the claim is
+                            called.
+                          enum:
+                          - media
+                          - postgres-data
+                          - backups
+                          - kafka
+                          type: string
+                        requestBytes:
+                          description: |-
+                            RequestBytes is the size the claim asks for, whether or not it is
+                            measured.
+                          format: int64
+                          type: integer
+                        sizeBytes:
+                          description: |-
+                            SizeBytes is the size of the filesystem the claim is on, which can be
+                            larger than the claim asks for.
+                          format: int64
+                          type: integer
+                      required:
+                      - claim
+                      - name
+                      type: object
+                    type: array
+                type: object
               verification:
                 description: |-
                   Verification reports the platform's latest self-test. Absent until the

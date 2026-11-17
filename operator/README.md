@@ -877,6 +877,39 @@ again.
   pipeline.
 - Kafka's topics and Valkey's cache, which the platform makes again.
 
+### The volumes, measured (`status.storage`)
+
+The operator measures each claim the platform uses — the library's, the
+databases', the backups' and the event broker's — with a Job of its own,
+`zaentrum-measure-{volume}-{five characters}` (label `zaentrum.io/measure`),
+which mounts the claim read-only: every hour, the backups' claim after each
+backup, and all at once for a `zaentrum.io/storage-request` value it has not
+answered yet:
+
+```sh
+kubectl -n zaentrum annotate zaentrum zaentrum --overwrite \
+  zaentrum.io/storage-request="$(date +%s)"
+```
+
+`status.storage` lists each claim with the size it asks for and, once
+measured, the filesystem's size, what is free and when; `request` is the value
+answered last. `status.backup.sets` lists the sets on the backups' claim, and
+the condition `StorageMeasured` says what was found, or why not.
+
+The backups' claim has one reader or writer at a time. While a backup runs or
+may start, its run waits, and a request is answered without it, as
+`StorageMeasured` says. While a run reads it, the schedule stands still, and a
+backup asked for, the backup before an update and a restore wait: for 10
+minutes at most, the run's deadline, and the 30 seconds of its pod's grace. A
+run that has not ended by then, as on a node that is gone, is removed and
+counted as failed, and holds nothing from then on; its pod may still read on
+that node. To end a run that hangs sooner, delete its Job:
+
+```sh
+kubectl -n zaentrum get jobs -l zaentrum.io/measure
+kubectl -n zaentrum delete job {name}
+```
+
 ### The media pipeline (`spec.pipeline`)
 
 `features.pipeline` runs the workers that make a title playable everywhere:

@@ -98,6 +98,11 @@ type ZaentrumReconciler struct {
 	// since when this operator has seen it so (mail.go).
 	mailUnnamed map[types.NamespacedName]unnamedMailSecret
 	mailMu      sync.Mutex
+
+	// measured holds, for each platform, what the measuring keeps between
+	// passes of the runs that left no Job to read (storage.go).
+	measured  map[types.UID]*measureMemory
+	measureMu sync.Mutex
 }
 
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums,verbs=get;list;watch;create;update;patch;delete
@@ -354,6 +359,10 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		backupWaits = true
 	}
 	r.reportBackups(ctx, &z, objs, update, vals.Version)
+	// The volumes, measured by the chart's Jobs that mount them, the backups'
+	// after a backup: none starts while a restore runs, nor the backups' while
+	// the schedule is held for a backup (storage.go).
+	measuring := r.measureStorage(ctx, &z, objs, tests, restoreInFlight || restoreDump != "", backupAsk.forBackup)
 	r.reportTLS(ctx, &z, tlsSecret, issuing)
 	// Where the platform's mail stands, and the mail Secrets the resource no
 	// longer names (mail.go).
@@ -439,7 +448,7 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	r.backupStatusWritten(&z)
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
-	if verifying || configuring || db.copying || restoreInFlight || backupWaits || updateWaits {
+	if verifying || configuring || db.copying || restoreInFlight || backupWaits || updateWaits || measuring {
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil

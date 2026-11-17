@@ -65,8 +65,11 @@ import (
 // is the backup before it, marked so; one that is being deleted is waited for,
 // as it may still write, but neither marked nor stopped. Otherwise the
 // operator starts one as a backup asked for starts (backuprequest.go), once
-// the CronJob is suspended; it also answers a request that waits. A request
-// that waits behind a run that counts gets its own Job after the update.
+// the CronJob is suspended and no run measures the backups' claim (storage.go);
+// it also answers a request that waits. A request that waits behind a run that
+// counts gets its own Job after the update. The 30 minutes count the wait for
+// a measuring run: one ends within ten and a half minutes by its Job's
+// deadline, and none starts while the update is held back.
 
 const (
 	// annotationBackupBeforeUpdate is the version a backup was made of, before
@@ -269,7 +272,11 @@ func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1
 			logger.Info("update: a backup that has ended still has a pod that runs; the update to "+target+" waits for it",
 				"job", writes.Name)
 		case running == nil && now.Before(u.deadline()):
-			u.step = updateStart
+			if measuring := r.backupsMeasuring(ctx, z); measuring != "" {
+				logger.Info("update: the backup before "+target+" waits for the backups' claim to be measured", "for", measuring)
+			} else {
+				u.step = updateStart
+			}
 		case running == nil:
 			logger.Info("update: no backup before " + target + " could be started in 30 minutes; applying it without one")
 			r.applyUpdate(ctx, z, &u, all, true, false)

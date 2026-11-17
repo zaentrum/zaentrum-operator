@@ -1,0 +1,20 @@
+{{- if and .Values.platform.uid (ne .Values.databases.mode "external") }}
+# ── What made the sets on the backups' claim ────────────────────────────────
+#
+# The ConfigMap zaentrum-backup holds what a Job on the backups' claim cannot
+# know about the platform: under platform, its name and its uid, the
+# resource's, and the version that runs, as status.currentVersion has it. The
+# backups' measuring Job reads the uid there, to tell a set this platform made
+# from another's (status.backup.sets[].own). The operator renders it with the
+# platform's uid (platform.uid); plain Helm renders none.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zaentrum-backup
+  labels:
+    app.kubernetes.io/name: zaentrum-backup
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+data:
+  platform: {{ dict "name" .Values.platform.name "uid" .Values.platform.uid "version" .Values.global.version | toJson | quote }}
+{{- end }}

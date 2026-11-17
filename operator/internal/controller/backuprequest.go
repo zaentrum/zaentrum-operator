@@ -39,9 +39,10 @@ import (
 // also while its Job is being deleted, so that the schedule's run and the one
 // asked for never write at once (backupScheduleHeld). The
 // backup starts on a later pass: one that found the CronJob suspended before
-// it applied anything, and finds no backup Job unfinished and no restore that
-// stops the platform or has it stopped. A request waits for all of these; it
-// is never refused because a backup runs.
+// it applied anything, and finds no backup Job unfinished, no run that
+// measures the backups' claim (storage.go) and no restore that stops the
+// platform or has it stopped. A request waits for all of these; it is never
+// refused because a backup or a measuring run runs.
 //
 // The backup is a Job of its own, made from the rendered CronJob's job
 // template — the same script, mounts and label, so that whatever lists the
@@ -146,6 +147,10 @@ type backupAsk struct {
 	request string
 	// hold says that the render suspends the backups' CronJob.
 	hold bool
+	// forBackup says that it does so for a backup, which runs or may start:
+	// for any reason but a run that measures the backups' claim, none of which
+	// starts then (storage.go).
+	forBackup bool
 	// suspended says that the backups' CronJob was suspended before the pass
 	// applied it.
 	suspended bool
@@ -220,12 +225,13 @@ func (r *ZaentrumReconciler) unanswered(z *zaentrumv1alpha1.Zaentrum, jobs []bat
 // even where its Job has ended, until that run has been read; an update waits
 // for the backup before it (updateWaits, updatebackup.go); a Job the platform
 // started itself, asked for or before an update, has not ended, whatever has
-// become of its request or its update, and also while it is being deleted; or
-// the backups' Jobs could not be listed (err). jobs are all the backups' Jobs,
+// become of its request or its update, and also while it is being deleted; a
+// run measures the backups' claim (measuring, backupsMeasuring); or the
+// backups' Jobs could not be listed (err). jobs are all the backups' Jobs,
 // those being deleted among them. It is the one hold on the schedule; whatever
 // else makes it stand still adds its reason here.
-func backupScheduleHeld(z *zaentrumv1alpha1.Zaentrum, request string, updateWaits bool, jobs []batchv1.Job, err error) bool {
-	if err != nil || request != "" || updateWaits {
+func backupScheduleHeld(z *zaentrumv1alpha1.Zaentrum, request string, updateWaits bool, measuring string, jobs []batchv1.Job, err error) bool {
+	if err != nil || request != "" || updateWaits || measuring != "" {
 		return true
 	}
 	for i := range jobs {
@@ -246,7 +252,9 @@ func (r *ZaentrumReconciler) planBackupRequest(ctx context.Context, z *zaentrumv
 	if err == nil {
 		ask.request = r.unanswered(z, notDeleting(all))
 	}
-	ask.hold = backupScheduleHeld(z, r.notYetAnswered(z), updateWaits, all, err) || r.stillWrites(ctx, all) != nil
+	request, writes := r.notYetAnswered(z), r.stillWrites(ctx, all) != nil
+	ask.forBackup = backupScheduleHeld(z, request, updateWaits, "", all, err) || writes
+	ask.hold = backupScheduleHeld(z, request, updateWaits, r.backupsMeasuring(ctx, z), all, err) || writes
 	if ask.request == "" && !updateWaits {
 		return ask
 	}
@@ -297,8 +305,11 @@ func (r *ZaentrumReconciler) startBackupRequest(ctx context.Context, z *zaentrum
 		waits = running
 	case writes != nil:
 		waits = writes.Name
-	case !ask.suspended:
-		waits = "the schedule to stand still"
+	default:
+		// A run that measures the backups' claim, or the schedule.
+		if waits = r.backupsMeasuring(ctx, z); waits == "" && !ask.suspended {
+			waits = "the schedule to stand still"
+		}
 	}
 	if waits != "" {
 		logger.Info("backups: the backup asked for waits", "request", value, "for", waits)

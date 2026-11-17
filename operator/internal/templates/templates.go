@@ -295,6 +295,13 @@ func (v Values) chartValues() map[string]interface{} {
 		"backup":   backup,
 		"mail":     v.mailValues(),
 		"services": services,
+		// The resource the chart is rendered for: the ConfigMap that says what
+		// made the sets names it, and with it the chart renders the Jobs the
+		// operator measures the volumes with (templates/storage.yaml).
+		"platform": map[string]interface{}{
+			"name": v.cr.Name,
+			"uid":  string(v.cr.UID),
+		},
 	}
 }
 
@@ -579,6 +586,39 @@ const (
 // restores nothing.
 func RestoreJob(hooks []*unstructured.Unstructured) *unstructured.Unstructured {
 	return hookJob(hooks, RestoreJobName)
+}
+
+// The chart's measuring Jobs (templates/storage.yaml): one hook for each claim
+// the platform uses, which the operator starts as Jobs of their own, and the
+// ConfigMap that says what made the sets (templates/backup-record.yaml).
+const (
+	// MeasureJobPrefix names each hook, zaentrum-measure-<volume>; each run
+	// gets a Job of its own named after it.
+	MeasureJobPrefix = "zaentrum-measure"
+	// MeasureContainer runs files/measure-volume.sh; its termination message is
+	// the run's report in JSON.
+	MeasureContainer = "measure"
+	// LabelMeasure names, on each hook and on its Jobs, the volume it measures.
+	LabelMeasure = "zaentrum.io/measure"
+	// BackupRecordName is the ConfigMap that says what made the sets.
+	BackupRecordName = "zaentrum-backup"
+)
+
+// The volumes the measuring Jobs measure, as status.storage.volumes names
+// them: the library's, the bundled Postgres's, the backups' and the event
+// broker's. The Postgres's is measured by the library's Job, through the
+// Postgres itself.
+const (
+	VolumeMedia    = "media"
+	VolumePostgres = "postgres-data"
+	VolumeBackups  = "backups"
+	VolumeKafka    = "kafka"
+)
+
+// MeasureJob returns the hook that measures a volume, or nil when the render
+// measures none of it.
+func MeasureJob(hooks []*unstructured.Unstructured, volume string) *unstructured.Unstructured {
+	return hookJob(hooks, MeasureJobPrefix+"-"+volume)
 }
 
 // PostgresMigrationJob returns the migration Job among the hooks, or nil when
