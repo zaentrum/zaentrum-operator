@@ -5,6 +5,15 @@ on:
   pull_request: {}
 
 jobs:
+  # The organisation's shared neutrality check.
+  neutrality-shared:
+    permissions:
+      contents: read
+    uses: zaentrum/.github/.github/workflows/neutrality.yml@v1
+    with:
+      exceptions: |
+        scripts/check-neutrality.sh  holds the older neutrality check until the shared check replaces it
+
   # The public boundary the open-source strategy calls "enforced, not trusted".
   # It was neither until 2026-08-06, when the published operator image was found
   # to carry three internal hostnames, compiled in via the chart templates the
