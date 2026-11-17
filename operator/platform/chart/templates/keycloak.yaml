@@ -178,18 +178,22 @@ spec:
             # Health + metrics endpoints (/auth/health/*). Needed for the probe.
             - name: KC_HEALTH_ENABLED
               value: "true"
-            # The JVM's heap as a share of this container's memory limit
-            # (resources.limits.memory below): at most half of it, starting at
-            # less than a third. Without this variable the image's start script
-            # (kc.sh) sets its own default, at most 70 % and starting at 50 %,
-            # for the JVM that rebuilds the server and the one that runs it
-            # alike. That leaves too little of the limit for what is not heap -
-            # metaspace, threads, the code cache, the GC's own - which is about
-            # 300 to 350 MiB at the first start, and that start ran into the
-            # limit. Only this container: the realm Job and the chart test run
-            # the admin CLI from the same image and are not sized by it.
+            # The JVM's heap as a share of this container's memory: at most half
+            # of it, starting at less than a third. The shares are of MaxRAM,
+            # which the Java runtime does not always take from the container's
+            # limit - in the one-machine image it took the machine's memory, and
+            # a heap of 8 GiB ran into the 1 GiB limit at the first start - so
+            # the chart names it, equal to resources.limits.memory below; a
+            # change of one is a change of the other. Without this variable the
+            # image's start script (kc.sh) sets its own shares, at most 70 % and
+            # starting at 50 %, for the JVM that rebuilds the server and the one
+            # that runs it alike; they leave too little for what is not heap -
+            # metaspace, threads, the code cache, the GC's own - about 300 to
+            # 350 MiB at the first start. Only this container: the realm Job and
+            # the chart test run the admin CLI from the same image and are not
+            # sized by it.
             - name: JAVA_OPTS_KC_HEAP
-              value: "-XX:MaxRAMPercentage=50 -XX:MinRAMPercentage=50 -XX:InitialRAMPercentage=30"
+              value: "-XX:MaxRAM=1g -XX:MaxRAMPercentage=50 -XX:MinRAMPercentage=50 -XX:InitialRAMPercentage=30"
             # Don't cache the mounted custom theme — so a redeploy of the theme
             # ConfigMap takes effect without fighting template/CSS caches.
             - name: KC_SPI_THEME_CACHE_THEMES
