@@ -10,7 +10,11 @@
 # 2026-10-04T00-00-05Z, the name a restore asks for — and holds
 #   globals.sql   the roles and their memberships, but the superuser's
 #                 (pg_dumpall --globals-only): what the databases' grants need
-#   <db>.dump     each database in pg_dump's custom format, compressed
+#   <db>.dump     each database in pg_dump's custom format, compressed, by
+#                 the database's whole name: a name holds no slash, so each
+#                 is a file of the set, and a dot in it stays in the file's
+#                 name; the restore takes the names from DATABASES, never back
+#                 from the files' names
 #   SHA256SUMS    the sha256 of each of those files
 # It is written as .partial-<name> and renamed once whole, so a dump without
 # the dot is complete. Then the newest RETENTION dumps stay, older ones go, and
@@ -23,7 +27,7 @@
 #
 # Environment (set by the Job):
 #   PGHOST, PGUSER, PGPASSWORD   the bundled Postgres and its superuser
-#   DATABASES                    the platform's databases, space-separated
+#   DATABASES                    the platform's databases, a name a line
 #   BACKUP_DIR                   where the claim is mounted
 #   RETENTION                    how many dumps to keep
 set -Eeuo pipefail
@@ -53,7 +57,12 @@ js() {
 }
 
 [ -n "${PGUSER:-}" ] && [ -n "${PGPASSWORD:-}" ] || fail "Secret zaentrum-db holds no user and password"
-[ -n "${DATABASES:-}" ] || fail "DATABASES names no database"
+# Each line of DATABASES is a database's name, whole.
+databases=()
+while IFS= read -r db; do
+	[ -z "$db" ] || databases+=("$db")
+done <<<"${DATABASES:-}"
+[ ${#databases[@]} -gt 0 ] || fail "DATABASES names no database"
 case ${RETENTION:-} in
 '' | *[!0-9]* | 0) fail "RETENTION is not a number of dumps to keep: '${RETENTION:-}'" ;;
 esac
@@ -77,22 +86,26 @@ pg_dumpall --globals-only --no-tablespaces |
 	grep -v -E "^(CREATE|ALTER) ROLE \"?${PGUSER}\"?[ ;]" >"$partial/globals.sql" ||
 	fail "cannot dump the roles"
 
-dbs_json="" files="globals.sql"
-for db in $DATABASES; do
-	[ -n "$(q -d postgres -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" ] ||
+dbs_json=""
+files=(globals.sql)
+for db in "${databases[@]}"; do
+	# The name is a value, which psql quotes (:'db'); never text of the
+	# statement, which psql reads from its input to put it in. The tools
+	# connect to the database by its name in PGDATABASE, which they take as
+	# the database's name alone, whatever it holds.
+	[ -n "$(printf '%s\n' "SELECT 1 FROM pg_database WHERE datname = :'db';" | q -d postgres -v "db=$db")" ] ||
 		fail "the Postgres has no database $db"
-	pg_dump --format=custom --no-password -d "$db" -f "$partial/$db.dump" ||
+	PGDATABASE=$db pg_dump --format=custom --no-password -f "$partial/$db.dump" ||
 		fail "cannot dump the database $db"
-	tables=$(q -d "$db" -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+	tables=$(PGDATABASE=$db q -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'")
 	size=$(wc -c <"$partial/$db.dump" | tr -d ' ')
 	dbs_json+="${dbs_json:+,}$(js "$db"):{\"tables\":$tables,\"bytes\":$size}"
-	files+=" $db.dump"
+	files+=("$db.dump")
 	say "dumped $db: $tables tables, $size bytes"
 done
 
-# shellcheck disable=SC2086 # the file names are words
-(cd "$partial" && sha256sum $files >SHA256SUMS) || fail "cannot write the checksums"
+(cd "$partial" && sha256sum -- "${files[@]}" >SHA256SUMS) || fail "cannot write the checksums"
 sync -f "$partial" 2>/dev/null || sync
 mv "$partial" "$dir/$name"
 partial=""

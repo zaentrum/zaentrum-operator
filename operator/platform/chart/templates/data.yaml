@@ -15,12 +15,20 @@ metadata:
   labels: { app: postgres, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
 data:
   # Runs once on first init (PGDATA empty). POSTGRES_DB already made 'zaentrum';
-  # create the per-app DBs the demo services + bundled Keycloak expect.
+  # create the per-app DBs the demo services + bundled Keycloak expect. Each
+  # name is written here in base64, plain text to SQL and to YAML; Postgres
+  # reads it back into the variable psql quotes as the name of the database it
+  # creates (:"chino"), so the name is never text of a statement.
   10-create-dbs.sql: |
-    CREATE DATABASE {{ .Values.databases.chino }};
-    CREATE DATABASE {{ .Values.databases.katalog }};
-    CREATE DATABASE {{ .Values.databases.keycloak }};
-    CREATE DATABASE {{ .Values.databases.portal }};
+    SELECT convert_from(decode('{{ b64enc .Values.databases.chino }}', 'base64'), 'UTF8') AS chino,
+      convert_from(decode('{{ b64enc .Values.databases.katalog }}', 'base64'), 'UTF8') AS katalog,
+      convert_from(decode('{{ b64enc .Values.databases.keycloak }}', 'base64'), 'UTF8') AS keycloak,
+      convert_from(decode('{{ b64enc .Values.databases.portal }}', 'base64'), 'UTF8') AS portal
+    \gset
+    CREATE DATABASE :"chino";
+    CREATE DATABASE :"katalog";
+    CREATE DATABASE :"keycloak";
+    CREATE DATABASE :"portal";
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -61,7 +69,7 @@ spec:
 {{- if eq $volume "emptyDir" }}
           emptyDir: { sizeLimit: 5Gi }     # lost whenever the pod moves
 {{- else }}
-          persistentVolumeClaim: { claimName: {{ $volume }} }
+          persistentVolumeClaim: { claimName: {{ $volume | quote }} }
 {{- end }}
         - name: initdb
           configMap: { name: postgres-initdb }
@@ -81,7 +89,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ $claim }}
+  name: {{ $claim | quote }}
   labels: { app: postgres, app.kubernetes.io/part-of: {{ .Values.global.partOf }} }
 spec:
   # One Postgres mounts it (the Deployment's strategy is Recreate).

@@ -1,8 +1,8 @@
 {{- with include "z.restoring" . }}
 # ── Restoring the bundled Postgres from a dump ──────────────────────────────
 #
-# Recreates every platform database from the dump {{ . }} on the claim
-# {{ include "z.backupClaim" $ }} (files/postgres-restore.sh), once it has made
+# Recreates every platform database from the dump {{ . }} on the backups'
+# claim (backup.claimName) (files/postgres-restore.sh), once it has made
 # sure the dump is whole: its checksums match, every database is in it — else
 # it refuses, changing nothing. While backup.restore names a dump, every client
 # of the database is stopped (z.replicas "db") and no backup starts; the
@@ -78,7 +78,7 @@ spec:
             - { name: tmp, mountPath: /tmp }
       volumes:
         - name: backups
-          persistentVolumeClaim: { claimName: {{ include "z.backupClaim" $ }}, readOnly: true }
+          persistentVolumeClaim: { claimName: {{ include "z.backupClaim" $ | quote }}, readOnly: true }
         - name: tmp
           emptyDir: { sizeLimit: 64Mi }
 {{- end }}

@@ -42,13 +42,20 @@ const canonicalCRD = "../../config/crd/zaentrum.io_zaentrums.yaml"
 // splices the canonical CRD into it and empties sinceThePin. Until then the
 // pinned operator, which writes none of them, is served exactly its own schema
 // — and a field missing from this list, or one the file already serves, fails
-// the test.
+// the test. A rule added since to a field the pinned install serves is listed
+// as the field's path and the rule's keyword, "path:keyword": the pinned
+// install serves the field without it until the re-pin.
 const pinnedInstall = "../../../deploy/operator-install.yaml"
 
-var sinceThePin = []string{}
+var sinceThePin = []string{
+	"spec.databases.chino:pattern", "spec.databases.chino:maxLength", "spec.databases.katalog:pattern", "spec.databases.katalog:maxLength",
+	"spec.databases.keycloak:pattern", "spec.databases.keycloak:maxLength", "spec.databases.portal:pattern", "spec.databases.portal:maxLength",
+	"spec.databases.external.host:pattern", "spec.databases.external.sslmode:enum",
+}
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted
-// paths below openAPIV3Schema, such as "spec.identity.tvClientId" — removed.
+// paths below openAPIV3Schema, such as "spec.identity.tvClientId" — removed,
+// or, for "path:keyword", that keyword of the field's schema alone.
 func withoutFields(t *testing.T, spec any, fields []string) any {
 	t.Helper()
 	b, err := json.Marshal(spec)
@@ -58,14 +65,21 @@ func withoutFields(t *testing.T, spec any, fields []string) any {
 	versions, _ := out["versions"].([]any)
 	for _, v := range versions {
 		for _, f := range fields {
-			parts := strings.Split(f, ".")
+			path, keyword, _ := strings.Cut(f, ":")
+			parts := strings.Split(path, ".")
 			node, _ := dig(v, "schema", "openAPIV3Schema").(map[string]any)
 			for _, p := range parts[:len(parts)-1] {
 				node, _ = dig(node, "properties", p).(map[string]any)
 			}
 			props, _ := node["properties"].(map[string]any)
 			require.Contains(t, props, parts[len(parts)-1], "sinceThePin names %s, which the canonical CRD does not serve", f)
-			delete(props, parts[len(parts)-1])
+			if keyword == "" {
+				delete(props, parts[len(parts)-1])
+				continue
+			}
+			field, _ := props[parts[len(parts)-1]].(map[string]any)
+			require.Contains(t, field, keyword, "sinceThePin names %s, which the canonical CRD does not serve", f)
+			delete(field, keyword)
 		}
 	}
 	return out

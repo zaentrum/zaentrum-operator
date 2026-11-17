@@ -371,9 +371,10 @@ backup.enabled, else wherever it keeps its data on a claim (z.postgresVolume)
 {{- if ne .Values.databases.mode "external" -}}{{ .Values.backup.restore }}{{- end -}}
 {{- end -}}
 
-{{/* z.platformDatabases — the platform's databases, space-separated. */}}
+{{/* z.platformDatabases — the platform's databases, a name a line, each
+     whole: a name may hold a space. */}}
 {{- define "z.platformDatabases" -}}
-{{- with .Values.databases -}}{{ .chino }} {{ .katalog }} {{ .keycloak }} {{ .portal }}{{- end -}}
+{{- with .Values.databases -}}{{ list .chino .katalog .keycloak .portal | join "\n" }}{{- end -}}
 {{- end -}}
 
 {{/* z.backupSecurity — the pod securityContext of the backup and restore
@@ -534,9 +535,34 @@ imagePullSecrets:
       name: zaentrum-worker-oidc
 {{- end -}}
 
-{{/* z.pgHost — host:port of the platform database (bundled or shared). */}}
+{{/* z.pgHostName and z.pgPort — the host, or the hosts separated by commas,
+     and the port of the platform database (bundled or shared). z.pgHost —
+     each host with the port after it, host1:port,host2:port: psql and the
+     JDBC driver take a port for each host, pgx one for them all, so each part
+     of the platform reaches the same servers on the same port. */}}
+{{- define "z.pgHostName" -}}
+{{- if eq .Values.databases.mode "external" -}}{{ required "databases.external.host is required in external mode" .Values.databases.external.host }}{{- else -}}postgres{{- end -}}
+{{- end -}}
+{{- define "z.pgPort" -}}
+{{- if eq .Values.databases.mode "external" -}}{{ .Values.databases.external.port | default 5432 }}{{- else -}}5432{{- end -}}
+{{- end -}}
 {{- define "z.pgHost" -}}
-{{- if eq .Values.databases.mode "external" -}}{{ required "databases.external.host is required in external mode" .Values.databases.external.host }}:{{ .Values.databases.external.port | default 5432 }}{{- else -}}postgres:5432{{- end -}}
+{{- $port := include "z.pgPort" . -}}
+{{- $hosts := list -}}
+{{- range splitList "," (include "z.pgHostName" .) -}}{{- $hosts = append $hosts (printf "%s:%s" . $port) -}}{{- end -}}
+{{- join "," $hosts -}}
+{{- end -}}
+{{/* z.pgKeycloakHost — the hosts as Keycloak's KC_DB_URL_HOST takes them: the
+     port after every host but the last, which Keycloak follows with
+     KC_DB_URL_PORT itself. */}}
+{{- define "z.pgKeycloakHost" -}}
+{{- $port := include "z.pgPort" . -}}
+{{- $hosts := splitList "," (include "z.pgHostName" .) -}}
+{{- $out := list -}}
+{{- range $i, $h := $hosts -}}
+{{- if lt (add1 $i) (len $hosts) -}}{{- $out = append $out (printf "%s:%s" $h $port) -}}{{- else -}}{{- $out = append $out $h -}}{{- end -}}
+{{- end -}}
+{{- join "," $out -}}
 {{- end -}}
 
 {{/* z.pgSSLMode — disable for the bundled plaintext postgres, configurable external. */}}
@@ -545,7 +571,13 @@ imagePullSecrets:
 {{- end -}}
 
 {{/* z.pgURL — a full DSN for one database: pass (dict "root" $ "db" <name>).
-     Credentials stay $(DB_USER)/$(DB_PASSWORD) env expansion at the consumer. */}}
+     Credentials stay $(DB_USER)/$(DB_PASSWORD) env expansion at the consumer.
+     The database's name and the host are in it as written, and a consumer
+     writes the whole as one quoted string: the schema's patterns and the
+     operator's check take no name or host with a character a URL or the
+     kubelet reads otherwise (no slash, ?, #, @, colon or dollar sign in a name;
+     in a host, a colon only inside the brackets of an IPv6 address). Several
+     hosts render host1,host2:port, the port after the last. */}}
 {{- define "z.pgURL" -}}
 postgres://$(DB_USER):$(DB_PASSWORD)@{{ include "z.pgHost" .root }}/{{ .db }}?sslmode={{ include "z.pgSSLMode" .root }}
 {{- end -}}

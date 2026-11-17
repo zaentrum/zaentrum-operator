@@ -101,7 +101,7 @@ func TestBackupCronJobAndItsClaim(t *testing.T) {
 	assert.Equal(t, corev1.TerminationMessageReadFile, c.TerminationMessagePolicy, "its summary is the termination message")
 	env := envByName(c)
 	assert.Equal(t, "postgres", env["PGHOST"].Value)
-	assert.Equal(t, "chino katalog keycloak portal", env["DATABASES"].Value)
+	assert.Equal(t, "chino\nkatalog\nkeycloak\nportal", env["DATABASES"].Value, "a name a line")
 	assert.Equal(t, "7", env["RETENTION"].Value)
 	assert.Equal(t, "zaentrum-db", env["PGPASSWORD"].ValueFrom.SecretKeyRef.Name)
 	assert.Equal(t, "backups", volumeClaim(pod, "backups"))
@@ -128,7 +128,7 @@ func TestBackupCronJobAndItsClaim(t *testing.T) {
 	assert.Equal(t, "30 3 * * *", cron.Spec.Schedule)
 	env = envByName(cron.Spec.JobTemplate.Spec.Template.Spec.Containers[0])
 	assert.Equal(t, "14", env["RETENTION"].Value)
-	assert.Equal(t, "media katalog keycloak launchpad", env["DATABASES"].Value)
+	assert.Equal(t, "media\nkatalog\nkeycloak\nlaunchpad", env["DATABASES"].Value)
 	class, _, _ := unstructured.NestedString(find(t, objs, "PersistentVolumeClaim", "backups").Object, "spec", "storageClassName")
 	assert.Equal(t, "fast", class, "the Postgres's class")
 	size, _, _ := unstructured.NestedString(find(t, objs, "PersistentVolumeClaim", "backups").Object, "spec", "resources", "requests", "storage")
@@ -229,7 +229,7 @@ func TestARestoreStopsTheDatabasesClients(t *testing.T) {
 	assert.Equal(t, []string{string(script)}, c.Args, "the script runs exactly as shipped")
 	env := envByName(c)
 	assert.Equal(t, "2026-10-04T00-00-05Z", env["DUMP"].Value)
-	assert.Equal(t, "chino katalog keycloak portal", env["DATABASES"].Value)
+	assert.Equal(t, "chino\nkatalog\nkeycloak\nportal", env["DATABASES"].Value, "a name a line")
 	assert.Equal(t, "backups", volumeClaim(pod, "backups"))
 	for _, m := range c.VolumeMounts {
 		if m.Name == "backups" {

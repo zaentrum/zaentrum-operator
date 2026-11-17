@@ -540,15 +540,30 @@ type DatabasesSpec struct {
 	// +optional
 	Mode string `json:"mode,omitempty"`
 	// +kubebuilder:default=chino
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$`
 	// +optional
 	Chino string `json:"chino,omitempty"`
 	// +kubebuilder:default=katalog
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$`
 	// +optional
 	Katalog string `json:"katalog,omitempty"`
+	// Keycloak is the name of Keycloak's database. With the bundled Postgres,
+	// Keycloak's start creates it where it is missing, so a new name starts
+	// Keycloak on a new, empty database, which imports the realm anew; the
+	// accounts stay in the database of the old name.
 	// +kubebuilder:default=keycloak
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$`
 	// +optional
 	Keycloak string `json:"keycloak,omitempty"`
+	// Portal is the name of the portal's database. With the bundled Postgres,
+	// portal-api's start creates it where it is missing, so a new name starts
+	// the portal on a new, empty database; what the old one holds stays in it.
 	// +kubebuilder:default=portal
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$`
 	// +optional
 	Portal string `json:"portal,omitempty"`
 
@@ -563,12 +578,14 @@ type DatabasesSpec struct {
 // DatabaseExternalSpec points the platform at a shared Postgres.
 type DatabaseExternalSpec struct {
 	// Host of the shared cluster, e.g. postgres.example.com.
+	// +kubebuilder:validation:Pattern=`^(|([[][0-9A-Fa-f:.]+[]]|[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?([.][A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*[.]?)(,([[][0-9A-Fa-f:.]+[]]|[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?([.][A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*[.]?))*)$`
 	// +optional
 	Host string `json:"host,omitempty"`
 	// +kubebuilder:default=5432
 	// +optional
 	Port int32 `json:"port,omitempty"`
 	// +kubebuilder:default=require
+	// +kubebuilder:validation:Enum="";disable;allow;prefer;require;verify-ca;verify-full
 	// +optional
 	SSLMode string `json:"sslmode,omitempty"`
 }

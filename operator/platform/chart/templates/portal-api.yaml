@@ -35,10 +35,13 @@ spec:
       {{- include "z.podSecurity" . | nindent 6 }}
 {{- if ne .Values.databases.mode "external" }}
       initContainers:
-        # Create the `portal` DB if it is missing. The demo Postgres is ephemeral
-        # (emptyDir) and the deploy job does NOT restart it, so a redeploy onto an
-        # already-running Postgres would otherwise lack the DB. Idempotent: connect
-        # to the maintenance DB (zaentrum) and CREATE only when absent.
+        # Create the portal's DB (databases.portal) if it is missing. The demo
+        # Postgres is ephemeral (emptyDir) and the deploy job does NOT restart it,
+        # so a redeploy onto an already-running Postgres would otherwise lack the
+        # DB. Idempotent: connect to the maintenance DB (zaentrum) and CREATE only
+        # when absent. The name is a value psql quotes (:'db') where it is looked
+        # for, and the name it creates, quoted as one (:"db"); never text of a
+        # statement, which psql reads from its input.
         - name: create-db
           image: postgres:16-alpine
           command: ["/bin/sh", "-c"]
@@ -46,13 +49,15 @@ spec:
             - |
               until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do echo "waiting for postgres…"; sleep 2; done
               MAINT="postgresql://$PGUSER:$PGPASSWORD@postgres:5432/zaentrum"
-              if psql "$MAINT" -tAc "SELECT 1 FROM pg_database WHERE datname='portal'" | grep -q 1; then
+              if printf '%s\n' "SELECT 1 FROM pg_database WHERE datname = :'db';" | psql "$MAINT" -tA -v "db=$DATABASE" | grep -q 1; then
                 echo "portal DB already exists"
               else
                 echo "creating portal DB…"
-                psql "$MAINT" -v ON_ERROR_STOP=1 -c "CREATE DATABASE portal"
+                printf '%s\n' 'CREATE DATABASE :"db";' | psql "$MAINT" -v ON_ERROR_STOP=1 -v "db=$DATABASE"
               fi
           env:
+            - name: DATABASE
+              value: {{ .Values.databases.portal | quote }}
             - name: PGUSER
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: PGPASSWORD
@@ -127,7 +132,7 @@ spec:
               name: zaentrum-db
               key: password
         - name: PG_URL
-          value: {{ include "z.pgURL" (dict "root" . "db" .Values.databases.portal) }}
+          value: {{ include "z.pgURL" (dict "root" . "db" .Values.databases.portal) | quote }}
 {{- if and (eq .Values.routing.mode "subdomains") .Values.routing.hosts.chino }}
         # Subdomain routing: the chino tile opens the real origin (boot upgrades
         # the seed-default registry URL; admin edits are never clobbered).

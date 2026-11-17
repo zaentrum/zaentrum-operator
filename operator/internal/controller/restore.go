@@ -99,15 +99,13 @@ func (r *ZaentrumReconciler) planRestore(ctx context.Context, z *zaentrumv1alpha
 	if dump, ok := restoring(z); ok {
 		return dump
 	}
-	request := strings.TrimSpace(z.GetAnnotations()[zaentrumv1alpha1.RestoreRequestAnnotation])
-	if rs := restoreStatus(z); request == "" || (rs != nil && rs.Request == request) {
+	request := restoreRequest(z)
+	if request == "" {
 		return ""
 	}
 	now := r.now()
 	refuse := func(msg string) string {
-		setRestore(z, &zaentrumv1alpha1.RestoreStatus{Request: request, Result: zaentrumv1alpha1.RestoreRefused,
-			StartedAt: &now, FinishedAt: &now, Message: "refused: " + msg + "; nothing was changed"})
-		log.FromContext(ctx).Info("restore: refused", "request", request, "reason", msg)
+		r.refuseRestore(ctx, z, request, msg)
 		return ""
 	}
 	if z.Spec.Databases.Mode == "external" {
@@ -126,6 +124,25 @@ func (r *ZaentrumReconciler) planRestore(ctx context.Context, z *zaentrumv1alpha
 	setRestore(z, &zaentrumv1alpha1.RestoreStatus{Request: request, Result: zaentrumv1alpha1.RestoreStopping,
 		StartedAt: &now, Message: "restoring " + m[1] + ": stopping the database's clients"})
 	return m[1]
+}
+
+// restoreRequest is the restore the resource asks for that has no answer yet,
+// or "".
+func restoreRequest(z *zaentrumv1alpha1.Zaentrum) string {
+	request := strings.TrimSpace(z.GetAnnotations()[zaentrumv1alpha1.RestoreRequestAnnotation])
+	if rs := restoreStatus(z); request == "" || (rs != nil && rs.Request == request) {
+		return ""
+	}
+	return request
+}
+
+// refuseRestore answers the restore asked for with its refusal: nothing was
+// changed, and the request is answered, so it does not start later.
+func (r *ZaentrumReconciler) refuseRestore(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, request, msg string) {
+	now := r.now()
+	setRestore(z, &zaentrumv1alpha1.RestoreStatus{Request: request, Result: zaentrumv1alpha1.RestoreRefused,
+		StartedAt: &now, FinishedAt: &now, Message: "refused: " + msg + "; nothing was changed"})
+	log.FromContext(ctx).Info("restore: refused", "request", request, "reason", msg)
 }
 
 // stepRestore takes this pass's step of the restore in flight, after the

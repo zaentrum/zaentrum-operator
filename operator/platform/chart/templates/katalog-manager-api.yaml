@@ -39,7 +39,7 @@ spec:
           args:
             - |
 {{- if eq .Values.databases.mode "external" }}
-              DB="postgresql://$PGUSER:$PGPASSWORD@{{ include "z.pgHost" . }}/{{ .Values.databases.katalog }}?sslmode={{ include "z.pgSSLMode" . }}"
+              DB="postgresql://$PGUSER:$PGPASSWORD@$DATABASE_HOSTS/$DATABASE?sslmode=$DATABASE_SSLMODE"
               until psql "$DB" -c 'select 1' >/dev/null 2>&1; do echo "waiting for postgres…"; sleep 2; done
 {{- else }}
               until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do echo "waiting for postgres…"; sleep 2; done
@@ -70,6 +70,17 @@ spec:
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: PGPASSWORD
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+{{- if eq .Values.databases.mode "external" }}
+            # The database's name, its hosts, each with the port after it
+            # (z.pgHost), and its sslmode reach the script in its environment,
+            # each whole; none is text of the script.
+            - name: DATABASE
+              value: {{ .Values.databases.katalog | quote }}
+            - name: DATABASE_HOSTS
+              value: {{ include "z.pgHost" . | quote }}
+            - name: DATABASE_SSLMODE
+              value: {{ include "z.pgSSLMode" . | quote }}
+{{- end }}
           volumeMounts:
             - { name: schema-sql, mountPath: /sql, readOnly: true }
       containers:
@@ -91,7 +102,9 @@ spec:
           value: {{ include "z.audience" . | quote }}
         - name: SPRING_DATASOURCE_URL
 {{- if eq .Values.databases.mode "external" }}
-          value: jdbc:postgresql://{{ include "z.pgHost" . }}/{{ .Values.databases.katalog }}?sslmode={{ include "z.pgSSLMode" . }}
+          # The host and the name as written, as in z.pgURL, which says what the
+          # rules keep out; one quoted string.
+          value: {{ printf "jdbc:postgresql://%s/%s?sslmode=%s" (include "z.pgHost" .) .Values.databases.katalog (include "z.pgSSLMode" .) | quote }}
 {{- else }}
           value: jdbc:postgresql://postgres:5432/katalog
 {{- end }}

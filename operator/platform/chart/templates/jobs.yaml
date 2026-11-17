@@ -145,11 +145,22 @@ spec:
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: PGPASSWORD
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+{{- if eq .Values.databases.mode "external" }}
+            # The database's name, its hosts, each with the port after it
+            # (z.pgHost), and its sslmode reach the script in its environment,
+            # each whole; none is text of the script.
+            - name: DATABASE
+              value: {{ .Values.databases.katalog | quote }}
+            - name: DATABASE_HOSTS
+              value: {{ include "z.pgHost" . | quote }}
+            - name: DATABASE_SSLMODE
+              value: {{ include "z.pgSSLMode" . | quote }}
+{{- end }}
           args:
             - |
               set -eu
 {{- if eq .Values.databases.mode "external" }}
-              DB="postgresql://$PGUSER:$PGPASSWORD@{{ include "z.pgHost" . }}/{{ .Values.databases.katalog }}?sslmode={{ include "z.pgSSLMode" . }}"
+              DB="postgresql://$PGUSER:$PGPASSWORD@$DATABASE_HOSTS/$DATABASE?sslmode=$DATABASE_SSLMODE"
 {{- else }}
               DB="postgresql://$PGUSER:$PGPASSWORD@postgres:5432/katalog"
 {{- end }}

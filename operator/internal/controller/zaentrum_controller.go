@@ -122,6 +122,32 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// The values of spec.databases are checked first, with the rules the
+	// schema holds, for a resource stored before the schema had them. While
+	// one fails, nothing is discovered, rendered, applied, pruned or started —
+	// what runs keeps running as it was — and the pass writes only the status:
+	// the Ready condition, on every pass; the controller's report, which names
+	// the operator that runs; and the refusal of a restore asked for meanwhile
+	// (refusal.go).
+	if refused := refusals(&z); len(refused) > 0 {
+		z.Status.Controller = r.controllerWhileRefused(ctx, &z)
+		z.Status.Phase = "Error"
+		r.setReady(&z, metav1.ConditionFalse, reasonResourceRefused, refusedMessage(refused))
+		r.answerRestoreWhileRefused(ctx, &z)
+		if err := r.patchStatus(ctx, &z); err != nil {
+			return ctrl.Result{}, err
+		}
+		logger.Info("resource refused: nothing new is applied", "refusals", len(refused))
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+	// A pass the check takes takes the refusal back first, before anything in
+	// it can fail: until the pass writes what it finds, Ready says nothing.
+	if takeRefusalBack(&z) {
+		if err := r.patchStatus(ctx, &z); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Stage 2 — release-channel discovery. Resolve spec.channel to its target
 	// tag from the published releases.json, then decide the tag to render this
 	// pass. Discovery is best-effort: any failure surfaces no update and keeps

@@ -4,8 +4,9 @@
 {{- if and .Values.storage.postgres.migrate (ne $volume $claim) }}
 # ── Moving the bundled Postgres onto its claim ──────────────────────────────
 #
-# Copies every database of the running Postgres — still on {{ $volume }} — onto
-# the claim {{ $claim }}, from the image the Postgres runs (files/postgres-migrate.sh).
+# Copies every database of the running Postgres, from where its data is now
+# (storage.postgres.current), onto its claim (storage.postgres.claimName), from
+# the image the Postgres runs (files/postgres-migrate.sh).
 # Nothing switches here: the Postgres moves only once this has succeeded, by a
 # render whose storage.postgres.current is the claim. The script refuses a
 # claim that holds a database it did not write, or one a Postgres has run on.
@@ -74,6 +75,6 @@ spec:
             - { name: data, mountPath: /var/lib/postgresql/data }
       volumes:
         - name: data
-          persistentVolumeClaim: { claimName: {{ $claim }} }
+          persistentVolumeClaim: { claimName: {{ $claim | quote }} }
 {{- end }}
 {{- end }}

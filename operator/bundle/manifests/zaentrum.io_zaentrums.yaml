@@ -113,6 +113,8 @@ spec:
                 properties:
                   chino:
                     default: chino
+                    maxLength: 63
+                    pattern: ^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$
                     type: string
                   external:
                     description: External configures the shared database cluster
@@ -120,6 +122,7 @@ spec:
                     properties:
                       host:
                         description: Host of the shared cluster, e.g. postgres.example.com.
+                        pattern: ^(|([[][0-9A-Fa-f:.]+[]]|[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?([.][A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*[.]?)(,([[][0-9A-Fa-f:.]+[]]|[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?([.][A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*[.]?))*)$
                         type: string
                       port:
                         default: 5432
@@ -127,13 +130,30 @@ spec:
                         type: integer
                       sslmode:
                         default: require
+                        enum:
+                        - ""
+                        - disable
+                        - allow
+                        - prefer
+                        - require
+                        - verify-ca
+                        - verify-full
                         type: string
                     type: object
                   katalog:
                     default: katalog
+                    maxLength: 63
+                    pattern: ^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$
                     type: string
                   keycloak:
                     default: keycloak
+                    description: |-
+                      Keycloak is the name of Keycloak's database. With the bundled Postgres,
+                      Keycloak's start creates it where it is missing, so a new name starts
+                      Keycloak on a new, empty database, which imports the realm anew; the
+                      accounts stay in the database of the old name.
+                    maxLength: 63
+                    pattern: ^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$
                     type: string
                   mode:
                     default: perApp
@@ -142,6 +162,12 @@ spec:
                     type: string
                   portal:
                     default: portal
+                    description: |-
+                      Portal is the name of the portal's database. With the bundled Postgres,
+                      portal-api's start creates it where it is missing, so a new name starts
+                      the portal on a new, empty database; what the old one holds stays in it.
+                    maxLength: 63
+                    pattern: ^([A-Za-z0-9_][A-Za-z0-9_.-]{0,62})?$
                     type: string
                 type: object
               eventStreaming:

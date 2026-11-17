@@ -149,20 +149,25 @@ summary=()
 total=0
 while IFS= read -r db; do
 	[ -n "$db" ] || continue
-	owner=$(src -d postgres -c "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '$db'")
-	if [ -z "$(dst -d postgres -At -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]; then
-		dst -d postgres -c "CREATE DATABASE \"$db\" OWNER \"$owner\"" ||
+	# The name is a value psql quotes (:'db') where it is looked for, and the
+	# name of the database it creates, quoted as one (:"db"), as its owner's
+	# is (:"owner"); never text of a statement, which psql reads from its input.
+	# The tools connect to the database by its name in PGDATABASE, which they
+	# take as the database's name alone, whatever it holds.
+	owner=$(printf '%s\n' "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = :'db';" | src -d postgres -v "db=$db")
+	if [ -z "$(printf '%s\n' "SELECT 1 FROM pg_database WHERE datname = :'db';" | dst -d postgres -At -v "db=$db")" ]; then
+		printf '%s\n' 'CREATE DATABASE :"db" OWNER :"owner";' | dst -d postgres -v "db=$db" -v "owner=$owner" ||
 			fail "cannot create the database $db"
 	fi
-	pg_dump -h "$SOURCE_HOST" -U "$POSTGRES_USER" --no-password -d "$db" | dst -d "$db" -o /dev/null ||
+	PGDATABASE=$db pg_dump -h "$SOURCE_HOST" -U "$POSTGRES_USER" --no-password | PGDATABASE=$db dst -o /dev/null ||
 		fail "cannot copy the database $db"
-	have=$(src -d "$db" -c "SELECT schemaname||'.'||relname FROM pg_stat_user_tables ORDER BY 1")
-	got=$(dst -d "$db" -At -c "SELECT schemaname||'.'||relname FROM pg_stat_user_tables ORDER BY 1")
+	have=$(PGDATABASE=$db src -c "SELECT schemaname||'.'||relname FROM pg_stat_user_tables ORDER BY 1")
+	got=$(PGDATABASE=$db dst -At -c "SELECT schemaname||'.'||relname FROM pg_stat_user_tables ORDER BY 1")
 	[ "$have" = "$got" ] ||
 		fail "the copy of $db holds other tables than its source"
-	tables=$(dst -d "$db" -At -c "SELECT count(*) FROM pg_stat_user_tables")
-	rows=$(dst -d "$db" -At -c "SELECT coalesce(sum(n_live_tup), 0) FROM pg_stat_user_tables")
-	size=$(dst -d "$db" -At -c "SELECT pg_database_size(current_database())")
+	tables=$(PGDATABASE=$db dst -At -c "SELECT count(*) FROM pg_stat_user_tables")
+	rows=$(PGDATABASE=$db dst -At -c "SELECT coalesce(sum(n_live_tup), 0) FROM pg_stat_user_tables")
+	size=$(PGDATABASE=$db dst -At -c "SELECT pg_database_size(current_database())")
 	total=$((total + size))
 	summary+=("$db ($tables tables, $rows rows)")
 	say "copied $db: $tables tables, $rows rows"

@@ -55,8 +55,11 @@ spec:
     spec:
       {{- include "z.imagePullSecrets" . | nindent 6 }}
       # The bundled postgres has no 'keycloak' database (it bootstraps only
-      # POSTGRES_DB=zaentrum), so create it before Keycloak's JPA store connects.
-      # Idempotent: skips creation when the database already exists.
+      # POSTGRES_DB=zaentrum), so create it (databases.keycloak) before
+      # Keycloak's JPA store connects. Idempotent: skips creation when the
+      # database already exists. The name is a value psql quotes (:'db') where it
+      # is looked for, and the name it creates, quoted as one (:"db"); never text
+      # of a statement, which psql reads from its input.
       initContainers:
 {{- if ne .Values.databases.mode "external" }}
         - name: create-keycloak-db
@@ -68,15 +71,18 @@ spec:
               until pg_isready -h postgres -U "$PGUSER" >/dev/null 2>&1; do
                 echo "waiting for postgres…"; sleep 2
               done
-              if psql -h postgres -U "$PGUSER" -tAc \
-                   "SELECT 1 FROM pg_database WHERE datname='keycloak'" \
+              if printf '%s\n' "SELECT 1 FROM pg_database WHERE datname = :'db';" |
+                   psql -h postgres -U "$PGUSER" -tA -v "db=$DATABASE" \
                    | grep -q 1; then
                 echo "database keycloak already exists"
               else
                 echo "creating database keycloak"
-                createdb -h postgres -U "$PGUSER" keycloak
+                printf '%s\n' 'CREATE DATABASE :"db";' |
+                  psql -h postgres -U "$PGUSER" -v ON_ERROR_STOP=1 -v "db=$DATABASE"
               fi
           env:
+            - name: DATABASE
+              value: {{ .Values.databases.keycloak | quote }}
             - name: PGUSER
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: PGPASSWORD
@@ -118,17 +124,17 @@ spec:
               value: postgres
 {{- if eq .Values.databases.mode "external" }}
             - name: KC_DB_URL_HOST
-              value: {{ .Values.databases.external.host }}
+              value: {{ include "z.pgKeycloakHost" . | quote }}
             - name: KC_DB_URL_PORT
               value: {{ .Values.databases.external.port | default 5432 | quote }}
             - name: KC_DB_URL_PROPERTIES
-              value: "?sslmode={{ .Values.databases.external.sslmode | default "require" }}"
+              value: {{ printf "?sslmode=%s" (include "z.pgSSLMode" .) | quote }}
 {{- else }}
             - name: KC_DB_URL_HOST
               value: postgres
 {{- end }}
             - name: KC_DB_URL_DATABASE
-              value: {{ .Values.databases.keycloak }}
+              value: {{ .Values.databases.keycloak | quote }}
             - name: KC_DB_USERNAME
               valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
             - name: KC_DB_PASSWORD

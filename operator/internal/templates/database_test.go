@@ -229,3 +229,47 @@ func TestPostgresWithAnExternalDatabase(t *testing.T) {
 	_, hooks := SplitHooks(objs)
 	assert.Nil(t, PostgresMigrationJob(hooks))
 }
+
+// A claim's name that no claim can have, which reaches the chart where nothing
+// refused it, stays one string wherever the chart writes it: the Postgres's
+// data volume, the copy onto it, the backups' volume and the restore's. No
+// pod gets a volume more.
+func TestTheClaimsNamesStayOneString(t *testing.T) {
+	const broken = "\n        - name: extra\n          emptyDir: {}"
+	z := base("zaentrum")
+	z.Spec.Storage.Postgres.ClaimName = "postgres-data" + broken
+	z.Spec.Backup.ClaimName = "backups" + broken
+
+	objs := renderWith(t, z, "", false)
+	pg := postgres(t, objs)
+	assert.Len(t, pg.Spec.Template.Spec.Volumes, 2, "data and initdb")
+	assert.Equal(t, "postgres-data"+broken, dataVolume(t, pg).PersistentVolumeClaim.ClaimName)
+	backup := backupCron(t, objs).Spec.JobTemplate.Spec.Template.Spec
+	assert.Equal(t, "backups"+broken, volumeClaim(backup, "backups"))
+	plain := backupCron(t, renderWith(t, base("zaentrum"), "", false)).Spec.JobTemplate.Spec.Template.Spec
+	assert.Len(t, backup.Volumes, len(plain.Volumes))
+
+	_, hooks := SplitHooks(renderWith(t, z, "emptyDir", true))
+	u := PostgresMigrationJob(hooks)
+	require.NotNil(t, u)
+	var job batchv1.Job
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &job))
+	assert.Equal(t, "postgres-data"+broken, volumeClaim(job.Spec.Template.Spec, "data"))
+	assert.Len(t, job.Spec.Template.Spec.Volumes, 1)
+
+	restoreJob := func(z *zaentrumv1alpha1.Zaentrum) corev1.PodSpec {
+		v := NewValues(z)
+		v.RestoreDump = restoreDump
+		objs, err := Render(v)
+		require.NoError(t, err)
+		_, hooks := SplitHooks(objs)
+		u := RestoreJob(hooks)
+		require.NotNil(t, u)
+		var job batchv1.Job
+		require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &job))
+		return job.Spec.Template.Spec
+	}
+	restore := restoreJob(z)
+	assert.Equal(t, "backups"+broken, volumeClaim(restore, "backups"))
+	assert.Len(t, restore.Volumes, len(restoreJob(base("zaentrum")).Volumes))
+}
