@@ -101,6 +101,13 @@ type Values struct {
 	// and the restore Job is rendered among the hooks. The reconciler sets it
 	// from status.backup.restore (restore.go).
 	RestoreDump string
+	// MailSecretVersion is the resourceVersion of the Secret spec.mail.secretName
+	// names, as the reconciler read it this pass, or empty while it is not
+	// there. The chart puts it on portal-api's pod and on the realm Job, so
+	// that the Secret appearing, or a change of it, starts portal-api again and
+	// runs the realm Job again: both read the password at their start. It is
+	// the Secret's version alone, never its data.
+	MailSecretVersion string
 }
 
 // NewValues builds the render context from a Zaentrum CR.
@@ -279,7 +286,29 @@ func (v Values) chartValues() map[string]interface{} {
 			"enabled": derefBool(spec.Verification.Enabled, true),
 		},
 		"backup":   backup,
+		"mail":     v.mailValues(),
 		"services": services,
+	}
+}
+
+// mailValues maps spec.mail onto the chart's mail values. A port of 0 is the
+// chart's to choose, by the encryption.
+func (v Values) mailValues() map[string]interface{} {
+	m := v.cr.Spec.Mail
+	alertsTo := make([]interface{}, 0, len(m.AlertsTo))
+	for _, a := range m.AlertsTo {
+		alertsTo = append(alertsTo, a)
+	}
+	return map[string]interface{}{
+		"host":          m.Host,
+		"port":          int(m.Port),
+		"encryption":    orDefault(m.Encryption, "starttls"),
+		"from":          m.From,
+		"fromName":      orDefault(m.FromName, "zaentrum"),
+		"user":          m.User,
+		"secretName":    m.SecretName,
+		"secretVersion": v.MailSecretVersion,
+		"alertsTo":      alertsTo,
 	}
 }
 

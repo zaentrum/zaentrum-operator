@@ -47,9 +47,15 @@ func newRealmEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum) *realmEnv {
 	return e
 }
 
+// render renders the platform as a pass does: with the version of the Secret
+// of the mail server's password, as the reconciler reads it.
 func (e *realmEnv) render() {
 	e.t.Helper()
-	objs, err := templates.Render(templates.NewValues(e.z))
+	v := templates.NewValues(e.z)
+	version, err := e.r.mailSecretVersion(context.Background(), e.z)
+	require.NoError(e.t, err)
+	v.MailSecretVersion = version
+	objs, err := templates.Render(v)
 	require.NoError(e.t, err)
 	e.platform, e.hooks = templates.SplitHooks(objs)
 }

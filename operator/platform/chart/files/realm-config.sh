@@ -37,6 +37,21 @@
 # VERIFY_PROFILE): a person here may have no email, and a child no last name.
 # And a realm without a password policy gets PASSWORD_POLICY.
 #
+# Then the realm's mail settings (smtpServer): the platform's mail server, as
+# MAIL_HOST and the rest say — the server, the port, the encryption, the
+# sender, the user and, from Secret MAIL_SECRET, the user's password — or none
+# at all where the platform's mail is not set up. Keycloak shows a password it
+# keeps only as **********, so a password cannot be compared: a run that signs
+# in with one writes the settings, the password with them. Settings without a
+# password that are so already are left alone. While Secret MAIL_SECRET holds
+# no password, or a user has no Secret named, the realm's settings stay as they
+# are. Each write is a merge, kcadm's own (-m, or -s): kcadm reads the realm,
+# changes what the write names and puts the realm back whole, so every other
+# setting keeps the value it had, one set in Keycloak's console among them; a
+# body put on its own would set the device code, CIBA and PAR settings back to
+# their defaults. The mail settings alone are the platform's: a write replaces
+# them whole, deleting what of them it does not name.
+#
 # Then the demo user. A realm imported without Secret zaentrum-demo-user gave it
 # the password "${DEMO_USER_PASSWORD}" — Keycloak leaves a placeholder it cannot
 # resolve as it is — the same on every such install. If it still signs in with
@@ -83,6 +98,17 @@
 #   PROFILE_ATTRIBUTE_CHECK  the part of it that must be so: a projection of
 #                    the profile's attributes, as Keycloak answers it
 #   PASSWORD_POLICY  the password policy of a realm that has none
+#   MAIL_HOST        the SMTP server the realm sends its mail through; not set
+#                    at all: the platform's mail is not set up, and the realm's
+#                    mail settings are cleared
+#   MAIL_PORT        its port
+#   MAIL_ENCRYPTION  starttls, tls or none
+#   MAIL_FROM        the sender's address
+#   MAIL_FROM_NAME   the sender's name, as a mail program shows it
+#   MAIL_USERNAME    the name the realm signs in to the server with; unset or
+#                    empty: it does not sign in
+#   MAIL_SECRET      the Secret the user's password is in
+#   MAIL_PASSWORD    from Secret MAIL_SECRET, when it holds one
 #   MASTER_FRONTEND_URL  the master realm's frontend URL; empty unsets it.
 #                    Not set at all: left as it is.
 #   DEMO_USER_PASSWORD   from Secret zaentrum-demo-user, when there is one
@@ -110,20 +136,41 @@ fail() {
 
 kc() { "$kcadm" "$@" --config "$cfg" 2>"$err"; }
 
+# why is kcadm's last line, the reason a call failed, cut to 240 characters.
+# Should it hold the mail server's password, as it is or as js() writes it,
+# the password is taken out before the line is printed.
 why() {
-	local line
+	local line pw
 	line=$(tail -n 1 "$err" 2>/dev/null || true)
+	if [ -n "${MAIL_PASSWORD:-}" ]; then
+		line=${line//"$MAIL_PASSWORD"/**********}
+		pw=$(js "$MAIL_PASSWORD")
+		pw=${pw#\"}
+		pw=${pw%\"}
+		line=${line//"$pw"/**********}
+	fi
 	printf '%.240s' "${line:-no output}"
 }
 
-# js quotes a value as a JSON string.
+# js quotes a value as a JSON string: the backslash, the quote and every
+# control character escaped, so that any value makes valid JSON.
 js() {
-	local s=$1
+	local s=$1 out="" c i
 	s=${s//\\/\\\\}
 	s=${s//\"/\\\"}
 	s=${s//$'\t'/\\t}
 	s=${s//$'\r'/\\r}
 	s=${s//$'\n'/\\n}
+	if [[ $s == *[[:cntrl:]]* ]]; then
+		for ((i = 0; i < ${#s}; i++)); do
+			c=${s:i:1}
+			if [[ $c == [[:cntrl:]] ]]; then
+				printf -v c '\\u%04x' "'$c"
+			fi
+			out+=$c
+		done
+		s=$out
+	fi
 	printf '"%s"' "$s"
 }
 
@@ -508,6 +555,79 @@ if [ -n "${PASSWORD_POLICY:-}" ]; then
 	fi
 fi
 
+# The realm's mail settings: the platform's mail server, or none. kcadm
+# answers each setting on a line of its own, "name" : "value" — asked for
+# smtpServer(*): asked for smtpServer alone, it answers the map without one.
+# The password reaches Keycloak as a JSON body on stdin, written by shell
+# builtins, and is never printed. Each write is kcadm's merge, so every other
+# setting of the realm keeps its value; the mail settings are replaced whole:
+# what the realm holds of them and the write does not name is deleted (-d).
+mail=""
+have=$(kc get "realms/$realm" --fields 'smtpServer(*)') ||
+	fail "cannot read the mail settings of realm $realm: $(why)"
+have_settings=$(grep -c '"[^"]*" *: *"' <<<"$have" || true)
+if [ -z "${MAIL_HOST:-}" ]; then
+	if [ "$have_settings" -gt 0 ]; then
+		kc update "realms/$realm" -s 'smtpServer={}' ||
+			fail "cannot clear the mail settings of realm $realm: $(why)"
+		mail="the realm sends no mail now"
+		echo "realm-config: $mail"
+	fi
+elif [ -n "${MAIL_USERNAME:-}" ] && [ -z "${MAIL_SECRET:-}" ]; then
+	mail="the realm's mail settings stay as they were until spec.mail names a Secret for the password of $MAIL_USERNAME"
+	echo "realm-config: $mail"
+elif [ -n "${MAIL_SECRET:-}" ] && [ -z "${MAIL_PASSWORD+set}" ]; then
+	mail="the realm's mail settings stay as they were until Secret $MAIL_SECRET holds the password"
+	echo "realm-config: $mail"
+else
+	ssl=false starttls=false auth=false secret=false
+	case ${MAIL_ENCRYPTION:-starttls} in
+	starttls) starttls=true ;;
+	tls) ssl=true ;;
+	none) ;;
+	*) fail "mail.encryption is ${MAIL_ENCRYPTION}: use starttls, tls or none" ;;
+	esac
+	[ -z "${MAIL_USERNAME:-}" ] || auth=true
+	settings=(host "$MAIL_HOST" port "${MAIL_PORT:-}" from "${MAIL_FROM:-}" fromDisplayName "${MAIL_FROM_NAME:-}"
+		ssl "$ssl" starttls "$starttls" auth "$auth")
+	if $auth; then
+		settings+=(user "$MAIL_USERNAME")
+		[ -z "${MAIL_SECRET:-}" ] || secret=true
+	fi
+	body="" in_step=true
+	for ((i = 0; i < ${#settings[@]}; i += 2)); do
+		body+="${body:+,}$(js "${settings[i]}"):$(js "${settings[i + 1]}")"
+		grep -qF "$(js "${settings[i]}") : $(js "${settings[i + 1]}")" <<<"$have" || in_step=false
+	done
+	# The user's password is one more setting Keycloak shows.
+	want_settings=$((${#settings[@]} / 2))
+	if $secret; then
+		want_settings=$((want_settings + 1))
+		body+=",\"password\":$(js "${MAIL_PASSWORD:-}")"
+	fi
+	[ "$have_settings" -eq "$want_settings" ] || in_step=false
+	# What the realm holds of the mail settings and these do not name goes.
+	drop=()
+	for name in $(sed -n 's/^ *"\([A-Za-z0-9_]*\)" *: *".*/\1/p' <<<"$have"); do
+		keep=false
+		for ((i = 0; i < ${#settings[@]}; i += 2)); do
+			if [ "$name" = "${settings[i]}" ]; then keep=true; fi
+		done
+		if [ "$name" = password ] && $secret; then keep=true; fi
+		$keep || drop+=(-d "smtpServer.$name")
+	done
+	if ! $in_step || $secret; then
+		printf '{"smtpServer":{%s}}' "$body" | kc update "realms/$realm" -f - -m ${drop[@]+"${drop[@]}"} ||
+			fail "cannot set the mail settings of realm $realm: $(why)"
+	fi
+	body=""
+	mail="the realm sends mail through $MAIL_HOST:${MAIL_PORT:-}"
+	if ! $in_step; then
+		mail+=" now"
+		echo "realm-config: $mail"
+	fi
+fi
+
 demo=""
 placeholder='${DEMO_USER_PASSWORD}'
 demo_id=$(kc get users -r "$realm" -q username=demo -q exact=true --fields id --format csv --noquotes) ||
@@ -561,6 +681,7 @@ fi
 [ ${#unaudienced[@]} -eq 0 ] || summary+="${summary:+; }no client to map the audience $audience for: ${unaudienced[*]}"
 [ -z "$verify" ] || summary+="${summary:+; }$verify"
 [ -z "$policy" ] || summary+="${summary:+; }$policy"
+[ -z "$mail" ] || summary+="${summary:+; }$mail"
 [ -z "$demo" ] || summary+="${summary:+; }$demo"
 [ -z "$console" ] || summary+="${summary:+; }$console"
 echo "realm-config: $summary"

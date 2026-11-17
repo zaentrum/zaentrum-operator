@@ -480,6 +480,91 @@ spec:
                         type: integer
                     type: object
                 type: object
+              mail:
+                description: |-
+                  Mail names the SMTP server the platform sends mail through. Unset: no
+                  mail is sent.
+                properties:
+                  alertsTo:
+                    description: AlertsTo are at most 10 addresses that get every
+                      alert mail.
+                    items:
+                      type: string
+                    maxItems: 10
+                    type: array
+                    x-kubernetes-validations:
+                    - message: alertsTo must not hold a control character
+                      rule: self.all(a, !a.matches('[[:cntrl:]]'))
+                  encryption:
+                    description: |-
+                      Encryption is how the connection to the server is encrypted: starttls,
+                      the default, after the greeting; tls from the start; none not at all.
+                    enum:
+                    - starttls
+                    - tls
+                    - none
+                    type: string
+                  from:
+                    description: From is the sender's address. Required with a host.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: from must not hold a control character
+                      rule: '!self.matches(''[[:cntrl:]]'')'
+                  fromName:
+                    description: |-
+                      FromName is the sender's name as a mail program shows it, at most 60
+                      characters. Default zaentrum.
+                    maxLength: 60
+                    type: string
+                    x-kubernetes-validations:
+                    - message: fromName must not hold a control character
+                      rule: '!self.matches(''[[:cntrl:]]'')'
+                  host:
+                    description: |-
+                      Host is the name of the SMTP server, e.g. smtp.example.org. Empty: no
+                      mail is sent.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: host must not hold a control character
+                      rule: '!self.matches(''[[:cntrl:]]'')'
+                  port:
+                    description: |-
+                      Port is the SMTP server's port, 1 to 65535. Unset: 587 with starttls,
+                      465 with tls, 25 with none.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  secretName:
+                    description: |-
+                      SecretName names a Secret in the platform's namespace with the key
+                      password, the password of user: a name a Secret can have, lowercase
+                      letters, digits, hyphens and dots, at most 253 characters. Required with
+                      a user. A Secret labelled zaentrum.io/mail that the resource has not
+                      named for 10 minutes is removed.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: secretName must not hold a control character
+                      rule: '!self.matches(''[[:cntrl:]]'')'
+                    - message: 'secretName must be a name a Secret can have: lowercase
+                        letters, digits, hyphens and dots'
+                      rule: self == '' || (size(self) <= 253 && self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'))
+                  user:
+                    description: |-
+                      User is the name the platform signs in to the server with. Empty: the
+                      platform does not sign in.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: user must not hold a control character
+                      rule: '!self.matches(''[[:cntrl:]]'')'
+                type: object
+                x-kubernetes-validations:
+                - message: from is required when host is set
+                  rule: '!has(self.host) || size(self.host) == 0 || (has(self.from)
+                    && size(self.from) > 0)'
+                - message: secretName is required when user is set
+                  rule: '!has(self.user) || size(self.user) == 0 || (has(self.secretName)
+                    && size(self.secretName) > 0)'
               network:
                 description: Network configures split-horizon / hostAliases.
                 properties:

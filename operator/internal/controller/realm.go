@@ -36,7 +36,9 @@ import (
 // and runs it itself instead, as a Job of its own, whenever what it sets
 // changes: the fingerprint of the rendered Job — its client list, its script
 // and its image — differs from that of the last run. The Job compares before
-// it writes, so a run over a realm that is already right changes nothing.
+// it writes, so a run over a realm that is already right changes nothing —
+// but for the mail server's password (spec.mail), which Keycloak never shows,
+// so a run that has one writes it again.
 //
 // One run at a time, and never beside a verification run: a realm run may move
 // where the master realm signs in, which ends the master token the

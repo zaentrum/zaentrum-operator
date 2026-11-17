@@ -255,6 +255,70 @@ type BackupSpec struct {
 	ClaimName string `json:"claimName,omitempty"`
 }
 
+// MailSpec names the SMTP server the platform sends its mail through. Mail is
+// set up when host and from are set: the operator then gives portal-api the
+// settings (PORTAL_MAIL_*) and the platform's public address
+// (PORTAL_PUBLIC_URL) and, with the bundled identity provider, has the realm
+// Job write them into the realm's mail settings; the Mail condition says where
+// it stands. Without them the realm Job clears the realm's mail settings, and
+// no mail is sent.
+// +kubebuilder:validation:XValidation:rule="!has(self.host) || size(self.host) == 0 || (has(self.from) && size(self.from) > 0)",message="from is required when host is set"
+// +kubebuilder:validation:XValidation:rule="!has(self.user) || size(self.user) == 0 || (has(self.secretName) && size(self.secretName) > 0)",message="secretName is required when user is set"
+type MailSpec struct {
+	// Host is the name of the SMTP server, e.g. smtp.example.org. Empty: no
+	// mail is sent.
+	// +kubebuilder:validation:XValidation:rule="!self.matches('[[:cntrl:]]')",message="host must not hold a control character"
+	// +optional
+	Host string `json:"host,omitempty"`
+
+	// Port is the SMTP server's port, 1 to 65535. Unset: 587 with starttls,
+	// 465 with tls, 25 with none.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// Encryption is how the connection to the server is encrypted: starttls,
+	// the default, after the greeting; tls from the start; none not at all.
+	// +kubebuilder:validation:Enum=starttls;tls;none
+	// +optional
+	Encryption string `json:"encryption,omitempty"`
+
+	// From is the sender's address. Required with a host.
+	// +kubebuilder:validation:XValidation:rule="!self.matches('[[:cntrl:]]')",message="from must not hold a control character"
+	// +optional
+	From string `json:"from,omitempty"`
+
+	// FromName is the sender's name as a mail program shows it, at most 60
+	// characters. Default zaentrum.
+	// +kubebuilder:validation:MaxLength=60
+	// +kubebuilder:validation:XValidation:rule="!self.matches('[[:cntrl:]]')",message="fromName must not hold a control character"
+	// +optional
+	FromName string `json:"fromName,omitempty"`
+
+	// User is the name the platform signs in to the server with. Empty: the
+	// platform does not sign in.
+	// +kubebuilder:validation:XValidation:rule="!self.matches('[[:cntrl:]]')",message="user must not hold a control character"
+	// +optional
+	User string `json:"user,omitempty"`
+
+	// SecretName names a Secret in the platform's namespace with the key
+	// password, the password of user: a name a Secret can have, lowercase
+	// letters, digits, hyphens and dots, at most 253 characters. Required with
+	// a user. A Secret labelled zaentrum.io/mail that the resource has not
+	// named for 10 minutes is removed.
+	// +kubebuilder:validation:XValidation:rule="!self.matches('[[:cntrl:]]')",message="secretName must not hold a control character"
+	// +kubebuilder:validation:XValidation:rule="self == '' || (size(self) <= 253 && self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'))",message="secretName must be a name a Secret can have: lowercase letters, digits, hyphens and dots"
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
+
+	// AlertsTo are at most 10 addresses that get every alert mail.
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:XValidation:rule="self.all(a, !a.matches('[[:cntrl:]]'))",message="alertsTo must not hold a control character"
+	// +optional
+	AlertsTo []string `json:"alertsTo,omitempty"`
+}
+
 // FeaturesSpec toggles optional platform capabilities.
 type FeaturesSpec struct {
 	// GPU enables hardware (NVENC) transcoding on the stream plane.
@@ -675,6 +739,11 @@ type ZaentrumSpec struct {
 	// Backup configures backups of the bundled Postgres.
 	// +optional
 	Backup BackupSpec `json:"backup,omitempty"`
+
+	// Mail names the SMTP server the platform sends mail through. Unset: no
+	// mail is sent.
+	// +optional
+	Mail MailSpec `json:"mail,omitempty"`
 
 	// Update configures Stage-2 auto-update.
 	// +optional

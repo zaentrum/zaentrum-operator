@@ -119,6 +119,26 @@ backup:
   # the annotation zaentrum.io/restore-request.
   restore: ""
 
+# The SMTP server the platform sends its mail through. Mail is set up when host
+# and from are set: portal-api is given the settings (PORTAL_MAIL_*, and the
+# platform's public address, PORTAL_PUBLIC_URL), and with the bundled identity
+# provider the realm Job (templates/realm.yaml) writes them into the realm's
+# mail settings. Without them the realm Job clears those, and no mail is sent.
+mail:
+  host: ""                 # the SMTP server's name, e.g. smtp.example.org; empty: no mail is sent
+  port: 0                  # 1..65535; 0: 587 with starttls, 465 with tls, 25 with none
+  encryption: starttls     # starttls | tls | none
+  from: ""                 # the sender's address; needed with a host
+  fromName: zaentrum       # the sender's name as a mail program shows it, at most 60 characters
+  user: ""                 # the name the platform signs in to the server with; empty: the platform does not sign in
+  secretName: ""           # a Secret with the key password, the password of user; required with a user
+  # The version of that Secret (its resourceVersion), set by the operator: on
+  # portal-api's pod and the realm Job, so that the Secret appearing or
+  # changing starts portal-api again and runs the realm Job again. Empty under
+  # plain Helm: there portal-api reads a new password when it starts again.
+  secretVersion: ""
+  alertsTo: []             # at most 10 addresses that get every alert mail
+
 # Event streaming: the bundled broker, or a shared external cluster (per-tenant
 # topic prefix + mTLS). External mode skips the bundled kafka entirely.
 eventStreaming:

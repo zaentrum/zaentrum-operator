@@ -338,6 +338,11 @@ func TestPruneListsOnlyItsOwnObjects(t *testing.T) {
 		if pl, ok := list.(*metav1.PartialObjectMetadataList); ok {
 			var o client.ListOptions
 			o.ApplyOptions(opts)
+			// The Secrets of the mail server's sign-in are the mail clean-up's
+			// (mail.go), not the prune's.
+			if pl.GroupVersionKind().Kind == "SecretList" && o.LabelSelector != nil && o.LabelSelector.String() == labelMail {
+				return c.List(ctx, list, opts...)
+			}
 			listed[strings.TrimSuffix(pl.GroupVersionKind().Kind, "List")] = o
 		}
 		return c.List(ctx, list, opts...)

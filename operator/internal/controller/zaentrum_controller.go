@@ -82,6 +82,11 @@ type ZaentrumReconciler struct {
 	// it does not serve it (prune.go).
 	unserved  map[schema.GroupKind]time.Time
 	clusterMu sync.Mutex
+
+	// mailUnnamed holds, for each mail Secret the resource does not name,
+	// since when this operator has seen it so (mail.go).
+	mailUnnamed map[types.NamespacedName]unnamedMailSecret
+	mailMu      sync.Mutex
 }
 
 // +kubebuilder:rbac:groups=zaentrum.io,resources=zaentrums,verbs=get;list;watch;create;update;patch;delete
@@ -191,7 +196,16 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("read the platform's certificate: %w", err)
 	}
+	// The Secret of the mail server's password, by its version: its appearing,
+	// or a change of it, starts portal-api again and runs the realm Job again
+	// (mail.go). One that cannot be read defers the render.
+	mailSecret, err := r.mailSecretVersion(ctx, &z)
+	if err != nil {
+		logger.Info("render deferred", "reason", err.Error())
+		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
+	}
 	vals := templates.NewValues(&z)
+	vals.MailSecretVersion = mailSecret
 	vals.OpenShift = openShift
 	vals.Version = decision.RenderTag
 	vals.PostgresVolume = db.volume
@@ -272,6 +286,10 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	restoreInFlight := r.stepRestore(ctx, &z, objs, tests)
 	r.reportBackups(ctx, &z, objs)
 	r.reportTLS(ctx, &z, tlsSecret, issuing)
+	// Where the platform's mail stands, and the mail Secrets the resource no
+	// longer names (mail.go).
+	r.reportMail(ctx, &z)
+	r.collectMailSecrets(ctx, &z)
 
 	// Refresh component readiness from the live Deployments and roll status up.
 	allReady, err := r.refreshComponents(ctx, &z, objs)

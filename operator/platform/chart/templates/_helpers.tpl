@@ -319,6 +319,33 @@ the console nor its sign-in needs a public route. Empty: the public host.
 {{- if not .Values.identity.exposeAdminConsole -}}http://localhost:8080/auth{{- end -}}
 {{- end -}}
 
+{{/* z.mailSetUp — "true" when the platform's mail is set up: a server
+     (mail.host) and a sender (mail.from) are named. Empty: no mail is sent. */}}
+{{- define "z.mailSetUp" -}}
+{{- if and .Values.mail.host .Values.mail.from -}}true{{- end -}}
+{{- end -}}
+
+{{/* z.mailSecretAnnotations — the pod annotation with the version of the
+     Secret of the mail server's password (mail.secretVersion, which the
+     operator sets from the Secret it reads), while mail is set up and a Secret
+     is named: so the Secret appearing, or a change of it, starts the pod anew,
+     which reads the password at its start. The version, never the password.
+     Empty: no annotation. */}}
+{{- define "z.mailSecretAnnotations" -}}
+{{- if and (include "z.mailSetUp" .) .Values.mail.secretName .Values.mail.secretVersion -}}
+zaentrum.io/mail-secret: {{ .Values.mail.secretVersion | quote }}
+{{- end -}}
+{{- end -}}
+
+{{/* z.mailPort — the SMTP server's port: mail.port, else the encryption's
+     own, 465 with tls, 25 with none, 587 with starttls. */}}
+{{- define "z.mailPort" -}}
+{{- $encryption := .Values.mail.encryption | default "starttls" -}}
+{{- $port := 587 -}}
+{{- if eq $encryption "tls" -}}{{- $port = 465 -}}{{- else if eq $encryption "none" -}}{{- $port = 25 -}}{{- end -}}
+{{- .Values.mail.port | default $port | int -}}
+{{- end -}}
+
 {{/* z.postgresClaim — the claim the bundled Postgres keeps its data on. */}}
 {{- define "z.postgresClaim" -}}
 {{- .Values.storage.postgres.claimName | default "postgres-data" -}}

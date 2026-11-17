@@ -48,9 +48,12 @@ const canonicalCRD = "../../config/crd/zaentrum.io_zaentrums.yaml"
 const pinnedInstall = "../../../deploy/operator-install.yaml"
 
 var sinceThePin = []string{
-	"spec.databases.chino:pattern", "spec.databases.chino:maxLength", "spec.databases.katalog:pattern", "spec.databases.katalog:maxLength",
-	"spec.databases.keycloak:pattern", "spec.databases.keycloak:maxLength", "spec.databases.portal:pattern", "spec.databases.portal:maxLength",
+	"spec.databases.chino:pattern", "spec.databases.chino:maxLength",
+	"spec.databases.katalog:pattern", "spec.databases.katalog:maxLength",
+	"spec.databases.keycloak:pattern", "spec.databases.keycloak:maxLength",
+	"spec.databases.portal:pattern", "spec.databases.portal:maxLength",
 	"spec.databases.external.host:pattern", "spec.databases.external.sslmode:enum",
+	"spec.mail",
 }
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted

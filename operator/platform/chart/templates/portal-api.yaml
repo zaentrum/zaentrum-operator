@@ -26,6 +26,12 @@ spec:
         role: backend
         component: portal
         app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+{{- with include "z.mailSecretAnnotations" . }}
+      # The Secret of the mail server's password, by its version: portal-api
+      # starts again when it appears or changes (z.mailSecretAnnotations).
+      annotations:
+        {{- . | nindent 8 }}
+{{- end }}
     spec:
       # Runs as the portal-api SA so the operator console can read/scale/restart
       # Deployments (namespace-scoped Role below).
@@ -138,6 +144,41 @@ spec:
         # the seed-default registry URL; admin edits are never clobbered).
         - name: CHINO_PUBLIC_URL
           value: https://{{ .Values.routing.hosts.chino }}/
+{{- end }}
+{{- if include "z.mailSetUp" . }}
+        # The SMTP server the platform's mail goes through (mail.*), given only
+        # when mail is set up, and the platform's public address, which the
+        # links in a mail start with. The user is mail.user; the password is
+        # the key password of the Secret mail.secretName names — optional, so
+        # that a Secret that is not there does not keep portal-api from
+        # starting; the Mail condition of the resource says it is missing — and
+        # PORTAL_MAIL_SECRET is that Secret's name, which changes with the
+        # password, so portal-api reads no Secret. Without a user, no sign-in.
+        - name: PORTAL_MAIL_HOST
+          value: {{ .Values.mail.host | quote }}
+        - name: PORTAL_MAIL_PORT
+          value: {{ include "z.mailPort" . | quote }}
+        - name: PORTAL_MAIL_ENCRYPTION
+          value: {{ .Values.mail.encryption | default "starttls" | quote }}
+        - name: PORTAL_MAIL_FROM
+          value: {{ .Values.mail.from | quote }}
+        - name: PORTAL_MAIL_FROM_NAME
+          value: {{ .Values.mail.fromName | default "zaentrum" | quote }}
+        # The further addresses of every alert mail, separated by commas.
+        - name: PORTAL_MAIL_ALERTS_TO
+          value: {{ join "," (.Values.mail.alertsTo | default list) | quote }}
+{{- with .Values.mail.user }}
+        - name: PORTAL_MAIL_USERNAME
+          value: {{ . | quote }}
+{{- end }}
+{{- with .Values.mail.secretName }}
+        - name: PORTAL_MAIL_PASSWORD
+          valueFrom: { secretKeyRef: { name: {{ . | quote }}, key: password, optional: true } }
+        - name: PORTAL_MAIL_SECRET
+          value: {{ . | quote }}
+{{- end }}
+        - name: PORTAL_PUBLIC_URL
+          value: {{ include "z.publicURL" . | quote }}
 {{- end }}
         # Kafka event tap for the admin debug console (read-only tail + topology).
 {{ include "z.kafkaEnv" . | indent 8 }}

@@ -9,10 +9,13 @@
 # manages people with to its secret and its three roles (z.peopleClient), and
 # a person's rating cap declared and mapped into the tokens chino-api takes
 # (z.ratingMapper), then the audience chino on the clients whose tokens those
-# are (z.audienceMapper), and writes where the admin console signs in
-# (z.adminConsoleURL) into the master realm, through the in-cluster admin API,
-# from the very image the platform's Keycloak runs. See files/realm-config.sh.
-# It changes nothing else, and leaves alone what is already so.
+# are (z.audienceMapper), the platform's mail server as the realm's mail
+# settings, or none without one (mail.*), and writes where the admin console
+# signs in (z.adminConsoleURL) into the master realm, through the in-cluster
+# admin API, from the very image the platform's Keycloak runs. See
+# files/realm-config.sh.
+# It changes nothing else, and leaves alone what is already so — but for the
+# mail server's password, which Keycloak never shows, so it is written again.
 #
 # A Helm hook, so a plain Helm install runs it after every install and upgrade.
 # The operator never applies it with the platform: it starts it itself, as a
@@ -41,6 +44,13 @@ spec:
         app.kubernetes.io/name: zaentrum-realm
         app.kubernetes.io/component: identity
         app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+{{- with include "z.mailSecretAnnotations" . }}
+      # The Secret of the mail server's password, by its version: part of the
+      # run's fingerprint, so the Job runs again when it appears or changes
+      # (z.mailSecretAnnotations).
+      annotations:
+        {{- . | nindent 8 }}
+{{- end }}
     spec:
       restartPolicy: Never
       # It talks to Keycloak, never to the Kubernetes API.
@@ -134,6 +144,33 @@ spec:
             # for the public host (identity.exposeAdminConsole).
             - name: MASTER_FRONTEND_URL
               value: {{ include "z.adminConsoleURL" . | quote }}
+{{- if include "z.mailSetUp" . }}
+            # The realm's mail settings: the platform's SMTP server (mail.*),
+            # which the realm sends its mail through. Not set at all: mail is
+            # not set up, and the realm's mail settings are cleared. The user
+            # is mail.user; the password is the key password of the Secret
+            # MAIL_SECRET names, when there is one.
+            - name: MAIL_HOST
+              value: {{ .Values.mail.host | quote }}
+            - name: MAIL_PORT
+              value: {{ include "z.mailPort" . | quote }}
+            - name: MAIL_ENCRYPTION
+              value: {{ .Values.mail.encryption | default "starttls" | quote }}
+            - name: MAIL_FROM
+              value: {{ .Values.mail.from | quote }}
+            - name: MAIL_FROM_NAME
+              value: {{ .Values.mail.fromName | default "zaentrum" | quote }}
+{{- with .Values.mail.user }}
+            - name: MAIL_USERNAME
+              value: {{ . | quote }}
+{{- end }}
+{{- with .Values.mail.secretName }}
+            - name: MAIL_SECRET
+              value: {{ . | quote }}
+            - name: MAIL_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ . | quote }}, key: password, optional: true } }
+{{- end }}
+{{- end }}
             - name: HOME
               value: /tmp
             # kcadm starts a JVM per call: start it small and fast.
