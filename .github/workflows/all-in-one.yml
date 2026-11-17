@@ -234,4 +234,21 @@ jobs:
             k -n "$ns" describe pod "$pod" | sed -n '/^Events:/,$p' || true
             echo "::endgroup::"
           done < "$RUNNER_TEMP/restarted.tsv"
+          # Keycloak's memory, from its pod's cgroup on the appliance: the pod's
+          # memory.events counts every kill of its containers, restarts included,
+          # and memory.peak is the most the pod and each container held.
+          uid=$(k -n zaentrum get pods -l app=keycloak -o jsonpath='{.items[0].metadata.uid}' 2>/dev/null || true)
+          if [ -n "$uid" ]; then
+            echo "::group::keycloak's memory, from its pod's cgroup"
+            docker exec zaentrum sh -c '
+              for d in $(find /sys/fs/cgroup -type d \( -name "*pod$1*" -o -name "*pod$2*" \) 2>/dev/null); do
+                for c in "$d" "$d"/*; do
+                  [ -f "$c/memory.events" ] || continue
+                  echo "$c"
+                  sed "s/^/  /" "$c/memory.events"
+                  echo "  peak $(cat "$c/memory.peak" 2>/dev/null || echo -) max $(cat "$c/memory.max" 2>/dev/null || echo -)"
+                done
+              done' sh "$uid" "${uid//-/_}" || true
+            echo "::endgroup::"
+          fi
           docker logs zaentrum --tail 40 || true
