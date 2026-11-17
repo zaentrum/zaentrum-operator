@@ -395,8 +395,9 @@ securityContext:
 
 {{/*
 z.replicas — per-service replica count from .Values.services.<name>.replicas,
-falling back to a default. (Avoids Sprig `dig`, which rejects the typed
-chartutil.Values.) Use: replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-api" "def" 1) }}
+falling back to a default where it is not set. A count of 0 is a count: the
+part is stopped. (Avoids Sprig `dig`, which rejects the typed
+chartutil.Values, and `default`, which takes 0 for unset.) Use: replicas: {{ include "z.replicas" (dict "root" $ "name" "chino-api" "def" 1) }}
 "db" true marks a service of the bundled Postgres's — one with a session in a
 database, a reader as much as a writer, or one that writes through
 katalog-manager-api: while a restore recreates the databases (z.restoring),
@@ -407,7 +408,7 @@ which no session may hold, it is 0.
 {{- $svcs := .root.Values.services -}}
 {{- if $svcs -}}
 {{- $svc := index $svcs .name -}}
-{{- if $svc -}}{{- $r = ($svc.replicas | default .def) -}}{{- end -}}
+{{- if $svc -}}{{- $n := index $svc "replicas" -}}{{- if not (kindIs "invalid" $n) -}}{{- $r = $n -}}{{- end -}}{{- end -}}
 {{- end -}}
 {{- if and .db (include "z.restoring" .root) -}}{{- $r = 0 -}}{{- end -}}
 {{- $r -}}
