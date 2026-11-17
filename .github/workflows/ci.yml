@@ -19,6 +19,32 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/check-neutrality.sh
 
+  # The operator's own tests, and the chart it embeds. The image's build
+  # compiles the operator and runs neither.
+  operator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # The newest 1.24, as the image's golang:1.24 has it. go.mod names
+          # 1.24.0, and a test of the proxy's parsing fails on 1.24.0 only.
+          go-version: '1.24'
+          cache-dependency-path: operator/go.sum
+      - uses: azure/setup-helm@v5
+      - name: go vet
+        working-directory: operator
+        run: go vet ./...
+      - name: go test
+        working-directory: operator
+        run: go test ./...
+      - name: helm lint
+        run: helm lint operator/platform/chart
+      # The appliance's manifests are committed: a render of this tree must
+      # leave them as they are.
+      - name: the appliance's manifests, as a render makes them
+        run: ./deploy/allinone/build.sh render && git diff --exit-code -- deploy/allinone/manifests
+
   # kind's real job: smoke-test that the manifests apply on a throwaway
   # vanilla cluster (NOT a runtime — see docs/architecture.md).
   manifests:
