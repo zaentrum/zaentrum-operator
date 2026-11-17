@@ -291,8 +291,9 @@ jobs:
             echo "::endgroup::"
             # What memory the JVM in the container takes its shares of: the
             # limit as the container sees it, and the JVM's own view of it
-            # (one short JVM, beside the server, once the platform is Ready);
-            # and the running server's size, without a new JVM.
+            # (one short JVM, beside the server, once the platform is Ready,
+            # with the heap options the server starts with); and the running
+            # server's size, without a new JVM.
             echo "::group::keycloak's memory as its JVM sees it"
             k -n zaentrum exec "$pod" -c keycloak -- sh -c '
               echo "memory.max as the container sees it: $(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo -)"
@@ -300,7 +301,8 @@ jobs:
               head -1 /proc/meminfo
               J=java; command -v java >/dev/null 2>&1 || J="$JAVA_HOME/bin/java"
               "$J" -XshowSettings:system -version 2>&1 | sed -n "/Operating System Metrics/,/^$/p"
-              "$J" -XX:MaxRAMPercentage=50 -XX:MinRAMPercentage=50 -XX:InitialRAMPercentage=30 -XX:+PrintFlagsFinal -version 2>/dev/null |
+              echo "JAVA_OPTS_KC_HEAP: ${JAVA_OPTS_KC_HEAP:-unset}"
+              "$J" $JAVA_OPTS_KC_HEAP -XX:+PrintFlagsFinal -version 2>/dev/null |
                 grep -E " (MaxHeapSize|InitialHeapSize|MaxRAM|UseContainerSupport) "
               echo "the server (pid 1, $(readlink /proc/1/exe 2>/dev/null)):"
               grep -E "^(VmRSS|VmHWM|VmSize|Threads):" /proc/1/status' || true
