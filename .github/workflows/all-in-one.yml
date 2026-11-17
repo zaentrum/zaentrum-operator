@@ -212,4 +212,26 @@ jobs:
           for j in $(k -n zaentrum get jobs -l zaentrum.io/verification=run -o name 2>/dev/null); do
             k -n zaentrum logs "$j" --all-containers --tail=60 || true
           done
+          # The realm job's own log: it writes the identity provider's realm.
+          for j in $(k -n zaentrum get jobs -o name 2>/dev/null | grep -- '-realm' || true); do
+            echo "::group::log of $j"
+            k -n zaentrum logs "$j" --all-containers --tail=200 || true
+            echo "::endgroup::"
+          done
+          # Every container that restarted: how its last run ended, its log from
+          # before the restart (gone from a plain logs) and its pod's events.
+          k get pods -A -o json | jq -r '.items[] | .metadata.namespace as $ns | .metadata.name as $pod
+            | ((.status.initContainerStatuses // []) + (.status.containerStatuses // []))[]
+            | select(.restartCount > 0)
+            | [$ns, $pod, .name, .restartCount, (.lastState.terminated.exitCode // "-"),
+               (.lastState.terminated.reason // "-"), (.lastState.terminated.finishedAt // "-")] | @tsv' \
+            > "$RUNNER_TEMP/restarted.tsv" || true
+          echo "Containers that restarted (namespace, pod, container, restarts, last exit code, reason, ended):"
+          cat "$RUNNER_TEMP/restarted.tsv"
+          while IFS=$'\t' read -r ns pod c _; do
+            echo "::group::log before the restart of $ns/$pod/$c"
+            k -n "$ns" logs "$pod" -c "$c" --previous --tail=200 || true
+            k -n "$ns" describe pod "$pod" | sed -n '/^Events:/,$p' || true
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/restarted.tsv"
           docker logs zaentrum --tail 40 || true
