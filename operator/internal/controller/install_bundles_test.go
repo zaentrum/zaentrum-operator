@@ -53,12 +53,14 @@ var sinceThePin = []string{
 	"spec.databases.keycloak:pattern", "spec.databases.keycloak:maxLength",
 	"spec.databases.portal:pattern", "spec.databases.portal:maxLength",
 	"spec.databases.external.host:pattern", "spec.databases.external.sslmode:enum",
-	"spec.mail",
+	"spec.mail", "spec.alerts", "status.certificate", "status.components.notReadySince", "status.components.stalled",
 }
 
 // withoutFields is a deep copy of a CRD spec with the given fields — dotted
 // paths below openAPIV3Schema, such as "spec.identity.tvClientId" — removed,
-// or, for "path:keyword", that keyword of the field's schema alone.
+// or, for "path:keyword", that keyword of the field's schema alone. A list is
+// stepped through to its items, so "status.components.notReadySince" names a
+// field of every component.
 func withoutFields(t *testing.T, spec any, fields []string) any {
 	t.Helper()
 	b, err := json.Marshal(spec)
@@ -73,6 +75,9 @@ func withoutFields(t *testing.T, spec any, fields []string) any {
 			node, _ := dig(v, "schema", "openAPIV3Schema").(map[string]any)
 			for _, p := range parts[:len(parts)-1] {
 				node, _ = dig(node, "properties", p).(map[string]any)
+				if items, ok := node["items"].(map[string]any); ok {
+					node = items
+				}
 			}
 			props, _ := node["properties"].(map[string]any)
 			require.Contains(t, props, parts[len(parts)-1], "sinceThePin names %s, which the canonical CRD does not serve", f)

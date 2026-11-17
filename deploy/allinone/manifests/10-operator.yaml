@@ -443,6 +443,55 @@ spec:
             description: ZaentrumSpec defines the desired state of a Zaentrum platform
               instance.
             properties:
+              alerts:
+                description: |-
+                  Alerts sets when the platform's alerts start, and whether they are
+                  mailed. portal-api reads the status every 60 seconds, shows each alert in
+                  the portal's bell for admins and, where mail is set up, mails it when it
+                  starts and when it ends. Unset: every field its default.
+                properties:
+                  backupAgeDays:
+                    description: |-
+                      BackupAgeDays is how many days old the newest good backup may be before
+                      its alert starts, 1 to 30; a backup that failed starts it at once.
+                      Default 2.
+                    format: int32
+                    maximum: 30
+                    minimum: 1
+                    type: integer
+                  certificateDays:
+                    description: |-
+                      CertificateDays is how many days before the platform's certificate
+                      (spec.tls) ends its alert starts, 1 to 90; a certificate that has ended
+                      starts it too. Default 14.
+                    format: int32
+                    maximum: 90
+                    minimum: 1
+                    type: integer
+                  mail:
+                    description: |-
+                      Mail says whether alerts are mailed where mail is set up (spec.mail): to
+                      every admin whose account is enabled and has an address, and to every
+                      address of spec.mail.alertsTo. Every alert shows in the bell whatever it
+                      says. Default true.
+                    type: boolean
+                  partNotReadyMinutes:
+                    description: |-
+                      PartNotReadyMinutes is how many minutes a part of the platform is not
+                      ready before its alert starts, 1 to 1440. Default 10.
+                    format: int32
+                    maximum: 1440
+                    minimum: 1
+                    type: integer
+                  volumeFullPercent:
+                    description: |-
+                      VolumeFullPercent is how full a volume is, in per cent, when its alert
+                      starts, 50 to 99. Default 90.
+                    format: int32
+                    maximum: 99
+                    minimum: 50
+                    type: integer
+                type: object
               backup:
                 description: Backup configures backups of the bundled Postgres.
                 properties:
@@ -1343,6 +1392,27 @@ spec:
                     - result
                     type: object
                 type: object
+              certificate:
+                description: |-
+                  Certificate is the platform's own certificate (spec.tls), as the
+                  operator reads it from its Secret on every pass. Absent without spec.tls,
+                  and while the Secret is not there or holds no certificate that can be
+                  read.
+                properties:
+                  names:
+                    description: |-
+                      Names are the names the certificate is for: its DNS names, or its common
+                      name where it has none.
+                    items:
+                      type: string
+                    type: array
+                  notAfter:
+                    description: NotAfter is when the certificate ends.
+                    format: date-time
+                    type: string
+                required:
+                - notAfter
+                type: object
               components:
                 description: Components reports per-Deployment readiness.
                 items:
@@ -1356,9 +1426,23 @@ spec:
                     name:
                       description: Name is the Deployment name.
                       type: string
+                    notReadySince:
+                      description: |-
+                        NotReadySince is the time the part was first seen not ready while it is
+                        meant to run. It is absent while the part is ready, and while the part is
+                        meant to run at 0: one an admin stopped, and every part the operator
+                        keeps stopped for a restore.
+                      format: date-time
+                      type: string
                     ready:
                       description: Ready is true when all replicas of the Deployment
                         are available.
+                      type: boolean
+                    stalled:
+                      description: |-
+                        Stalled is true while the part's rollout has given up, and absent
+                        otherwise. A part can be ready and stalled at once: what ran before
+                        still serves.
                       type: boolean
                   required:
                   - name

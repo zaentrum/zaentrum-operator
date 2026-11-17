@@ -319,6 +319,49 @@ type MailSpec struct {
 	AlertsTo []string `json:"alertsTo,omitempty"`
 }
 
+// AlertsSpec holds the settings of the platform's five alerts, which
+// portal-api starts and ends from the status. The resource holds no defaults:
+// a setting left out means its default, which portal-api applies, and a value
+// outside its range is refused by the cluster, in the cluster's words.
+type AlertsSpec struct {
+	// PartNotReadyMinutes is how many minutes a part of the platform is not
+	// ready before its alert starts, 1 to 1440. Default 10.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=1440
+	// +optional
+	PartNotReadyMinutes int32 `json:"partNotReadyMinutes,omitempty"`
+
+	// VolumeFullPercent is how full a volume is, in per cent, when its alert
+	// starts, 50 to 99. Default 90.
+	// +kubebuilder:validation:Minimum=50
+	// +kubebuilder:validation:Maximum=99
+	// +optional
+	VolumeFullPercent int32 `json:"volumeFullPercent,omitempty"`
+
+	// CertificateDays is how many days before the platform's certificate
+	// (spec.tls) ends its alert starts, 1 to 90; a certificate that has ended
+	// starts it too. Default 14.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=90
+	// +optional
+	CertificateDays int32 `json:"certificateDays,omitempty"`
+
+	// BackupAgeDays is how many days old the newest good backup may be before
+	// its alert starts, 1 to 30; a backup that failed starts it at once.
+	// Default 2.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=30
+	// +optional
+	BackupAgeDays int32 `json:"backupAgeDays,omitempty"`
+
+	// Mail says whether alerts are mailed where mail is set up (spec.mail): to
+	// every admin whose account is enabled and has an address, and to every
+	// address of spec.mail.alertsTo. Every alert shows in the bell whatever it
+	// says. Default true.
+	// +optional
+	Mail *bool `json:"mail,omitempty"`
+}
+
 // FeaturesSpec toggles optional platform capabilities.
 type FeaturesSpec struct {
 	// GPU enables hardware (NVENC) transcoding on the stream plane.
@@ -745,6 +788,13 @@ type ZaentrumSpec struct {
 	// +optional
 	Mail MailSpec `json:"mail,omitempty"`
 
+	// Alerts sets when the platform's alerts start, and whether they are
+	// mailed. portal-api reads the status every 60 seconds, shows each alert in
+	// the portal's bell for admins and, where mail is set up, mails it when it
+	// starts and when it ends. Unset: every field its default.
+	// +optional
+	Alerts AlertsSpec `json:"alerts,omitempty"`
+
 	// Update configures Stage-2 auto-update.
 	// +optional
 	Update UpdateSpec `json:"update,omitempty"`
@@ -1055,6 +1105,29 @@ type ComponentStatus struct {
 	Ready bool `json:"ready"`
 	// Image is the primary container image (with tag) currently applied.
 	Image string `json:"image,omitempty"`
+	// NotReadySince is the time the part was first seen not ready while it is
+	// meant to run. It is absent while the part is ready, and while the part is
+	// meant to run at 0: one an admin stopped, and every part the operator
+	// keeps stopped for a restore.
+	// +optional
+	NotReadySince *metav1.Time `json:"notReadySince,omitempty"`
+	// Stalled is true while the part's rollout has given up, and absent
+	// otherwise. A part can be ready and stalled at once: what ran before
+	// still serves.
+	// +optional
+	Stalled bool `json:"stalled,omitempty"`
+}
+
+// CertificateStatus is the platform's own certificate (spec.tls), as the
+// operator last read it from its Secret.
+type CertificateStatus struct {
+	// NotAfter is when the certificate ends.
+	NotAfter metav1.Time `json:"notAfter"`
+
+	// Names are the names the certificate is for: its DNS names, or its common
+	// name where it has none.
+	// +optional
+	Names []string `json:"names,omitempty"`
 }
 
 // ZaentrumStatus reports the observed state of a Zaentrum platform instance.
@@ -1085,6 +1158,13 @@ type ZaentrumStatus struct {
 	// Components reports per-Deployment readiness.
 	// +optional
 	Components []ComponentStatus `json:"components,omitempty"`
+
+	// Certificate is the platform's own certificate (spec.tls), as the
+	// operator reads it from its Secret on every pass. Absent without spec.tls,
+	// and while the Secret is not there or holds no certificate that can be
+	// read.
+	// +optional
+	Certificate *CertificateStatus `json:"certificate,omitempty"`
 
 	// Controller reports the operator's own controller — what it runs, how it
 	// was installed and whether something newer is out. Reported, never acted

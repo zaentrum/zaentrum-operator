@@ -523,12 +523,14 @@ func platformLabel(z *zaentrumv1alpha1.Zaentrum) string {
 }
 
 // refreshComponents reads each managed Deployment and records its readiness +
-// applied image into status.components. Returns true when every Deployment has
-// all desired replicas available.
+// applied image into status.components, and for a part that is not ready
+// though it is meant to run, since when (notReadySince). Returns true when
+// every Deployment has all desired replicas available.
 func (r *ZaentrumReconciler) refreshComponents(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, objs []*unstructured.Unstructured) (bool, error) {
 	var comps []zaentrumv1alpha1.ComponentStatus
 	allReady := true
 	r.stalled = nil
+	since := notReadySince(z, r.now())
 
 	for _, obj := range objs {
 		if obj.GetKind() != "Deployment" {
@@ -538,7 +540,7 @@ func (r *ZaentrumReconciler) refreshComponents(ctx context.Context, z *zaentrumv
 		var dep appsv1.Deployment
 		err := r.Get(ctx, types.NamespacedName{Namespace: obj.GetNamespace(), Name: name}, &dep)
 		if errors.IsNotFound(err) {
-			comps = append(comps, zaentrumv1alpha1.ComponentStatus{Name: name, Ready: false})
+			comps = append(comps, zaentrumv1alpha1.ComponentStatus{Name: name, Ready: false, NotReadySince: since(obj, false)})
 			allReady = false
 			continue
 		}
@@ -569,16 +571,61 @@ func (r *ZaentrumReconciler) refreshComponents(ctx context.Context, z *zaentrumv
 		// Kubernetes already decides when a rollout has given up: the
 		// Progressing condition flips to False with ProgressDeadlineExceeded
 		// after progressDeadlineSeconds. Surface that rather than re-deriving
-		// it, and name the component so the reason is actionable.
+		// it, and name the component so the reason is actionable: in the Ready
+		// condition's message, and as the part's own stalled. A stalled part
+		// whose previous pods still serve stays ready.
+		stalled := false
 		if stalledReason := rolloutStalled(&dep); stalledReason != "" {
 			allReady = false
+			stalled = true
 			r.stalled = append(r.stalled, fmt.Sprintf("%s (%s)", name, stalledReason))
 		}
-		comps = append(comps, zaentrumv1alpha1.ComponentStatus{Name: name, Ready: ready, Image: image})
+		comps = append(comps, zaentrumv1alpha1.ComponentStatus{Name: name, Ready: ready, Image: image,
+			NotReadySince: since(obj, ready), Stalled: stalled})
 	}
 
 	z.Status.Components = comps
 	return allReady, nil
+}
+
+// notReadySince answers, for a Deployment of this pass's render and whether it
+// is ready, since when the part has not been ready while it is meant to run.
+// status.components is written anew on every pass, so the time is carried
+// over from the status the pass read — from the API server, not a cache
+// (Reconcile) — and an operator that starts again reads it back from there. A
+// part first seen not ready on this pass has now; one that is ready has none,
+// and neither has one meant to run at 0 (meantToRunAtZero), which counts
+// afresh from the pass that sees it meant to run again.
+func notReadySince(z *zaentrumv1alpha1.Zaentrum, now metav1.Time) func(obj *unstructured.Unstructured, ready bool) *metav1.Time {
+	before := map[string]metav1.Time{}
+	for _, c := range z.Status.Components {
+		if c.NotReadySince != nil {
+			before[c.Name] = *c.NotReadySince
+		}
+	}
+	return func(obj *unstructured.Unstructured, ready bool) *metav1.Time {
+		if ready || meantToRunAtZero(z, obj) {
+			return nil
+		}
+		t, ok := before[obj.GetName()]
+		if !ok {
+			t = now
+		}
+		return &t
+	}
+}
+
+// meantToRunAtZero says whether a part is meant to run at 0: one an admin
+// stopped, which spec.replicas names with 0, and every client of the database
+// the operator keeps stopped for a restore, whose Deployment the render
+// applies with 0 replicas. The admin's word is read from the resource,
+// whatever the render applied.
+func meantToRunAtZero(z *zaentrumv1alpha1.Zaentrum, obj *unstructured.Unstructured) bool {
+	if n, ok := z.Spec.Replicas[obj.GetName()]; ok && n == 0 {
+		return true
+	}
+	n, found, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "replicas")
+	return found && asCount(n) == 0
 }
 
 func (r *ZaentrumReconciler) patchStatus(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) error {

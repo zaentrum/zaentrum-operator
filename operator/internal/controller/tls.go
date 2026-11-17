@@ -122,9 +122,10 @@ func hostnameOf(z *zaentrumv1alpha1.Zaentrum) string {
 	return "zaentrum.localhost"
 }
 
-// reportTLS writes the TLS condition. sec and issuing are what
-// platformCertificate found this pass.
+// reportTLS writes the TLS condition and status.certificate. sec and issuing
+// are what platformCertificate found this pass.
 func (r *ZaentrumReconciler) reportTLS(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, sec *corev1.Secret, issuing bool) {
+	z.Status.Certificate = certificateStatus(z, sec)
 	set := func(status metav1.ConditionStatus, reason, msg string) {
 		setCondition(z, condTypeTLS, status, reason, clip(msg, maxVerifyMessage))
 	}
@@ -231,16 +232,42 @@ func leafCertificate(bundle []byte) (*x509.Certificate, error) {
 	}
 }
 
-// certificateNames are the names a certificate is for.
+// certificateStatus is status.certificate: when the certificate in the Secret
+// of spec.tls ends, and the names it is for, whenever the Secret holds one
+// that can be read — whatever else the TLS condition says of it: for other
+// names, ended, without its key, left by a cert-manager the cluster no longer
+// serves. Nil without spec.tls, and while the Secret is not there or holds no
+// certificate.
+func certificateStatus(z *zaentrumv1alpha1.Zaentrum, sec *corev1.Secret) *zaentrumv1alpha1.CertificateStatus {
+	if z.Spec.TLS == nil || sec == nil {
+		return nil
+	}
+	cert, err := leafCertificate(sec.Data[corev1.TLSCertKey])
+	if err != nil {
+		return nil
+	}
+	return &zaentrumv1alpha1.CertificateStatus{NotAfter: metav1.NewTime(cert.NotAfter.UTC()), Names: namesOf(cert)}
+}
+
+// namesOf are the names a certificate is for: its DNS names, or its common
+// name where it has none; nil where it has neither.
+func namesOf(cert *x509.Certificate) []string {
+	if len(cert.DNSNames) > 0 {
+		return append([]string(nil), cert.DNSNames...)
+	}
+	if cert.Subject.CommonName != "" {
+		return []string{cert.Subject.CommonName}
+	}
+	return nil
+}
+
+// certificateNames are the names a certificate is for, as the TLS condition
+// says them: "no name" where it has none.
 func certificateNames(cert *x509.Certificate) []string {
-	names := append([]string{}, cert.DNSNames...)
-	if len(names) == 0 && cert.Subject.CommonName != "" {
-		names = append(names, cert.Subject.CommonName)
+	if names := namesOf(cert); len(names) > 0 {
+		return names
 	}
-	if len(names) == 0 {
-		names = []string{"no name"}
-	}
-	return names
+	return []string{"no name"}
 }
 
 func orDefaultString(s, def string) string {
