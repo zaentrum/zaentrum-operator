@@ -190,6 +190,14 @@ func (r *ZaentrumReconciler) stepRestore(ctx context.Context, z *zaentrumv1alpha
 				return true
 			}
 		}
+		// A run that measures the backups' claim holds it too; the restore
+		// waits for it, still stopping (storage.go).
+		if job := r.backupsMeasuring(ctx, z); job != "" {
+			log.FromContext(ctx).Info("restore: waiting for the backups' claim to be measured", "dump", dump, "job", job)
+			rs.Message = "restoring " + dump + ": stopping the database's clients"
+			setRestore(z, rs)
+			return true
+		}
 		claim := backupClaim(z)
 		var pvc corev1.PersistentVolumeClaim
 		if err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: claim}, &pvc); apierrors.IsNotFound(err) {
