@@ -139,6 +139,14 @@ button[type="submit"]:active { transform: translateY(1px); }
 }
 .link:hover { text-decoration: underline; }
 
+/* Without a password reset: whom to ask instead, where the link would be. */
+.note {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 footer {
   margin-top: 20px;
   text-align: center;

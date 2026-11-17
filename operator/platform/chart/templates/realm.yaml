@@ -10,10 +10,12 @@
 # a person's rating cap declared and mapped into the tokens chino-api takes
 # (z.ratingMapper), then the audience chino on the clients whose tokens those
 # are (z.audienceMapper), the platform's mail server as the realm's mail
-# settings, or none without one (mail.*), and writes where the admin console
-# signs in (z.adminConsoleURL) into the master realm, through the in-cluster
-# admin API, from the very image the platform's Keycloak runs. See
-# files/realm-config.sh.
+# settings, or none without one (mail.*), the realm's password reset on while
+# those name a server and off while they name none, with the chart's theme as
+# the email theme of a realm that has none (EMAIL_THEME), and writes where the
+# admin console signs in (z.adminConsoleURL) into the master realm, through
+# the in-cluster admin API, from the very image the platform's Keycloak runs.
+# See files/realm-config.sh.
 # It changes nothing else, and leaves alone what is already so — but for the
 # mail server's password, which Keycloak never shows, so it is written again.
 #
@@ -136,6 +138,11 @@ spec:
             # The realm's password policy, where it has none.
             - name: PASSWORD_POLICY
               value: {{ $import.passwordPolicy | quote }}
+            # The realm's email theme, where it has none: the chart's theme
+            # (keycloak-theme.yaml), whose password reset mail has the
+            # platform's words.
+            - name: EMAIL_THEME
+              value: zaentrum
             # What a demo user still signing in with the import's placeholder
             # password gets instead.
             - name: DEMO_USER_PASSWORD

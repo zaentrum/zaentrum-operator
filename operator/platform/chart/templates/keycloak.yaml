@@ -91,6 +91,8 @@ spec:
         # Lay out the custom login theme (from the keycloak-theme ConfigMap) into the
         # Keycloak themes dir structure on a shared emptyDir. The built-in themes
         # (base/keycloak/keycloak.v2) come from the themes JAR, so only 'zaentrum' lives here.
+        # Its email part holds the password reset mail's words; the realm Job
+        # makes it the realm's email theme (EMAIL_THEME).
         - name: theme-layout
           image: postgres:16-alpine
           command: ["/bin/sh", "-c"]
@@ -103,6 +105,10 @@ spec:
               cp /src/login.ftl        "$D/login.ftl"
               cp /src/zaentrum.css     "$D/resources/css/zaentrum.css"
               cp /src/favicon.svg      "$D/resources/img/favicon.svg"
+              E=/themes/zaentrum/email
+              mkdir -p "$E/messages"
+              cp /src/email-theme.properties       "$E/theme.properties"
+              cp /src/email-messages_en.properties "$E/messages/messages_en.properties"
               echo "theme laid out:"; find /themes -type f
           volumeMounts:
             - { name: themes, mountPath: /themes }

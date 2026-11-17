@@ -52,6 +52,12 @@
 # their defaults. The mail settings alone are the platform's: a write replaces
 # them whole, deleting what of them it does not name.
 #
+# Then the realm's password reset, by its mail settings as they are now: on
+# while they name a server, off while they name none, so that the sign-in page
+# never offers a link nothing could send. Before it is switched on, a realm
+# without an email theme gets EMAIL_THEME, the chart's, whose password reset
+# mail has the platform's words; an email theme someone chose stays.
+#
 # Then the demo user. A realm imported without Secret zaentrum-demo-user gave it
 # the password "${DEMO_USER_PASSWORD}" — Keycloak leaves a placeholder it cannot
 # resolve as it is — the same on every such install. If it still signs in with
@@ -98,6 +104,7 @@
 #   PROFILE_ATTRIBUTE_CHECK  the part of it that must be so: a projection of
 #                    the profile's attributes, as Keycloak answers it
 #   PASSWORD_POLICY  the password policy of a realm that has none
+#   EMAIL_THEME      the email theme of a realm that has none: the chart's
 #   MAIL_HOST        the SMTP server the realm sends its mail through; not set
 #                    at all: the platform's mail is not set up, and the realm's
 #                    mail settings are cleared
@@ -628,6 +635,38 @@ else
 	fi
 fi
 
+# The realm's password reset follows its mail settings as they are now,
+# written, cleared or left waiting for their Secret above: on while they name
+# a server, off while they name none. kcadm prints a server as
+# "host" : "smtp.example.org" — asked for smtpServer(*), as above. The reset
+# mail's words are the email theme's, which a realm without one gets first.
+# Each is written as kcadm's merge (-s), as the mail settings are, so every
+# other setting of the realm keeps the value it had. On a realm whose client
+# session timeouts and organizationsEnabled are not written yet, the merge
+# writes them at their defaults, which changes no value.
+theme="" reset=""
+have=$(kc get "realms/$realm" --fields 'smtpServer(*),resetPasswordAllowed,emailTheme') ||
+	fail "cannot read realm $realm: $(why)"
+if [ -n "${EMAIL_THEME:-}" ] && ! grep -q '"emailTheme" *: *"[^"]' <<<"$have"; then
+	kc update "realms/$realm" -s "emailTheme=$EMAIL_THEME" ||
+		fail "cannot set the email theme of realm $realm: $(why)"
+	theme="the realm's email theme is $EMAIL_THEME now"
+	echo "realm-config: $theme"
+fi
+reset_want=false reset_have=false
+grep -q '"host" *: *"[^"]' <<<"$have" && reset_want=true
+grep -q '"resetPasswordAllowed" *: *true' <<<"$have" && reset_have=true
+if [ "$reset_have" != "$reset_want" ]; then
+	kc update "realms/$realm" -s "resetPasswordAllowed=$reset_want" ||
+		fail "cannot switch the password reset of realm $realm: $(why)"
+	if $reset_want; then
+		reset="the sign-in page offers a password reset now"
+	else
+		reset="the sign-in page offers no password reset now: the realm sends no mail"
+	fi
+	echo "realm-config: $reset"
+fi
+
 demo=""
 placeholder='${DEMO_USER_PASSWORD}'
 demo_id=$(kc get users -r "$realm" -q username=demo -q exact=true --fields id --format csv --noquotes) ||
@@ -682,6 +721,8 @@ fi
 [ -z "$verify" ] || summary+="${summary:+; }$verify"
 [ -z "$policy" ] || summary+="${summary:+; }$policy"
 [ -z "$mail" ] || summary+="${summary:+; }$mail"
+[ -z "$theme" ] || summary+="${summary:+; }$theme"
+[ -z "$reset" ] || summary+="${summary:+; }$reset"
 [ -z "$demo" ] || summary+="${summary:+; }$demo"
 [ -z "$console" ] || summary+="${summary:+; }$console"
 echo "realm-config: $summary"

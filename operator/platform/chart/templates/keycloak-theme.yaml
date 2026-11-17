@@ -2,7 +2,8 @@
 # ── Custom Keycloak login theme (nalet/chino design system) ─────────────────
 # Laid out into the Keycloak themes dir by the theme-layout initContainer (see
 # templates/keycloak.yaml). Stable name 'keycloak-theme' (no kustomize hash) so
-# the Deployment's theme-src volume references a fixed ConfigMap name.
+# the Deployment's theme-src volume references a fixed ConfigMap name. The
+# email-* files are its email part: the password reset mail's words.
 apiVersion: v1
 kind: ConfigMap
 metadata:

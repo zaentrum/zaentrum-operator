@@ -1,6 +1,8 @@
 <#-- zaentrum demo login — self-contained template styled by zaentrum.css.
      Posts the standard username/password form to ${url.loginAction}; other
-     flows fall back to the parent (keycloak.v2) theme via theme.properties. -->
+     flows fall back to the parent (keycloak.v2) theme via theme.properties.
+     The realm allows a password reset only while it sends mail (the realm
+     Job); without one the page says whom to ask instead. -->
 <!DOCTYPE html>
 <html lang="${(locale.currentLanguageTag)!'en'}">
 <head>
@@ -48,6 +50,9 @@
             <a class="link" href="${url.registrationUrl}">Create account</a>
           </#if>
         </div>
+      </#if>
+      <#if !((realm.resetPasswordAllowed)!false)>
+        <p class="note">Forgot your password? Ask an admin for a new invite link.</p>
       </#if>
     </div>
     <footer>zaentrum · demo</footer>
