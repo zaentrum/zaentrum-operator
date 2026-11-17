@@ -51,6 +51,9 @@ on:
 permissions:
   contents: read
   packages: write
+  # id-token: the workflow's own identity, which signs what it builds:
+  # there is no key to keep.
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -148,9 +151,22 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
+          # The build's own record (which repository, which commit, which
+          # workflow) and the list of the packages the image holds, attached
+          # to the image.
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha,scope=operator-bundle
           cache-to: type=gha,mode=max,scope=operator-bundle
+
+      - uses: sigstore/cosign-installer@v4.1.3
+        if: github.event_name != 'pull_request'
+      - name: Sign the bundle, by its digest
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ env.BUNDLE_IMAGE }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
 
   # ── Build + push an opm catalog/index image referencing the bundle ───────
   # A CatalogSource can point at ghcr.io/zaentrum/operator-catalog to make the
@@ -262,6 +278,7 @@ jobs:
           opm generate dockerfile catalog
 
       - name: Build and push operator-catalog
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -269,4 +286,15 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ steps.tags.outputs.list }}
-          provenance: false
+          # The build's own record (which repository, which commit, which
+          # workflow) and the list of the packages the image holds, attached
+          # to the image.
+          provenance: mode=max
+          sbom: true
+
+      - uses: sigstore/cosign-installer@v4.1.3
+      - name: Sign the catalog, by its digest
+        env:
+          IMAGE: ${{ env.CATALOG_IMAGE }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"

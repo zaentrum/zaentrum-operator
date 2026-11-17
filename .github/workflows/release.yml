@@ -17,6 +17,10 @@ on:
 
 permissions:
   contents: write
+  # id-token and attestations: the workflow's own identity signs the record
+  # of the build of every file the release publishes: there is no key to keep.
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -31,6 +35,13 @@ jobs:
 
       - name: Render the release's operator install
         run: ./scripts/render-release.sh "$GITHUB_REF_NAME" dist
+
+      # The build's record of the install (which repository, which commit,
+      # which workflow), signed by this workflow. It holds no packages of its
+      # own: the images it names each carry their own list.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/operator-install.yaml
 
       # An install that names an image which does not exist installs nothing.
       - name: Wait for the release's operator image
