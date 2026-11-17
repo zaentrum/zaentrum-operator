@@ -148,8 +148,8 @@ jobs:
     env:
       APPLIANCE: ${{ github.ref_type == 'tag' && format('ghcr.io/zaentrum/appliance:{0}', github.ref_name) || format('ghcr.io/zaentrum/appliance:sha-{0}', github.sha) }}
     steps:
+      # The release's scripts below, and the memory sampler on every boot.
       - uses: actions/checkout@v4
-        if: github.ref_type == 'tag'
 
       # Every repository builds its own images from the release's tag; the
       # appliance pulls them as its pods start. Booting before they exist
@@ -169,6 +169,17 @@ jobs:
       - name: Boot the appliance
         run: docker run -d --name zaentrum --privileged -p 80:80 "$APPLIANCE"
 
+      # What the identity provider's pod is charged for, once a second, from
+      # the moment it exists until the platform is Ready: its cgroup and each
+      # of its containers', memory.current and memory.stat's fields. The
+      # runner's memory and the appliance's own limit first.
+      - name: Sample the identity provider's memory
+        run: |
+          free -m
+          echo "the appliance's memory limit (0: none): $(docker inspect zaentrum --format '{{.HostConfig.Memory}}')"
+          nohup ./scripts/allinone-memory.sh sample "$RUNNER_TEMP/keycloak-memory.txt" > "$RUNNER_TEMP/sampler.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/sampler.pid"
+
       - name: Wait for the platform to be Ready
         run: |
           k() { docker exec zaentrum kubectl "$@"; }
@@ -180,6 +191,21 @@ jobs:
           done
           echo "::error::the platform did not become Ready in 25 minutes"
           exit 1
+
+      - name: What the identity provider's pod was charged for
+        if: always()
+        run: |
+          kill "$(cat "$RUNNER_TEMP/sampler.pid" 2>/dev/null)" 2>/dev/null || true
+          ./scripts/allinone-memory.sh report "$RUNNER_TEMP/keycloak-memory.txt" || true
+          tail -5 "$RUNNER_TEMP/sampler.log" 2>/dev/null || true
+
+      - name: Keep the samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keycloak-memory
+          path: ${{ runner.temp }}/keycloak-memory.txt
+          if-no-files-found: ignore
 
       - name: Wait for the platform's verification of itself
         run: |
@@ -249,6 +275,19 @@ jobs:
                   echo "  peak $(cat "$c/memory.peak" 2>/dev/null || echo -) max $(cat "$c/memory.max" 2>/dev/null || echo -)"
                 done
               done' sh "$uid" "${uid//-/_}" || true
+            echo "::endgroup::"
+            # Where what the pod writes is kept: its volumes (an emptyDir's
+            # medium Memory is charged to the pod), and the filesystems of the
+            # container's root, its data directory and the pod's emptyDirs.
+            echo "::group::keycloak's volumes and filesystems"
+            k -n zaentrum get pod -l app=keycloak -o json |
+              jq -c '.items[0].spec.volumes[] | {name, emptyDir, configMap: .configMap.name, secret: .secret.secretName}' || true
+            pod=$(k -n zaentrum get pods -l app=keycloak -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            k -n zaentrum exec "$pod" -c keycloak -- sh -c 'cat /proc/self/mounts | grep -E " (/|/opt/keycloak[^ ]*|/tmp) "' || true
+            docker exec zaentrum sh -c '
+              df -T /var/lib/rancher/k3s/agent/containerd /var/lib/kubelet/pods/$1/volumes/kubernetes.io~empty-dir/* 2>/dev/null ||
+                df /var/lib/rancher/k3s/agent/containerd /var/lib/kubelet/pods/$1/volumes/kubernetes.io~empty-dir/* 2>/dev/null
+              grep -E " (/|/var/lib/rancher[^ ]*|/var/lib/kubelet[^ ]*) " /proc/mounts' sh "$uid" || true
             echo "::endgroup::"
           fi
           docker logs zaentrum --tail 40 || true
