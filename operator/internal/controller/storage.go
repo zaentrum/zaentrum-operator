@@ -66,7 +66,8 @@ import (
 const (
 	condTypeStorageMeasured = "StorageMeasured"
 
-	// annotationMeasureSet is the set a backups' run was asked for by name.
+	// annotationMeasureSet is the set a backups' run was asked for by name: for
+	// a restore, its request, the name and what follows its "#".
 	annotationMeasureSet = "zaentrum.io/measure-set"
 	// annotationMeasureAnswered is, on a run a request started, the request
 	// that had been answered when it started: a value asked again after
@@ -968,8 +969,11 @@ func (r *ZaentrumReconciler) measureJob(z *zaentrumv1alpha1.Zaentrum, p volumePl
 		annotations[annotationMeasureAnswered] = answered
 	}
 	if set != "" {
+		// A restore asks with its request, the set's name and what follows its
+		// "#": the run carries the request it answers, the script the name.
 		annotations[annotationMeasureSet] = set
-		if err := addEnv(job, templates.MeasureContainer, "SET", set); err != nil {
+		name, _, _ := strings.Cut(set, "#")
+		if err := addEnv(job, templates.MeasureContainer, "SET", name); err != nil {
 			return job, err
 		}
 	}

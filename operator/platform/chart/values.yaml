@@ -127,10 +127,15 @@ backup:
 # name and its uid. With them the chart renders the ConfigMap zaentrum-backup,
 # which says what made the sets on the backups' claim, and the Jobs the
 # operator measures the volumes with (templates/storage.yaml). Empty under
-# plain Helm, which renders neither: nothing there reads them.
+# plain Helm, which renders neither: nothing there reads them. The rest is
+# what the ConfigMap holds besides, for each set's backup.json.
 platform:
   name: ""
   uid: ""
+  operator: ""             # the operator's version, as status.controller.version has it
+  resource: ""             # the resource's spec as it is, in JSON
+  secrets: []              # names of the Secrets the resource refers to, and of those read by a fixed name that exist
+  addons: []               # each addon's name, chart and version
 
 # The SMTP server the platform sends its mail through. Mail is set up when host
 # and from are set: portal-api is given the settings (PORTAL_MAIL_*, and the

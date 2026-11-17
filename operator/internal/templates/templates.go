@@ -12,9 +12,11 @@ package templates
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -114,6 +116,176 @@ type Values struct {
 	// runs the realm Job again: both read the password at their start. It is
 	// the Secret's version alone, never its data.
 	MailSecretVersion string
+	// Record is what the ConfigMap zaentrum-backup says made the sets, beside
+	// the platform's name and uid and the version rendered: the operator's
+	// version, the resource's spec as it is, the names of its Secrets, and the
+	// addons (templates/backup-record.yaml). The reconciler reads them
+	// (record.go); where it gives no spec, the CR's own is written.
+	Record BackupRecord
+}
+
+// BackupRecord is what a set's backup.json says made it, beyond what the chart
+// knows itself.
+type BackupRecord struct {
+	// Operator is the operator's version, as status.controller.version has it.
+	Operator string
+	// Resource is the spec of the platform's resource as it is, in JSON.
+	Resource string
+	// Secrets are the names of the Secrets the resource refers to, and of
+	// those the platform reads by a fixed name that exist: names, never a
+	// value.
+	Secrets []string
+	// Addons are the platform's addons; AddonsUnknown says they could not be
+	// read, nor the last known: the record then holds null, never none.
+	Addons        []BackupAddon
+	AddonsUnknown bool
+}
+
+// BackupAddon is an addon as a set's backup.json names it: its name, chart and
+// version.
+type BackupAddon struct {
+	Name    string `json:"name"`
+	Chart   string `json:"chart"`
+	Version string `json:"version"`
+}
+
+// recordValues are the chart's values of the record: the operator's version,
+// the spec in JSON, the Secrets' names and the addons.
+//
+// Every URL in it, an addon's chart or one in the spec, is written without its
+// user, its password and its query (bareURL).
+func (v Values) recordValues() (operator, resource string, secrets, addons []interface{}) {
+	raw := []byte(v.Record.Resource)
+	if len(raw) == 0 {
+		raw, _ = json.Marshal(v.cr.Spec)
+	}
+	resource = "{}"
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var spec interface{}
+	if dec.Decode(&spec) == nil {
+		if bare, err := json.Marshal(bareURLs(spec)); err == nil {
+			resource = string(bare)
+		}
+	}
+	secrets = make([]interface{}, 0, len(v.Record.Secrets))
+	for _, s := range v.Record.Secrets {
+		secrets = append(secrets, s)
+	}
+	addons = make([]interface{}, 0, len(v.Record.Addons))
+	for _, a := range v.Record.Addons {
+		addons = append(addons, map[string]interface{}{"name": a.Name, "chart": bareURL(a.Chart), "version": a.Version})
+	}
+	return v.Record.Operator, resource, secrets, addons
+}
+
+// bareURLs is a JSON value with every string in it bare (bareURL).
+func bareURLs(v interface{}) interface{} {
+	switch t := v.(type) {
+	case string:
+		return bareURL(t)
+	case map[string]interface{}:
+		for k, e := range t {
+			t[k] = bareURLs(e)
+		}
+	case []interface{}:
+		for i, e := range t {
+			t[i] = bareURLs(e)
+		}
+	}
+	return v
+}
+
+// LeftOut stands in a set's record for a value that cannot be read as URLs of
+// hosts, or holds a user and a password, while something in it may be a
+// credential.
+const LeftOut = "(left out)"
+
+var (
+	// urlSeparators part a value: a server list holds several, between commas,
+	// semicolons or spaces.
+	urlSeparators = regexp.MustCompile(`[,;\s]+`)
+	urlScheme     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.\-_]*://`)
+	// urlHost is a host, a name or an address in brackets, and its port.
+	urlHost = regexp.MustCompile(`^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.\-_~%]+)?(:[0-9]*)?$`)
+	// imageDigest is what follows the at-sign of an image pinned by its
+	// digest, as repo:tag@sha256:…: no host, so no credential before it.
+	imageDigest = regexp.MustCompile(`^[a-z0-9]+([+._-][a-z0-9]+)*:[0-9a-fA-F]{32,}$`)
+)
+
+// bareURL is a value with each URL in it written without its user, its
+// password and its query, and fails closed: nothing that stands before an
+// at-sign in a URL, nor a user and a password, is written. A value with "://"
+// or an at-sign in it is read in parts (urlSeparators). Each part must be one
+// of these:
+//   - a URL of a host, read from its scheme, written with what stands before
+//     its host's at-sign and its query taken out;
+//   - a part with no "://" and no user and password (a name, a colon and
+//     something before an at-sign; an image pinned by its digest is none);
+//     where the value holds a URL, with no at-sign either. A mail address in a
+//     value without one stays.
+//
+// Where a part is none of these, as a password that holds a slash, a question
+// mark, a hash or a separator makes it, or a scheme the pattern does not read,
+// the whole value is left out (LeftOut): a password split over two parts may
+// look like a host and its port in the first. The fragment stays.
+func bareURL(s string) string {
+	urls := strings.Contains(s, "://")
+	if !urls && !strings.Contains(s, "@") {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, sep := range append(urlSeparators.FindAllStringIndex(s, -1), []int{len(s), len(s)}) {
+		part, ok := barePart(s[last:sep[0]], urls)
+		if !ok {
+			return LeftOut
+		}
+		b.WriteString(part)
+		b.WriteString(s[sep[0]:sep[1]])
+		last = sep[1]
+	}
+	return b.String()
+}
+
+// barePart is one part of a value as bareURL writes it, and whether it can be;
+// urls says that the value holds "://".
+func barePart(p string, urls bool) (string, bool) {
+	scheme := urlScheme.FindString(p)
+	if scheme == "" {
+		at := strings.LastIndex(p, "@")
+		switch {
+		case strings.Contains(p, "://"):
+			// A scheme the pattern does not read, as jdbc:postgresql://.
+			return "", false
+		case at >= 0 && strings.Contains(p[:at], ":") && !imageDigest.MatchString(p[at+1:]):
+			// A user and a password; an image pinned by its digest stays.
+			return "", false
+		case at >= 0 && urls:
+			return "", false
+		}
+		return p, true
+	}
+	rest := p[len(scheme):]
+	end := strings.IndexAny(rest, "/?#")
+	if end < 0 {
+		end = len(rest)
+	}
+	authority, tail := rest[:end], rest[end:]
+	if at := strings.LastIndex(authority, "@"); at >= 0 {
+		authority = authority[at+1:]
+	}
+	if strings.Contains(tail, "@") || !urlHost.MatchString(authority) {
+		return "", false
+	}
+	if q := strings.Index(tail, "?"); q >= 0 {
+		fragment := ""
+		if h := strings.Index(tail[q:], "#"); h >= 0 {
+			fragment = tail[q+h:]
+		}
+		tail = tail[:q] + fragment
+	}
+	return scheme + authority + tail, true
 }
 
 // NewValues builds the render context from a Zaentrum CR.
@@ -298,10 +470,23 @@ func (v Values) chartValues() map[string]interface{} {
 		// The resource the chart is rendered for: the ConfigMap that says what
 		// made the sets names it, and with it the chart renders the Jobs the
 		// operator measures the volumes with (templates/storage.yaml).
-		"platform": map[string]interface{}{
-			"name": v.cr.Name,
-			"uid":  string(v.cr.UID),
-		},
+		"platform": v.platformValues(),
+	}
+}
+
+// platformValues are the resource's name and uid and, for the ConfigMap
+// zaentrum-backup, the rest of what made the sets (Record).
+func (v Values) platformValues() map[string]interface{} {
+	operator, resource, secrets, addons := v.recordValues()
+	return map[string]interface{}{
+		"name":     v.cr.Name,
+		"uid":      string(v.cr.UID),
+		"operator": operator,
+		"resource": resource,
+		"secrets":  secrets,
+		"addons":   addons,
+		// Not known: the ConfigMap holds null.
+		"addonsUnknown": v.Record.AddonsUnknown,
 	}
 }
 

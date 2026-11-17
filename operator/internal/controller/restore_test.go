@@ -37,17 +37,43 @@ func (e *backupEnv) askRestore(value string) {
 }
 
 // restorePass takes a pass's restore steps as Reconcile does: the plan before
-// the render, the step after it. copying is a database copy in flight.
+// the render, the ask for the set's version and the step after it. copying is
+// a database copy in flight.
 func (e *backupEnv) restorePass(copying bool) (string, bool) {
 	e.t.Helper()
 	e.clock = e.clock.Add(10 * time.Second)
-	dump := e.r.planRestore(context.Background(), e.z, copying)
-	e.render(dump)
-	return dump, e.r.stepRestore(context.Background(), e.z, e.platform, e.hooks)
+	ctx := context.Background()
+	plan := e.r.planRestore(ctx, e.z, copying, e.running())
+	e.render(plan.dump)
+	e.r.askForSet(ctx, e.z, e.hooks, plan, false)
+	return plan.dump, e.r.stepRestore(ctx, e.z, e.platform, e.hooks)
+}
+
+// version is the version the platform runs, as the render has it.
+func (e *backupEnv) version() string { return templates.NewValues(e.z).Version }
+
+// running is the version that runs, as Reconcile has it: the status's, or
+// the version rendered on a first install.
+func (e *backupEnv) running() string {
+	if v := e.z.Status.CurrentVersion; v != "" {
+		return v
+	}
+	return e.version()
+}
+
+// listSet lists a set in status.backup.sets, made by version, as the backups'
+// measuring would.
+func (e *backupEnv) listSet(name, version string) {
+	if e.z.Status.Backup == nil {
+		e.z.Status.Backup = &zaentrumv1alpha1.BackupStatus{}
+	}
+	e.z.Status.Backup.Sets = append(e.z.Status.Backup.Sets, zaentrumv1alpha1.BackupSet{Name: name, Bytes: 1024, Version: version, Whole: true})
+	listedOn(e.z, backupClaim(e.z))
 }
 
 // runPods gives every Deployment of the normal render a running pod, as a
-// running platform has, and the claim backups.
+// running platform has, and the claim backups, bound, where the measuring has
+// listed aDump, made by the version that runs.
 func (e *backupEnv) runningPlatform() {
 	e.t.Helper()
 	ctx := context.Background()
@@ -60,7 +86,8 @@ func (e *backupEnv) runningPlatform() {
 			Name: o.GetName() + "-abc", Namespace: e.z.Namespace, Labels: labels}}))
 	}
 	require.NoError(e.t, e.c.Create(ctx, &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
-		Name: "backups", Namespace: e.z.Namespace}}))
+		Name: "backups", Namespace: e.z.Namespace}, Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound}}))
+	e.listSet(aDump, e.version())
 }
 
 // stopClients deletes the pods of the Deployments the render stopped, as the
@@ -251,12 +278,14 @@ func TestRestoreRefusals(t *testing.T) {
 	t.Run("no claim to restore from", func(t *testing.T) {
 		e := newBackupEnv(t, verifyCR())
 		e.askRestore(aDump)
-		_, _ = e.restorePass(false)
+		dump, _ := e.restorePass(false)
+		assert.Empty(t, dump, "refused before anything stops")
 		_, inFlight := e.restorePass(false)
 		assert.False(t, inFlight)
 		rs := e.z.Status.Backup.Restore
 		assert.Equal(t, zaentrumv1alpha1.RestoreRefused, rs.Result)
-		assert.Contains(t, rs.Message, "no claim backups")
+		assert.Equal(t, "refused: there is no claim backups to restore from; nothing was changed", rs.Message)
+		assert.Equal(t, "NoClaim", restoreCondition(e.z).Reason)
 		assert.Empty(t, restoreJobs(t, e.c, e.z.Namespace))
 	})
 	for name, c := range map[string]struct {
@@ -305,13 +334,33 @@ func TestRestoreRefusals(t *testing.T) {
 
 // A restore waits for a database copy to end before it stops anything, and
 // for a backup in flight before it restores.
+// R.C10: the check comes before the wait for the database's copy: a set it
+// refuses is refused at once while the copy runs, with nothing stopped, not
+// once the copy has ended.
+func TestRC10TheCheckComesBeforeTheCopysWait(t *testing.T) {
+	z := verifyCR()
+	z.Spec.Version = "v0.5.0"
+	e := newBackupEnv(t, z)
+	e.runningPlatform()
+	const newer = "2026-01-01T00-00-05Z"
+	e.listSet(newer, "v0.6.0")
+	e.askRestore(newer)
+	dump, _ := e.restorePass(true)
+	assert.Empty(t, dump, "nothing stops")
+	rs := e.z.Status.Backup.Restore
+	require.NotNil(t, rs, "answered while the database is copied")
+	assert.Equal(t, zaentrumv1alpha1.RestoreRefused, rs.Result)
+	assert.Equal(t, "NewerVersion", restoreCondition(e.z).Reason)
+	assert.Empty(t, restoreJobs(t, e.c, e.z.Namespace))
+}
+
 func TestARestoreWaitsForACopyAndABackup(t *testing.T) {
 	e := newBackupEnv(t, verifyCR())
 	e.runningPlatform()
 	e.askRestore(aDump)
 	dump, _ := e.restorePass(true)
 	assert.Empty(t, dump, "nothing stops while the database is copied")
-	assert.Nil(t, e.z.Status.Backup, "the request is not answered yet")
+	assert.Nil(t, e.z.Status.Backup.Restore, "the request is not answered yet")
 	assert.Equal(t, "Waiting", restoreCondition(e.z).Reason)
 
 	e.backupRun("zaentrum-backup-1", e.clock, -1, "")
@@ -360,8 +409,15 @@ func TestARestoreWaitsForACopyAndABackup(t *testing.T) {
 func TestReconcileWhileARestoreRuns(t *testing.T) {
 	z := verifyCR()
 	z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
+	// A release the platform runs, and the claim the set of that release is
+	// on, which the backups' measuring has listed it on.
+	z.Spec.Version = "v0.5.0"
+	z.Status.Backup = &zaentrumv1alpha1.BackupStatus{Sets: []zaentrumv1alpha1.BackupSet{{Name: aDump, Version: "v0.5.0", Whole: true}}}
+	listedOn(z, "backups")
+	claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "backups", Namespace: verifyNS},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound}}
 	s := selfScheme(t)
-	c := fake.NewClientBuilder().WithScheme(s).WithObjects(z).
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(z, claim).
 		WithStatusSubresource(&zaentrumv1alpha1.Zaentrum{}, &appsv1.Deployment{}, &batchv1.Job{}).
 		WithInterceptorFuncs(interceptor.Funcs{Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
 			return applyAsCreateOrUpdate(ctx, cl, obj, patch, opts...)

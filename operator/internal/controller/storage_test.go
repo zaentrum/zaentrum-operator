@@ -47,6 +47,7 @@ type storageEnv struct {
 	refuse       string          // a create of a run is refused, saying this
 	unreadClaims map[string]bool // these claims cannot be read
 	unreadPods   bool            // no pod can be listed
+	unreadRuns   bool            // no Job can be listed
 	creates      int             // the runs it was asked to create
 }
 
@@ -79,6 +80,9 @@ func newStorageEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum, objs ...client.Ob
 			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 				if _, pods := list.(*corev1.PodList); pods && e.unreadPods {
 					return errors.New("the pods could not be listed")
+				}
+				if _, jobs := list.(*batchv1.JobList); jobs && e.unreadRuns {
+					return errors.New("the Jobs could not be listed")
 				}
 				return c.List(ctx, list, opts...)
 			},
@@ -1023,6 +1027,10 @@ func TestRC7ReconcileMeasures(t *testing.T) {
 func TestRC7ReconcileStartsNoRunWhileARestoreRuns(t *testing.T) {
 	z := verifyCR()
 	z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
+	// The set listed, of the release that runs: the restore goes on (R.C10).
+	z.Spec.Version = "v0.5.0"
+	z.Status.Backup = &zaentrumv1alpha1.BackupStatus{Sets: []zaentrumv1alpha1.BackupSet{{Name: aDump, Version: "v0.5.0", Whole: true}}}
+	listedOn(z, "backups")
 	clock := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	r, c := reconcileEnv(t, z, &clock, boundClaim("media"), boundClaim("postgres-data"), boundClaim("backups"))
 	ctx := context.Background()

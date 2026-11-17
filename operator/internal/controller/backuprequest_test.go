@@ -312,9 +312,12 @@ func TestRC11ABackupAskedForWaitsForABackupThatRuns(t *testing.T) {
 // stopped, through the pass that reads the restore's end, and starts on the
 // next.
 func TestRC11ABackupAskedForWaitsForARestore(t *testing.T) {
-	z := verifyCR()
-	z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
-	e := newRequestPlatform(t, z)
+	e := newRequestPlatform(t, verifyCR())
+	e.pass()
+	e.listOnClaim(aDump)
+	e.change(func(z *zaentrumv1alpha1.Zaentrum) {
+		z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
+	})
 	e.pass()
 	rs := e.zaentrum().Status.Backup.Restore
 	require.Equal(t, zaentrumv1alpha1.RestoreRunning, rs.Result)

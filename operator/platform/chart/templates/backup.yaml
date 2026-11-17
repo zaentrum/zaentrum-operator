@@ -3,7 +3,8 @@
 #
 # A CronJob dumps every platform database, on backup.schedule, into a dump of
 # its own on the claim backups — pg_dump's custom format a database, the roles,
-# and the sha256 of each file — and keeps the newest backup.retention dumps
+# backup.json, what made the set, from the ConfigMap zaentrum-backup, and the
+# sha256 of each file — and keeps the newest backup.retention dumps
 # (files/postgres-backup.sh). Over the network, from the image the Postgres
 # runs, while the platform keeps serving. The operator reads each run's
 # summary from its pod into status.backup; a restore is
@@ -104,6 +105,10 @@ spec:
                   value: {{ .Values.backup.retention | default 7 | quote }}
                 - name: BACKUP_DIR
                   value: /backups
+                # What made the set, for its backup.json: the ConfigMap
+                # zaentrum-backup (templates/backup-record.yaml).
+                - name: RECORD_DIR
+                  value: /record
                 - name: HOME
                   value: /tmp
               securityContext:
@@ -117,10 +122,15 @@ spec:
               terminationMessagePolicy: File
               volumeMounts:
                 - { name: backups, mountPath: /backups }
+                - { name: record, mountPath: /record, readOnly: true }
                 - { name: tmp, mountPath: /tmp }
           volumes:
             - name: backups
               persistentVolumeClaim: { claimName: {{ include "z.backupClaim" . | quote }} }
+            # Optional: without it, as under plain Helm, the set is made
+            # without backup.json, and the log says so.
+            - name: record
+              configMap: { name: zaentrum-backup, optional: true }
             - name: tmp
               emptyDir: { sizeLimit: 64Mi }
 {{- end }}

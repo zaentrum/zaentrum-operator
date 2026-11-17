@@ -344,6 +344,7 @@ func TestRC12ARestartedOperatorCountsOn(t *testing.T) {
 // the restore has ended the 30 minutes start, with a backup first.
 func TestRC12DuringARestoreTheUpdateWaits(t *testing.T) {
 	e := newUpdatePlatform(t, nil)
+	e.listOnClaim(aDump)
 	e.change(func(z *zaentrumv1alpha1.Zaentrum) {
 		z.Spec.Version = "v0.5.0"
 		z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
@@ -843,6 +844,7 @@ func TestRC12ABackupCountsFor40MinutesForATargetSetAgain(t *testing.T) {
 // held back after it.
 func TestRC12ABackupFromBeforeARestoreDoesNotCount(t *testing.T) {
 	e, _, _ := withdrawnBackup(t)
+	e.listOnClaim(aDump)
 	e.change(func(z *zaentrumv1alpha1.Zaentrum) {
 		z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
 	})
@@ -868,6 +870,7 @@ func TestRC12ARestoreStartsTheCountAgain(t *testing.T) {
 	first := e.clock
 	e.pass()
 	e.clock = first.Add(10 * time.Minute)
+	e.listOnClaim(aDump)
 	e.change(func(z *zaentrumv1alpha1.Zaentrum) {
 		z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
 	})
@@ -1122,6 +1125,7 @@ func TestRC12ARestoreRefusedLeavesTheCount(t *testing.T) {
 // not the update's: the update held back after it counts from then.
 func TestRC12ACountFromBeforeARestoreIsNotTaken(t *testing.T) {
 	e := newUpdatePlatform(t, nil)
+	e.listOnClaim(aDump)
 	e.change(func(z *zaentrumv1alpha1.Zaentrum) {
 		z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
 	})

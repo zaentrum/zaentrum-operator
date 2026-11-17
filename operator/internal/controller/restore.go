@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,9 @@ import (
 // "#" and anything after it, so that the same dump can be asked for again. A
 // value status.backup.restore.request has not answered starts one restore:
 //
+//	(checked)  before anything stops, the claim must hold the set and the
+//	           version rule let it be restored, else it is refused, nothing
+//	           stopped (restorecheck.go); meanwhile the request waits
 //	Stopping   the render stops every client of the database — each
 //	           Deployment with a session in it or writing through
 //	           katalog-manager-api, z.replicas "db" — and suspends the backups;
@@ -94,36 +98,56 @@ func setRestore(z *zaentrumv1alpha1.Zaentrum, rs *zaentrumv1alpha1.RestoreStatus
 // planRestore decides, before the render, which dump this pass restores, if
 // any: the one in flight, else a new request that can start now. copying says
 // the bundled Postgres is being copied onto its claim, which a restore waits
-// for.
-func (r *ZaentrumReconciler) planRestore(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, copying bool) string {
+// for; version is the version that runs, which the set's is checked against
+// before anything stops (restorecheck.go).
+func (r *ZaentrumReconciler) planRestore(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, copying bool, version string) restorePlan {
 	if dump, ok := restoring(z); ok {
-		return dump
+		return restorePlan{dump: dump}
 	}
 	request := restoreRequest(z)
 	if request == "" {
-		return ""
+		// No request waits: a wait's condition goes with its request.
+		r.endWait(z)
+		dropWaiting(z)
+		return restorePlan{}
 	}
 	now := r.now()
-	refuse := func(msg string) string {
-		r.refuseRestore(ctx, z, request, msg)
-		return ""
+	refuse := func(reason, msg string) restorePlan {
+		r.refuseRestore(ctx, z, request, reason, msg)
+		return restorePlan{}
 	}
 	if z.Spec.Databases.Mode == "external" {
-		return refuse("the databases are external, with no bundled Postgres to restore")
+		return refuse(reasonRefused, "the databases are external, with no bundled Postgres to restore")
 	}
 	m := dumpRequest.FindStringSubmatch(request)
 	if m == nil {
-		return refuse(fmt.Sprintf("%q names no dump: a dump is named like 2026-10-04T00-00-05Z, as status.backup.dumps lists them", request))
+		return refuse(reasonRefused, fmt.Sprintf("%q names no dump: a dump is named like 2026-10-04T00-00-05Z, as status.backup.dumps lists them", request))
 	}
+	// The set's version, before anything stops.
+	switch c := r.checkSet(ctx, z, request, m[1], version); c.verdict {
+	case setRefused:
+		return refuse(c.reason, c.message)
+	case setWaits:
+		setCondition(z, condTypeRestore, metav1.ConditionUnknown, reasonWaiting, c.message)
+		if c.ask {
+			return restorePlan{ask: request}
+		}
+		return restorePlan{}
+	case setUndecided:
+		// What it could not read is said, and read again next pass.
+		setCondition(z, condTypeRestore, metav1.ConditionUnknown, reasonWaiting, c.message)
+		return restorePlan{}
+	}
+	r.endWait(z)
 	if copying {
-		setCondition(z, condTypeRestore, metav1.ConditionUnknown, "Waiting",
+		setCondition(z, condTypeRestore, metav1.ConditionUnknown, reasonWaiting,
 			"the restore of "+m[1]+" starts once the bundled Postgres has been copied onto its claim")
-		return ""
+		return restorePlan{}
 	}
 	log.FromContext(ctx).Info("restore: stopping the database's clients", "dump", m[1])
 	setRestore(z, &zaentrumv1alpha1.RestoreStatus{Request: request, Result: zaentrumv1alpha1.RestoreStopping,
 		StartedAt: &now, Message: "restoring " + m[1] + ": stopping the database's clients"})
-	return m[1]
+	return restorePlan{dump: m[1]}
 }
 
 // restoreRequest is the restore the resource asks for that has no answer yet,
@@ -138,10 +162,17 @@ func restoreRequest(z *zaentrumv1alpha1.Zaentrum) string {
 
 // refuseRestore answers the restore asked for with its refusal: nothing was
 // changed, and the request is answered, so it does not start later.
-func (r *ZaentrumReconciler) refuseRestore(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, request, msg string) {
+func (r *ZaentrumReconciler) refuseRestore(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, request, reason, msg string) {
 	now := r.now()
+	r.endWait(z)
+	// The ending is kept whole: a cut comes out of the middle.
+	msg = clip(msg, maxVerifyMessage-utf8.RuneCountInString(refusalStart+refusalEnding))
 	setRestore(z, &zaentrumv1alpha1.RestoreStatus{Request: request, Result: zaentrumv1alpha1.RestoreRefused,
-		StartedAt: &now, FinishedAt: &now, Message: "refused: " + msg + "; nothing was changed"})
+		StartedAt: &now, FinishedAt: &now, Message: refusalStart + msg + refusalEnding})
+	if reason != reasonRefused {
+		// The cause, which portal-api tells the refusals apart by.
+		setCondition(z, condTypeRestore, metav1.ConditionFalse, reason, z.Status.Backup.Restore.Message)
+	}
 	log.FromContext(ctx).Info("restore: refused", "request", request, "reason", msg)
 }
 

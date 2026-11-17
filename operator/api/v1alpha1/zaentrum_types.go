@@ -212,10 +212,18 @@ type TLSIssuerRef struct {
 // RestoreRequestAnnotation asks for the bundled Postgres to be restored from a
 // dump of its backups: its value is the dump's name, as status.backup.dumps
 // lists them (2026-10-04T00-00-05Z). A value the operator has not answered —
-// status.backup.restore.request — starts one restore: every client of the
-// database is stopped, the dump is checked and restored, and the clients start
-// again.
+// status.backup.restore.request — starts one restore: before anything stops,
+// the set's version is checked against the platform's (the version rule);
+// then every client of the database is stopped, the dump is checked and
+// restored, and the clients start again.
 const RestoreRequestAnnotation = "zaentrum.io/restore-request"
+
+// RestoreAnyVersionAnnotation, holding a set's name, lets a restore of that set
+// go on although its version cannot be compared with the platform's: a set
+// without backup.json, a release on one side and another tag on the other, or
+// two different tags. It never lets a set of a newer release be restored. The
+// operator reads it and never writes or removes it.
+const RestoreAnyVersionAnnotation = "zaentrum.io/restore-any-version"
 
 // BackupSpec configures backups of the bundled Postgres (databases.mode perApp
 // or single): a CronJob dumps every platform database into the claim backups,
@@ -1094,7 +1102,27 @@ type BackupSet struct {
 	// absent without one.
 	// +optional
 	Own *bool `json:"own,omitempty"`
+
+	// VersionRule is what the version rule says of the set now, against the
+	// version that runs: ok, newer (a newer release, which is never restored)
+	// or not-comparable (restored only with zaentrum.io/restore-any-version).
+	// +kubebuilder:validation:Enum=ok;newer;not-comparable
+	// +optional
+	VersionRule string `json:"versionRule,omitempty"`
 }
+
+// What the version rule says of a set, in status.backup.sets[].versionRule.
+const (
+	// VersionRuleOK is a set of the same release as the platform or an older
+	// one, or of the same other tag: its restore goes on.
+	VersionRuleOK = "ok"
+	// VersionRuleNewer is a set of a newer release: it is never restored.
+	VersionRuleNewer = "newer"
+	// VersionRuleNotComparable is a set without a version, or whose version
+	// cannot be compared with the platform's: it is restored only with
+	// zaentrum.io/restore-any-version.
+	VersionRuleNotComparable = "not-comparable"
+)
 
 // RestoreResult is where a restore of the bundled Postgres is.
 // +kubebuilder:validation:Enum=Stopping;Running;Succeeded;Failed;Refused
@@ -1111,9 +1139,10 @@ const (
 	// RestoreFailed means the restore failed once it had begun; message says
 	// how far it came.
 	RestoreFailed RestoreResult = "Failed"
-	// RestoreRefused means the restore changed nothing: the dump was not there,
-	// not whole, or did not match its checksums, or the request could not be
-	// carried out.
+	// RestoreRefused means the restore changed nothing: the version rule
+	// refused the set, the claim did not hold it or could not be read, the dump
+	// was not whole or did not match its checksums, or the request could not be
+	// carried out. The Restore condition's reason names the cause.
 	RestoreRefused RestoreResult = "Refused"
 )
 
