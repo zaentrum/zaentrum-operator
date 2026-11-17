@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -295,6 +296,36 @@ func TestDialGuardBlocksAPIServer(t *testing.T) {
 
 // End to end: a guarded Fetcher refuses SSRF targets, over https and OCI, with
 // no traffic (literal IPs fail in Control; the API hostname fails pre-resolve).
+// Behind a proxy the dialer connects to the proxy alone, so the address the
+// chart is fetched from has to be checked before the request is handed on: the
+// same addresses are refused, and the proxy is never asked for them.
+func TestFetchRefusesSSRFBehindAProxy(t *testing.T) {
+	var asked atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Add(1)
+		http.Error(w, "the proxy would connect anywhere", http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+	pu, err := url.Parse(proxy.URL)
+	require.NoError(t, err)
+	// allowLoopback: the stand-in proxy listens on loopback. Loopback targets are
+	// left out below for that reason; TestFetchRefusesSSRF covers them.
+	f := &Fetcher{allowLoopback: true, proxy: func(*http.Request) (*url.URL, error) { return pu, nil }}
+	for _, tc := range []struct{ ref, want string }{
+		{"https://169.254.169.254/chart.tgz", "link-local"},
+		{"https://[fd00:ec2::254]/chart.tgz", "metadata"},
+		{"https://100.100.100.200/chart.tgz", "metadata"},
+		{"https://kubernetes.default/chart.tgz", "in-cluster API"},
+		{"https://name-that-does-not-resolve.invalid/chart.tgz", "cannot be checked"},
+	} {
+		_, err := f.Fetch(context.Background(), zaentrumv1alpha1.AddonChart{Ref: tc.ref}, true)
+		if assert.Error(t, err, tc.ref) {
+			assert.Contains(t, err.Error(), tc.want, tc.ref)
+		}
+	}
+	assert.Zero(t, asked.Load(), "the proxy was asked to connect to an address the guard refuses")
+}
+
 func TestFetchRefusesSSRF(t *testing.T) {
 	f := &Fetcher{} // Transport nil -> the real SSRF-guarded transport; loopback refused
 	for _, tc := range []struct{ ref, want string }{

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -55,6 +56,9 @@ type Fetcher struct {
 	// allowLoopback lets the SSRF guard dial loopback (httptest servers). Tests
 	// only; loopback is refused in production.
 	allowLoopback bool
+	// proxy names the proxy for a request; nil reads the environment, as
+	// http.ProxyFromEnvironment does. Tests only.
+	proxy func(*http.Request) (*url.URL, error)
 
 	mu       sync.Mutex
 	archives map[string]*cachedArchive // by archive digest, and by OCI manifest digest
@@ -251,8 +255,24 @@ func (f *Fetcher) transport() http.RoundTripper {
 		return f.Transport
 	}
 	g := newDialGuard(f.allowLoopback)
+	proxy := f.proxy
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
 	return &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		// Behind a proxy, the dialer meets the proxy's address alone and the
+		// proxy connects to the chart's. So the chart's address is checked
+		// here, by the same rules, before the request is handed to the proxy.
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			p, err := proxy(req)
+			if err != nil || p == nil {
+				return p, err
+			}
+			if err := g.checkTarget(req.Context(), req.URL.Hostname()); err != nil {
+				return nil, err
+			}
+			return p, nil
+		},
 		DialContext:           g.dialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,
@@ -328,12 +348,40 @@ func (g *dialGuard) control(_, address string, _ syscall.RawConn) error {
 	if ip == nil {
 		return nil
 	}
+	return g.check(ip)
+}
+
+// check refuses an address a chart fetch must never reach.
+func (g *dialGuard) check(ip net.IP) error {
 	if err := guardResolvedIP(ip, g.allowLoopback); err != nil {
 		return err
 	}
 	for _, b := range g.blockedIPs {
 		if ip.Equal(b) {
 			return fmt.Errorf("refusing to connect to %s: in-cluster API server", ip)
+		}
+	}
+	return nil
+}
+
+// checkTarget checks the host a request is for, where a proxy and not this
+// process connects to it: by its name, and by every address the name resolves
+// to here. A name that resolves to nothing here cannot be checked, and is
+// refused.
+func (g *dialGuard) checkTarget(ctx context.Context, host string) error {
+	if g.blockedHost(host) {
+		return fmt.Errorf("refusing to connect to %q: in-cluster API server", host)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return g.check(ip)
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		return fmt.Errorf("refusing to fetch from %q through a proxy: it does not resolve here, so its address cannot be checked", host)
+	}
+	for _, a := range addrs {
+		if err := g.check(a.IP); err != nil {
+			return err
 		}
 	}
 	return nil
