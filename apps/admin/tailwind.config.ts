@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-// Tailwind theme mapped onto the nalet.cloud design-system tokens
+// Tailwind theme mapped onto the design system's tokens
 // (src/styles/tokens.css). Colours are wired to the CSS custom
 // properties so a single source of truth (the token sheet) drives both
 // raw CSS and Tailwind utilities — change a token, both follow.

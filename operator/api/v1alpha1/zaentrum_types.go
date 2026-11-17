@@ -486,7 +486,7 @@ type RoutingHosts struct {
 
 // EventStreamingSpec selects the Kafka the platform rides: the bundled
 // single-node broker, or a shared external cluster (per-tenant topic prefix +
-// mTLS) — e.g. the platform Strimzi at platform-event-streaming.
+// mTLS), such as a Strimzi cluster.
 type EventStreamingSpec struct {
 	// Mode is "bundled" (default) or "external".
 	// +kubebuilder:validation:Enum=bundled;external
@@ -495,7 +495,7 @@ type EventStreamingSpec struct {
 	Mode string `json:"mode,omitempty"`
 
 	// Bootstrap is the external bootstrap server list, e.g.
-	// platform-kafka-kafka-bootstrap.platform-event-streaming.svc:9093.
+	// my-cluster-kafka-bootstrap.kafka.svc:9093.
 	// +optional
 	Bootstrap string `json:"bootstrap,omitempty"`
 
@@ -505,7 +505,7 @@ type EventStreamingSpec struct {
 	CertSecret string `json:"certSecret,omitempty"`
 
 	// TopicPrefix is the per-tenant topic namespace on a shared cluster
-	// (e.g. "zaentrum-beta."). Default "stube.".
+	// (e.g. "media."). Default "stube.".
 	// +kubebuilder:default="stube."
 	// +optional
 	TopicPrefix string `json:"topicPrefix,omitempty"`

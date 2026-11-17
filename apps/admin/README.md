@@ -44,7 +44,7 @@ win.
 | Framework | React 18 |
 | Build | Vite 6 (`base: '/manage/'`) |
 | Language | TypeScript 5 (strict) |
-| Styling | TailwindCSS 3, theme mapped to the nalet.cloud design tokens |
+| Styling | TailwindCSS 3, theme mapped to the design system's tokens |
 | Icons | lucide-react |
 | Routing | react-router-dom 6 (`basename="/manage"`) |
 

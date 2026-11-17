@@ -4,8 +4,8 @@
 # The open-source strategy (KB zaentrum/opensource-strategy, candidate ADR-021,
 # §6) says the public boundary is "enforced, not trusted" and describes exactly
 # this gate. It had never been built. On 2026-08-06 the published operator image
-# was found to carry `postgres.nalet.cloud`, `chino.beta.nalet.cloud` and
-# `sso.nalet.cloud` — embedded in the binary via the chart templates the
+# was found to carry three internal hostnames of one installation's database,
+# beta and sign-in service — embedded in the binary via the chart templates the
 # operator compiles in. Nothing was there to notice.
 #
 # Three rules:
@@ -104,14 +104,14 @@ root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 fail=0
 
 # ── allowlist ────────────────────────────────────────────────────────────────
-# The demo overlay IS nalet's own public reference deployment — its hostnames
-# are the real, intentionally-published addresses of zaentrum.demo.nalet.cloud,
-# not a leak. Everything else must be neutral.
+# The demo overlay IS the reference demo's own published deployment — its
+# hostnames are its intentionally published addresses, not a leak. Everything
+# else must be neutral.
 #
 # Keep this list short and justified. A growing allowlist means the rule is
 # wrong, not that the exceptions are right.
 allow_hosts=(
-  'deploy/overlays/demo/'                        # nalet's own published demo deployment
+  'deploy/overlays/demo/'                        # the reference demo's own published deployment
   'operator/platform/chart/values-demo.yaml'     # ditto — the demo profile's real address
   'platform/keycloak/README.md'                  # documents that demo deployment
   'scripts/check-neutrality.sh'                  # this file lists the patterns it bans
