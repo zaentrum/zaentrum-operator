@@ -119,6 +119,15 @@ backup:
   # the annotation zaentrum.io/restore-request.
   restore: ""
 
+# The platform's own resource, as the operator renders the chart for it: its
+# name and its uid. With them the chart renders the ConfigMap zaentrum-backup,
+# which says what made the sets on the backups' claim, and the Jobs the
+# operator measures the volumes with (templates/storage.yaml). Empty under
+# plain Helm, which renders neither: nothing there reads them.
+platform:
+  name: ""
+  uid: ""
+
 # The SMTP server the platform sends its mail through. Mail is set up when host
 # and from are set: portal-api is given the settings (PORTAL_MAIL_*, and the
 # platform's public address, PORTAL_PUBLIC_URL), and with the bundled identity

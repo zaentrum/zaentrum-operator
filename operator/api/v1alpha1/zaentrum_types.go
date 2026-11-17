@@ -1040,6 +1040,12 @@ type BackupStatus struct {
 	// +optional
 	Dumps []string `json:"dumps,omitempty"`
 
+	// Sets are the sets on the backups' claim, newest first, as its measuring
+	// found them: the newest 30, fewer where 30 do not fit its report, and one
+	// a restore asked for by name, however old.
+	// +optional
+	Sets []BackupSet `json:"sets,omitempty"`
+
 	// Job is the latest backup's Job.
 	// +optional
 	Job string `json:"job,omitempty"`
@@ -1048,6 +1054,29 @@ type BackupStatus struct {
 	// asked for.
 	// +optional
 	Restore *RestoreStatus `json:"restore,omitempty"`
+}
+
+// BackupSet is one set on the backups' claim.
+type BackupSet struct {
+	// Name is the set's directory, the name to restore it by.
+	Name string `json:"name"`
+
+	// Bytes is the size of its files.
+	Bytes int64 `json:"bytes"`
+
+	// Version is the version of the platform that made it, from its
+	// backup.json; empty without one.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// Whole says that its SHA256SUMS is there; the restore checks every
+	// checksum.
+	Whole bool `json:"whole"`
+
+	// Own says whether this platform made it, by the uid in its backup.json;
+	// absent without one.
+	// +optional
+	Own *bool `json:"own,omitempty"`
 }
 
 // RestoreResult is where a restore of the bundled Postgres is.
@@ -1095,6 +1124,78 @@ type RestoreStatus struct {
 	// Message is what was restored, or why not.
 	// +optional
 	Message string `json:"message,omitempty"`
+}
+
+// StorageRequestAnnotation asks the operator to measure every volume now: a
+// value status.storage.request has not answered starts every measuring Job,
+// unless a restore runs. Set a fresh value per request.
+const StorageRequestAnnotation = "zaentrum.io/storage-request"
+
+// StorageStatus is what the measuring Jobs found.
+type StorageStatus struct {
+	// Volumes are the claims the platform uses, each with the size it asks for
+	// and, once measured, the filesystem it is on.
+	// +optional
+	Volumes []VolumeStatus `json:"volumes,omitempty"`
+
+	// Databases are the bundled Postgres's platform databases and their sizes.
+	// Absent with external databases.
+	// +optional
+	Databases []DatabaseSize `json:"databases,omitempty"`
+
+	// Request is the last zaentrum.io/storage-request value answered: every
+	// measuring Job it started has ended.
+	// +optional
+	Request string `json:"request,omitempty"`
+}
+
+// VolumeStatus is one claim the platform uses, as it was last measured.
+type VolumeStatus struct {
+	// Name is media, postgres-data, backups or kafka, whatever the claim is
+	// called.
+	// +kubebuilder:validation:Enum=media;postgres-data;backups;kafka
+	Name string `json:"name"`
+
+	// Claim is the PersistentVolumeClaim measured.
+	Claim string `json:"claim"`
+
+	// RequestBytes is the size the claim asks for, whether or not it is
+	// measured.
+	// +optional
+	RequestBytes *int64 `json:"requestBytes,omitempty"`
+
+	// SizeBytes is the size of the filesystem the claim is on, which can be
+	// larger than the claim asks for.
+	// +optional
+	SizeBytes *int64 `json:"sizeBytes,omitempty"`
+
+	// FreeBytes is what the platform can still write there; blocks kept for
+	// root count as used.
+	// +optional
+	FreeBytes *int64 `json:"freeBytes,omitempty"`
+
+	// Filesystem identifies the filesystem and the node it was measured on:
+	// volumes with the same one are on one disk. Volumes with different ones
+	// can still share free space, as subvolumes of one pool do. Absent where
+	// the filesystem reports no id, as a network share does: such a volume
+	// joins no other.
+	// +optional
+	Filesystem string `json:"filesystem,omitempty"`
+
+	// MeasuredAt is when these figures were taken. They stay, with this time,
+	// when a later measuring fails.
+	// +optional
+	MeasuredAt *metav1.Time `json:"measuredAt,omitempty"`
+}
+
+// DatabaseSize is one platform database of the bundled Postgres.
+type DatabaseSize struct {
+	// Name is the database's key in spec.databases: chino, katalog, keycloak
+	// or portal.
+	Name string `json:"name"`
+
+	// Bytes is its size, as Postgres counts it.
+	Bytes int64 `json:"bytes"`
 }
 
 // ComponentStatus reports the readiness of one managed Deployment.
@@ -1182,6 +1283,12 @@ type ZaentrumStatus struct {
 	// Absent with external databases.
 	// +optional
 	Backup *BackupStatus `json:"backup,omitempty"`
+
+	// Storage is what the measuring Jobs found: one Job for each claim the
+	// platform uses, every hour, on zaentrum.io/storage-request and, for the
+	// backups' claim, after each backup.
+	// +optional
+	Storage *StorageStatus `json:"storage,omitempty"`
 }
 
 // +kubebuilder:object:root=true

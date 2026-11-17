@@ -1,0 +1,139 @@
+{{/*
+z.measureJob — the Job that measures one claim: a hook, which the operator
+starts as Jobs of its own. Call with (dict "root" $ "volume" <name> "claim"
+<claim>), and "postgres" true for the library's (the bundled Postgres's
+databases, and the volume of its data), "sets" true for the backups' (the sets
+on the claim), "node" a node to run on (the event broker's, kafkaNode).
+*/}}
+{{- define "z.measureJob" -}}
+{{- $root := .root -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zaentrum-measure-{{ .volume }}
+  labels:
+    app.kubernetes.io/name: zaentrum-measure
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: {{ $root.Values.global.partOf }}
+    zaentrum.io/measure: {{ .volume }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  # One attempt: the next hour measures again.
+  backoffLimit: 0
+  # A run whose pod cannot start in ten minutes, as on a claim another node
+  # holds or one that only one pod may mount, has failed, and says why.
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zaentrum-measure
+        app.kubernetes.io/component: storage
+        app.kubernetes.io/part-of: {{ $root.Values.global.partOf }}
+        zaentrum.io/measure: {{ .volume }}
+    spec:
+      restartPolicy: Never
+      # It talks to the Postgres at most, never to the Kubernetes API.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "z.imagePullSecrets" $root | nindent 6 }}
+      {{- include "z.podSecurity" $root | nindent 6 }}
+      {{- with .node }}
+      # Where the claim's node-local volume is (storage.kafkaNode).
+      nodeSelector:
+        kubernetes.io/hostname: {{ . | quote }}
+      {{- end }}
+      containers:
+        - name: measure
+          image: postgres:16-alpine
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+{{ $root.Files.Get "files/measure-volume.sh" | indent 14 }}
+          env:
+            - name: MEASURE_DIR
+              value: /measure
+            - name: HOME
+              value: /tmp
+{{- if .postgres }}
+            - name: PGHOST
+              value: postgres
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: user } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: zaentrum-db, key: password } }
+            # Each database by its key, whole: psql gets each name as a value.
+            - name: DB_CHINO
+              value: {{ $root.Values.databases.chino | quote }}
+            - name: DB_KATALOG
+              value: {{ $root.Values.databases.katalog | quote }}
+            - name: DB_KEYCLOAK
+              value: {{ $root.Values.databases.keycloak | quote }}
+            - name: DB_PORTAL
+              value: {{ $root.Values.databases.portal | quote }}
+{{- if ne (include "z.postgresVolume" $root) "emptyDir" }}
+            # The Postgres keeps its data on a claim: the volume of that is
+            # measured too, by the server itself.
+            - name: POSTGRES_VOLUME
+              value: "true"
+{{- end }}
+{{- end }}
+{{- if .sets }}
+            - name: SETS
+              value: "true"
+            - name: PLATFORM
+              valueFrom: { configMapKeyRef: { name: zaentrum-backup, key: platform, optional: true } }
+{{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 500m, memory: 128Mi }
+          terminationMessagePolicy: File
+          volumeMounts:
+            - { name: claim, mountPath: /measure, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        # Read-only at the claim itself, so that the kubelet changes nothing
+        # on the volume to mount it: no ownership, however many files.
+        - name: claim
+          persistentVolumeClaim: { claimName: {{ .claim }}, readOnly: true }
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+{{- end -}}
+
+{{- if .Values.platform.uid }}
+{{- $postgres := ne .Values.databases.mode "external" }}
+# ── The volumes, measured ───────────────────────────────────────────────────
+#
+# One Job for each claim the platform uses: the library's (media), the
+# backups' with the bundled Postgres, and the event broker's where it has one
+# (storage.kafkaPvc). Each mounts its claim read-only and leaves, as its
+# termination message, the filesystem's size, what an ordinary writer can
+# still use of it, and the filesystem's id (files/measure-volume.sh). The
+# library's also asks the bundled Postgres for the size of each platform
+# database and, where the Postgres keeps its data on a claim, for the size,
+# the free space and the id of the filesystem that is on: the server reads
+# those itself, for its superuser. The backups' also lists the sets on the
+# claim.
+#
+# They are hooks: the operator never applies them with the platform. It
+# starts each as a Job of its own (internal/controller/storage.go): every
+# hour, on zaentrum.io/storage-request, and the backups' after each backup and
+# for a restore; never two runs of one at once, and none while a restore
+# runs. It renders them with the platform's uid (platform.uid); plain Helm
+# renders none, having nothing that reads what they report.
+{{ include "z.measureJob" (dict "root" . "volume" "media" "claim" (include "z.mediaClaimName" .) "postgres" $postgres) }}
+{{- if $postgres }}
+---
+{{ include "z.measureJob" (dict "root" . "volume" "backups" "claim" (include "z.backupClaim" .) "sets" true) }}
+{{- end }}
+{{- if and .Values.features.kafka (ne .Values.eventStreaming.mode "external") .Values.storage.kafkaPvc }}
+---
+{{ include "z.measureJob" (dict "root" . "volume" "kafka" "claim" .Values.storage.kafkaPvc "node" .Values.storage.kafkaNode) }}
+{{- end }}
+{{- end }}
