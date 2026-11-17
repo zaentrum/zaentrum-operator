@@ -15,6 +15,14 @@
 #                 is a file of the set, and a dot in it stays in the file's
 #                 name; the restore takes the names from DATABASES, never back
 #                 from the files' names
+#   backup.json   what made the set: platform, its first field (the resource's
+#                 name and uid, the version that runs, the operator's), v (1),
+#                 createdAt (when the run began), the databases with their
+#                 tables and bytes, the resource's spec, the names of its
+#                 Secrets and the addons. All but the time and the databases
+#                 come from the ConfigMap zaentrum-backup, mounted at
+#                 RECORD_DIR; without it the set has no backup.json, and the log
+#                 says so
 #   SHA256SUMS    the sha256 of each of those files
 # It is written as .partial-<name> and renamed once whole, so a dump without
 # the dot is complete. Then the newest RETENTION dumps stay, older ones go, and
@@ -30,11 +38,14 @@
 #   DATABASES                    the platform's databases, a name a line
 #   BACKUP_DIR                   where the claim is mounted
 #   RETENTION                    how many dumps to keep
+#   RECORD_DIR                   the ConfigMap zaentrum-backup: platform,
+#                                resource, secrets, addons
 set -Eeuo pipefail
 
 termlog=${TERMINATION_LOG:-/dev/termination-log}
 wait_seconds=${PG_WAIT_SECONDS:-300}
 dir=${BACKUP_DIR:-/backups}
+record=${RECORD_DIR:-/record}
 partial=""
 
 fail() {
@@ -104,6 +115,29 @@ for db in "${databases[@]}"; do
 	files+=("$db.dump")
 	say "dumped $db: $tables tables, $size bytes"
 done
+
+# What made the set: the record of the ConfigMap, platform first, with when the
+# run began and the databases. Each part is JSON as the operator wrote it.
+recorded() {
+	local key
+	for key in platform resource secrets addons; do
+		[ -s "$record/$key" ] || return 1
+	done
+	case $(cat "$record/platform") in '{'*'}') ;; *) return 1 ;; esac
+	case $(cat "$record/resource") in '{'*'}') ;; *) return 1 ;; esac
+	case $(cat "$record/secrets") in '['*']') ;; *) return 1 ;; esac
+	case $(cat "$record/addons") in '['*']') ;; *) return 1 ;; esac
+}
+if recorded; then
+	created="${name:0:13}:${name:14:2}:${name:17:2}Z"
+	printf '{"platform":%s,"v":1,"createdAt":"%s","databases":{%s},"resource":%s,"secrets":%s,"addons":%s}\n' \
+		"$(cat "$record/platform")" "$created" "$dbs_json" "$(cat "$record/resource")" \
+		"$(cat "$record/secrets")" "$(cat "$record/addons")" >"$partial/backup.json" ||
+		fail "cannot write backup.json"
+	files+=(backup.json)
+else
+	say "the ConfigMap zaentrum-backup holds no record of the platform: the set is made without backup.json"
+fi
 
 (cd "$partial" && sha256sum -- "${files[@]}" >SHA256SUMS) || fail "cannot write the checksums"
 sync -f "$partial" 2>/dev/null || sync

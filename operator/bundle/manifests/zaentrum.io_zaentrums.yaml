@@ -1033,6 +1033,16 @@ spec:
                             Version is the version of the platform that made it, from its
                             backup.json; empty without one.
                           type: string
+                        versionRule:
+                          description: |-
+                            VersionRule is what the version rule says of the set now, against the
+                            version that runs: ok, newer (a newer release, which is never restored)
+                            or not-comparable (restored only with zaentrum.io/restore-any-version).
+                          enum:
+                          - ok
+                          - newer
+                          - not-comparable
+                          type: string
                         whole:
                           description: |-
                             Whole says that its SHA256SUMS is there; the restore checks every

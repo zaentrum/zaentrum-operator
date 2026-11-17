@@ -88,6 +88,11 @@ type ZaentrumReconciler struct {
 	mailUnnamed map[types.NamespacedName]unnamedMailSecret
 	mailMu      sync.Mutex
 
+	// restoreWaits holds, for each platform, the restore whose set's version
+	// the check waits for, and since when (restorecheck.go).
+	restoreWaits map[types.UID]restoreWait
+	restoreMu    sync.Mutex
+
 	// measured holds, for each platform, what the measuring keeps between
 	// passes of the runs that left no Job to read (storage.go).
 	measured  map[types.UID]*measureMemory
@@ -188,8 +193,11 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	// A restore of the bundled Postgres stops every client of the database for
 	// as long as it runs; whether one is in flight, or starts, is decided
-	// before the render for the same reason (restore.go).
-	restoreDump := r.planRestore(ctx, &z, db.copying)
+	// before the render for the same reason (restore.go). Before anything
+	// stops, the set's version is checked against the version that runs
+	// (restorecheck.go).
+	restore := r.planRestore(ctx, &z, db.copying, decision.RenderTag)
+	restoreDump := restore.dump
 	if restoreDump != "" {
 		db.start = false
 	}
@@ -216,6 +224,11 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	vals.PostgresVolume = db.volume
 	vals.PostgresMigrate = db.migrate
 	vals.RestoreDump = restoreDump
+	// The operator's own reading, taken before the render: the ConfigMap
+	// zaentrum-backup names its version beside what else made the sets
+	// (record.go).
+	controller := r.controllerReport(ctx, &z, channelTarget)
+	vals.Record = r.backupRecord(ctx, &z, controller.Version)
 	certificateValues(&vals, &z, tlsSecret, issuing)
 	rendered, err := templates.Render(vals)
 	if err != nil {
@@ -286,13 +299,18 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// The restore in flight takes its step now that its clients were applied
-	// stopped, and the backups are read.
+	// A restore that waits for its set's version has the backups' claim read
+	// for it (restorecheck.go); the restore in flight takes its step now that
+	// its clients were applied stopped, and the backups are read.
+	r.askForSet(ctx, &z, tests, restore)
 	restoreInFlight := r.stepRestore(ctx, &z, objs, tests)
 	r.reportBackups(ctx, &z, objs)
 	// The volumes, measured by the chart's Jobs that mount them, the backups'
 	// after a backup: none starts while a restore runs (storage.go).
 	measuring := r.measureStorage(ctx, &z, objs, tests, restoreInFlight || restoreDump != "")
+	// What the version rule says of each set listed, against the version that
+	// runs (versionrule.go).
+	markVersionRules(&z, vals.Version)
 	r.reportTLS(ctx, &z, tlsSecret, issuing)
 	// Where the platform's mail stands, and the mail Secrets the resource no
 	// longer names (mail.go).
@@ -316,7 +334,8 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// else — not the phase, not the conditions, not a component. The platform
 	// version above is what this operator rolls out; status.controller is the
 	// operator, which it reports and never upgrades. See internal/controller/self.go.
-	z.Status.Controller = r.controllerReport(ctx, &z, channelTarget)
+	// The reading was taken before the render.
+	z.Status.Controller = controller
 
 	switch {
 	case restoreInFlight:

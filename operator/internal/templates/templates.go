@@ -12,6 +12,7 @@ package templates
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -108,6 +109,115 @@ type Values struct {
 	// runs the realm Job again: both read the password at their start. It is
 	// the Secret's version alone, never its data.
 	MailSecretVersion string
+	// Record is what the ConfigMap zaentrum-backup says made the sets, beside
+	// the platform's name and uid and the version rendered: the operator's
+	// version, the resource's spec as it is, the names of its Secrets, and the
+	// addons (templates/backup-record.yaml). The reconciler reads them
+	// (record.go); where it gives no spec, the CR's own is written.
+	Record BackupRecord
+}
+
+// BackupRecord is what a set's backup.json says made it, beyond what the chart
+// knows itself.
+type BackupRecord struct {
+	// Operator is the operator's version, as status.controller.version has it.
+	Operator string
+	// Resource is the spec of the platform's resource as it is, in JSON.
+	Resource string
+	// Secrets are the names of the Secrets the resource refers to, and of
+	// those the platform reads by a fixed name that exist: names, never a
+	// value.
+	Secrets []string
+	// Addons are the platform's addons.
+	Addons []BackupAddon
+}
+
+// BackupAddon is an addon as a set's backup.json names it: its name, chart and
+// version.
+type BackupAddon struct {
+	Name    string `json:"name"`
+	Chart   string `json:"chart"`
+	Version string `json:"version"`
+}
+
+// recordValues are the chart's values of the record: the operator's version,
+// the spec in JSON, the Secrets' names and the addons.
+//
+// Every URL in it, an addon's chart or one in the spec, is written without its
+// user, its password and its query (bareURL).
+func (v Values) recordValues() (operator, resource string, secrets, addons []interface{}) {
+	raw := []byte(v.Record.Resource)
+	if len(raw) == 0 {
+		raw, _ = json.Marshal(v.cr.Spec)
+	}
+	resource = "{}"
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var spec interface{}
+	if dec.Decode(&spec) == nil {
+		if bare, err := json.Marshal(bareURLs(spec)); err == nil {
+			resource = string(bare)
+		}
+	}
+	secrets = make([]interface{}, 0, len(v.Record.Secrets))
+	for _, s := range v.Record.Secrets {
+		secrets = append(secrets, s)
+	}
+	addons = make([]interface{}, 0, len(v.Record.Addons))
+	for _, a := range v.Record.Addons {
+		addons = append(addons, map[string]interface{}{"name": a.Name, "chart": bareURL(a.Chart), "version": a.Version})
+	}
+	return v.Record.Operator, resource, secrets, addons
+}
+
+// bareURLs is a JSON value with every string in it bare (bareURL).
+func bareURLs(v interface{}) interface{} {
+	switch t := v.(type) {
+	case string:
+		return bareURL(t)
+	case map[string]interface{}:
+		for k, e := range t {
+			t[k] = bareURLs(e)
+		}
+	case []interface{}:
+		for i, e := range t {
+			t[i] = bareURLs(e)
+		}
+	}
+	return v
+}
+
+// bareURL is a value with each URL in it written without its user, its
+// password and its query: every part between commas that has a scheme, as a
+// server list holds several. The rest stays as it is, the fragment included.
+func bareURL(s string) string {
+	if !strings.Contains(s, "://") {
+		return s
+	}
+	parts := strings.Split(s, ",")
+	for i, p := range parts {
+		at := strings.Index(p, "://")
+		if at < 0 {
+			continue
+		}
+		head, rest := p[:at+3], p[at+3:]
+		authority := rest
+		if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+			authority = rest[:end]
+		}
+		if user := strings.LastIndex(authority, "@"); user >= 0 {
+			rest = rest[user+1:]
+		}
+		if q := strings.Index(rest, "?"); q >= 0 {
+			fragment := ""
+			if h := strings.Index(rest[q:], "#"); h >= 0 {
+				fragment = rest[q+h:]
+			}
+			rest = rest[:q] + fragment
+		}
+		parts[i] = head + rest
+	}
+	return strings.Join(parts, ",")
 }
 
 // NewValues builds the render context from a Zaentrum CR.
@@ -291,10 +401,21 @@ func (v Values) chartValues() map[string]interface{} {
 		// The resource the chart is rendered for: the ConfigMap that says what
 		// made the sets names it, and with it the chart renders the Jobs the
 		// operator measures the volumes with (templates/storage.yaml).
-		"platform": map[string]interface{}{
-			"name": v.cr.Name,
-			"uid":  string(v.cr.UID),
-		},
+		"platform": v.platformValues(),
+	}
+}
+
+// platformValues are the resource's name and uid and, for the ConfigMap
+// zaentrum-backup, the rest of what made the sets (Record).
+func (v Values) platformValues() map[string]interface{} {
+	operator, resource, secrets, addons := v.recordValues()
+	return map[string]interface{}{
+		"name":     v.cr.Name,
+		"uid":      string(v.cr.UID),
+		"operator": operator,
+		"resource": resource,
+		"secrets":  secrets,
+		"addons":   addons,
 	}
 }
 
