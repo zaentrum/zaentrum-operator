@@ -540,11 +540,61 @@ func psqlCalls(calls []pgCall, text string) []pgCall {
 func runBackup(t *testing.T, databases, held []string) (scriptRun, string) {
 	t.Helper()
 	claim := t.TempDir()
-	run := runScript(t, "bash", chartFile(t, "files/postgres-backup.sh"), []string{
+	return runBackupOn(t, claim, databases, held), claim
+}
+
+// runBackupOn runs the backup script over the claim, the Postgres holding the
+// databases held.
+func runBackupOn(t *testing.T, claim string, databases, held []string) scriptRun {
+	t.Helper()
+	return runScript(t, "bash", chartFile(t, "files/postgres-backup.sh"), []string{
 		"PGHOST=postgres", "PGUSER=zaentrum", "PGPASSWORD=secret", "DATABASES=" + strings.Join(databases, "\n"),
 		"RETENTION=7", "BACKUP_DIR=" + claim, "PG_WAIT_SECONDS=5",
 	}, map[string][]string{"postgres": append([]string{"postgres", "zaentrum"}, held...)})
-	return run, claim
+}
+
+// A run that was stopped, or died, before its rename leaves its .partial-
+// directory on the claim. The next run removes it before it writes anything,
+// and is not failed by it: a run that ends well writes its set beside no
+// leftover, and one that fails leaves none behind either, its own nor the one
+// before it.
+func TestTheBackupRemovesWhatARunStoppedBeforeItLeft(t *testing.T) {
+	leftover := func(t *testing.T, claim string) string {
+		t.Helper()
+		left := filepath.Join(claim, ".partial-2026-10-03T00-00-05Z")
+		require.NoError(t, os.Mkdir(left, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(left, "globals.sql"), []byte("CREATE ROLE app;\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(left, "chino.dump"), []byte("PGDMP a dump cut off"), 0o400))
+		return left
+	}
+	gone := func(t *testing.T, claim string) {
+		t.Helper()
+		partials, err := filepath.Glob(filepath.Join(claim, ".partial-*"))
+		require.NoError(t, err)
+		assert.Empty(t, partials, "no .partial- directory is left")
+	}
+	names := platformDatabases("katalog")
+	t.Run("a run that ends well", func(t *testing.T) {
+		claim := t.TempDir()
+		leftover(t, claim)
+		run := runBackupOn(t, claim, names, names)
+		require.Equal(t, 0, run.exit, run.output())
+		gone(t, claim)
+		var summary struct {
+			Dump string   `json:"dump"`
+			Kept []string `json:"kept"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(run.termlog), &summary), run.termlog)
+		assert.Equal(t, []string{summary.Dump}, summary.Kept, "the set it wrote, and nothing of the run before")
+	})
+	t.Run("a run that fails", func(t *testing.T) {
+		claim := t.TempDir()
+		leftover(t, claim)
+		run := runBackupOn(t, claim, names, []string{"chino", "katalog", "keycloak"})
+		require.Equal(t, 1, run.exit, run.output())
+		assert.Equal(t, "the Postgres has no database portal", run.termlog)
+		gone(t, claim)
+	})
 }
 
 // The backup asks for each database by its name as a value psql quotes,

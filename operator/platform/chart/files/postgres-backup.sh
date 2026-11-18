@@ -17,8 +17,11 @@
 #                 from the files' names
 #   SHA256SUMS    the sha256 of each of those files
 # It is written as .partial-<name> and renamed once whole, so a dump without
-# the dot is complete. Then the newest RETENTION dumps stay, older ones go, and
-# so does what a run that died left behind.
+# the dot is complete. What a run that was stopped or died left behind goes
+# before a run writes anything; one run at a time writes the claim (the
+# CronJob's concurrencyPolicy, and the operator's hold on the schedule), so
+# none is another's that still runs. Then the newest RETENTION dumps stay, and
+# older ones go.
 #
 # Secrets travel in the environment only (PGPASSWORD, from Secret
 # zaentrum-db). On success the termination message is a summary in JSON — the
@@ -75,6 +78,9 @@ until pg_isready -q; do
 done
 q() { psql -X -v ON_ERROR_STOP=1 -At "$@"; }
 
+# What a run before left: one that was stopped, or died, before its rename.
+find "$dir" -mindepth 1 -maxdepth 1 -name '.partial-*' -exec rm -rf {} + 2>/dev/null || true
+
 name=$(date -u +%Y-%m-%dT%H-%M-%SZ)
 [ ! -e "$dir/$name" ] || fail "a dump named $name is there already"
 partial=$dir/.partial-$name
@@ -123,7 +129,6 @@ for ((i = RETENTION; i < ${#kept[@]}; i++)); do
 	say "removed ${kept[$i]}, older than the newest $RETENTION"
 done
 [ ${#kept[@]} -le "$RETENTION" ] || kept=("${kept[@]:0:$RETENTION}")
-find "$dir" -mindepth 1 -maxdepth 1 -name '.partial-*' -exec rm -rf {} + 2>/dev/null || true
 
 free=$(df -Pk "$dir" | awk 'NR == 2 { print $4 }')
 kept_json=""
