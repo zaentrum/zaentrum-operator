@@ -116,6 +116,11 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 	var latest *batchv1.Job
 	var latestFailed bool
 	running := runningBackup(all)
+	if w := r.stillWrites(ctx, all); running == "" && w != nil {
+		// A Job that failed while its pod still runs: until that pod has
+		// ended, it runs.
+		running = w.Name
+	}
 	for i := range jobs {
 		job := &jobs[i]
 		done, failed := jobFinished(job)
@@ -201,7 +206,7 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 			msg = fmt.Sprintf("%s: %d databases, %s; %d dumps kept, %s free", rep.Dump, len(rep.Databases),
 				bytesOf(rep.Bytes), len(rep.Kept), bytesOf(rep.Free))
 		}
-		if to := updatedAfter(latest, version); to != "" && !stoppedAtTheBound(latest) {
+		if to := updatedAfter(latest, version); to != "" && endedBeforeTheBound(latest) {
 			msg += "; made before the update to " + to
 		}
 	}
@@ -439,11 +444,14 @@ func updatedAfter(job *batchv1.Job, version string) string {
 	return to
 }
 
-// stoppedAtTheBound says whether the backup was stopped only as the update was
-// applied, after the 35 minutes: the update did not wait for its pod, so a set
-// it wrote is not one made before the update.
-func stoppedAtTheBound(job *batchv1.Job) bool {
-	t, stopped := stoppedAt(job)
+// endedBeforeTheBound says whether the backup ended before its update's 35
+// minutes were over: an update waits for its backup until then at the latest,
+// so one that ended later did so with the update applied, and a set it wrote
+// is not one made before the update. One the operator stopped is never said
+// to be, whatever the stamps say: the Job controller's clock is not the
+// operator's.
+func endedBeforeTheBound(job *batchv1.Job) bool {
 	since, err := sinceOf(job)
-	return stopped && err == nil && !t.Before(since.Add(updateHoldBound))
+	_, stopped := job.Annotations[annotationBackupBeforeUpdateStopped]
+	return err == nil && !stopped && finishedAt(job).Before(since.Add(updateHoldBound))
 }

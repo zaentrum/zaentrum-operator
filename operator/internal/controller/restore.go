@@ -180,17 +180,19 @@ func (r *ZaentrumReconciler) stepRestore(ctx context.Context, z *zaentrumv1alpha
 			return true
 		}
 		// Those being deleted among them: one that has not ended may still
-		// write.
+		// write, and so may the pod of one that failed (stillWrites).
 		jobs, err := r.allBackupJobs(ctx, z)
 		if err != nil {
 			return true
 		}
-		for i := range jobs {
-			if done, _ := jobFinished(&jobs[i]); !done {
-				rs.Message = "restoring " + dump + ": waiting for the backup " + jobs[i].Name + " to end"
-				setRestore(z, rs)
-				return true
-			}
+		running := runningJob(jobs)
+		if running == nil {
+			running = r.stillWrites(ctx, jobs)
+		}
+		if running != nil {
+			rs.Message = "restoring " + dump + ": waiting for the backup " + running.Name + " to end"
+			setRestore(z, rs)
+			return true
 		}
 		claim := backupClaim(z)
 		var pvc corev1.PersistentVolumeClaim

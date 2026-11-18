@@ -255,14 +255,14 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			rendered, err = templates.Render(vals)
 		}
 	}
-	if cron := renderedObject(rendered, "CronJob", templates.BackupCronJobName); err == nil && cron != nil && update.heldBack() != nil {
+	if cron := renderedObject(rendered, "CronJob", templates.BackupCronJobName); err == nil && cron != nil && update.record() != nil {
 		// The CronJob keeps the count of the update held back, and that it
 		// was applied, until the version that runs moves (updatebackup.go).
 		annotations := cron.GetAnnotations()
 		if annotations == nil {
 			annotations = map[string]string{}
 		}
-		for k, v := range update.heldBack() {
+		for k, v := range update.record() {
 			annotations[k] = v
 		}
 		cron.SetAnnotations(annotations)
@@ -346,7 +346,7 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// update is at its backup, that backup answers it, or it starts after the
 	// update.
 	backupWaits := false
-	if update.from == "" {
+	if !update.waits() {
 		backupWaits = r.startBackupRequest(ctx, &z, objs, backupAsk, restoreDump)
 	} else if backupAsk.request != "" && (update.job == nil || update.job.Annotations[zaentrumv1alpha1.BackupRequestAnnotation] != backupAsk.request) {
 		logger.Info("backups: the backup asked for waits", "request", loggedRequest(backupAsk.request),

@@ -1375,3 +1375,544 @@ func TestRC12ARunNeverMarkedIsMarkedAndStoppedAsTheUpdateIsApplied(t *testing.T)
 	assert.Equal(t, stamp(first), run.Annotations[annotationBackupBeforeUpdateSince])
 	e.stoppedAsApplied(t, out, run.Name)
 }
+
+// failsWithItsPodRunning fails a backup Job as the Job controller does at its
+// deadline, while its pod still runs, and gives that pod.
+func (e *platformEnv) failsWithItsPodRunning(name string) *corev1.Pod {
+	e.t.Helper()
+	ctx := context.Background()
+	job := e.job(name)
+	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(e.clock), Reason: "DeadlineExceeded"}}
+	require.NoError(e.t, e.c.Status().Update(ctx, &job))
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name + "-x", Namespace: e.key.Namespace,
+		Labels: map[string]string{batchv1.JobNameLabel: name}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	require.NoError(e.t, e.c.Create(ctx, pod))
+	return pod
+}
+
+// podEnds ends the pod.
+func (e *platformEnv) podEnds(pod *corev1.Pod) {
+	e.t.Helper()
+	pod.Status = corev1.PodStatus{Phase: corev1.PodFailed, ContainerStatuses: []corev1.ContainerStatus{{Name: templates.BackupContainer,
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 143, FinishedAt: metav1.NewTime(e.clock)}}}}}
+	require.NoError(e.t, e.c.Status().Update(context.Background(), pod))
+}
+
+// R.C12: a stop refused as the update is applied is owed on the cluster, and
+// a backup that then ends before it is made is not marked as made before the
+// update.
+func TestRC12ABackupThatEndsBeforeItsOwedStopIsNotMadeBefore(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	refusing := true
+	e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+		if j, ok := obj.(*batchv1.Job); ok && refusing && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+			return errors.New("admission webhook refused it")
+		}
+		return nil
+	})
+	job, first := e.heldBackUpdate()
+	e.passAt(first.Add(45 * time.Minute))
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	held := e.cron().Annotations
+	assert.Equal(t, job, held[annotationBackupBeforeUpdateStopOwed], "the stop owed is kept on the cluster, with the Job")
+	assert.Equal(t, "v0.5.0", held[annotationBackupBeforeUpdateTo])
+	e.endBackup(job, 0, okSummary)
+	refusing = false
+	e.pass()
+	assert.Empty(t, e.job(job).Annotations[annotationBackupBeforeUpdateTo], "it ended before its stop: not made before the update")
+	assert.Equal(t, goodSet, e.backupCondition().Message)
+	assert.Empty(t, e.cron().Annotations[annotationBackupBeforeUpdate], "nothing is owed any more: the record goes")
+}
+
+// R.C12: where the backups' Jobs cannot be listed at the 35 minutes, a stop is
+// owed, and the first pass that can list stops the backup of that count that
+// still runs.
+func TestRC12ABackupNotListedAtThe35MinutesIsStoppedOnceItCanBe(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	job, first := e.heldBackUpdate()
+	listing := false
+	e.refuse(func(verb string, obj any, opts *client.ListOptions) error {
+		if _, ok := obj.(*batchv1.JobList); ok && !listing && verb == "list" && opts.LabelSelector != nil &&
+			opts.LabelSelector.Matches(labels.Set{labelDatabase: databaseBackup}) {
+			return errors.New("the server is currently unable to handle the request")
+		}
+		return nil
+	})
+	out := e.passAt(first.Add(35 * time.Minute))
+	require.True(t, logged(out, "update: the backups' Jobs could not be listed in 35 minutes; applying v0.5.0 without a backup"), out)
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	assert.Equal(t, stopOwedUnknown, e.cron().Annotations[annotationBackupBeforeUpdateStopOwed], "the Jobs could not be listed")
+	listing = true
+	out, _ = e.pass()
+	e.stoppedAsApplied(t, out, job)
+	assert.Empty(t, e.cron().Annotations[annotationBackupBeforeUpdate], "done: the record goes")
+}
+
+// R.C12: a stop owed stays owed through a pass that applies the update again
+// without listing the backups' Jobs.
+func TestRC12AStopOwedStaysOwedWhereTheJobsCannotBeListed(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	stopping, listing, applying := false, true, false
+	e.refuse(func(verb string, obj any, opts *client.ListOptions) error {
+		if j, ok := obj.(*batchv1.Job); ok && !stopping && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+			return errors.New("admission webhook refused it")
+		}
+		if _, ok := obj.(*batchv1.JobList); ok && !listing && verb == "list" && opts.LabelSelector != nil &&
+			opts.LabelSelector.Matches(labels.Set{labelDatabase: databaseBackup}) {
+			return errors.New("the server is currently unable to handle the request")
+		}
+		return refusedApplyOf(verb, obj, "v0.5.0", !applying)
+	})
+	job, first := e.heldBackUpdate()
+	e.clock = first.Add(45*time.Minute - 10*time.Second)
+	_, err := e.tryPass()
+	require.Error(t, err, "the apply of v0.5.0 fails")
+	listing = false
+	_, err = e.tryPass()
+	require.Error(t, err)
+	listing, applying, stopping = true, true, true
+	e.endBackup(job, 0, okSummary)
+	e.pass()
+	assert.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	assert.Empty(t, e.job(job).Annotations[annotationBackupBeforeUpdateTo], "still owed its stop as it ended: not made before")
+	assert.Equal(t, goodSet, e.backupCondition().Message)
+}
+
+// refusedApplyOf refuses, where refusing, the apply of chino-api at the
+// version.
+func refusedApplyOf(verb string, obj any, version string, refusing bool) error {
+	if u, ok := obj.(*unstructured.Unstructured); ok && refusing && verb == "patch" && u.GetKind() == "Deployment" && u.GetName() == "chino-api" {
+		containers, _, _ := unstructured.NestedSlice(u.Object, "spec", "template", "spec", "containers")
+		if strings.HasSuffix(containers[0].(map[string]any)["image"].(string), ":"+version) {
+			return errors.New("admission webhook refused it")
+		}
+	}
+	return nil
+}
+
+// R.C12: a stop refused as the update is applied is made by an operator that
+// starts again: what is owed is kept on the CronJob, beside the count.
+func TestRC12AStopOwedIsMadeByAnOperatorThatStartsAgain(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	refusing := true
+	e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+		if j, ok := obj.(*batchv1.Job); ok && refusing && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+			return errors.New("admission webhook refused it")
+		}
+		return nil
+	})
+	job, first := e.heldBackUpdate()
+	e.passAt(first.Add(45 * time.Minute))
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	e.restart()
+	refusing = false
+	out, _ := e.pass()
+	e.stoppedAsApplied(t, out, job)
+}
+
+// R.C12: a mark refused after the version moved is tried again on every pass
+// until it is made.
+func TestRC12AMarkRefusedIsTriedAgainOnEveryPass(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	refused := 0
+	e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+		if j, ok := obj.(*batchv1.Job); ok && verb == "patch" && refused < 3 && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+			refused++
+			return errors.New("admission webhook refused it")
+		}
+		return nil
+	})
+	job, _ := e.heldBackUpdate()
+	e.endBackup(job, 0, okSummary)
+	e.pass()
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	e.pass()
+	e.pass()
+	require.Equal(t, 3, refused)
+	require.Empty(t, e.job(job).Annotations[annotationBackupBeforeUpdateTo])
+	e.pass()
+	assert.Equal(t, "v0.5.0", e.job(job).Annotations[annotationBackupBeforeUpdateTo], "made on the fourth try")
+	assert.Equal(t, goodSet+"; made before the update to v0.5.0", e.backupCondition().Message)
+}
+
+// R.C12: a backup is said to be made before the update only where it ended
+// before the 35 minutes were over.
+func TestRC12MadeBeforeTheUpdateEndsAtThe35Minutes(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		ended   time.Duration
+		claimed bool
+	}{
+		{"ended at 34:59", 34*time.Minute + 59*time.Second, true},
+		{"ended at 35:00", 35 * time.Minute, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newUpdatePlatform(t, nil)
+			job, first := e.heldBackUpdate()
+			e.clock = first.Add(c.ended)
+			e.endBackup(job, 0, okSummary)
+			e.passAt(first.Add(35*time.Minute + 10*time.Second))
+			require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+			want := goodSet
+			if c.claimed {
+				want += "; made before the update to v0.5.0"
+			}
+			assert.Equal(t, want, e.backupCondition().Message)
+		})
+	}
+}
+
+// R.C12: in auto mode a failed channel lookup goes on with the version that
+// waits only where an update is held back or applied, and never where the
+// version is pinned.
+func TestRC12AFailedLookupGoesOnOnlyWithAnUpdatePending(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	t.Cleanup(down.Close)
+	t.Run("none pending", func(t *testing.T) {
+		z := verifyCR()
+		z.Spec.Update.Mode = zaentrumv1alpha1.UpdateAuto
+		z.Status.CurrentVersion = "v0.3.0"
+		z.Status.AvailableUpdate = "v0.4.0"
+		e := newRequestPlatform(t, z)
+		e.r.ReleasesURL = down.URL
+		e.pass()
+		e.pass()
+		assert.Equal(t, "v0.3.0", e.zaentrum().Status.CurrentVersion)
+		assert.Empty(t, e.cron().Annotations[annotationBackupBeforeUpdate], "no update is held back from what the status said")
+		assert.Empty(t, e.beforeUpdate())
+	})
+	t.Run("pinned", func(t *testing.T) {
+		z := verifyCR()
+		z.Spec.Update.Mode = zaentrumv1alpha1.UpdateAuto
+		z.Status.CurrentVersion = "v0.3.0"
+		e := newRequestPlatform(t, z)
+		e.pass()
+		e.pass()
+		require.Len(t, e.beforeUpdate(), 1)
+		e.change(func(z *zaentrumv1alpha1.Zaentrum) { z.Spec.Version = "v0.3.0" })
+		e.pass()
+		got := e.zaentrum()
+		assert.Equal(t, "v0.3.0", got.Status.CurrentVersion)
+		assert.Empty(t, got.Status.AvailableUpdate, "pinned to the version that runs: the update is taken back")
+		assert.Empty(t, e.cron().Annotations[annotationBackupBeforeUpdate])
+	})
+}
+
+// R.C12: no backup starts, and the schedule does not move, while a pod of a
+// backup Job that has failed still runs: a request waits for it, and so does
+// the backup before an update.
+func TestRC12NoBackupStartsWhileAFailedBackupsPodRuns(t *testing.T) {
+	t.Run("the schedule", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		e.scheduledRun("zaentrum-backup-29324160")
+		pod := e.failsWithItsPodRunning("zaentrum-backup-29324160")
+		e.pass()
+		assert.True(t, e.suspended(), "its pod may still write")
+		assert.Equal(t, "zaentrum-backup-29324160", e.backup().Running, "it runs while its pod does")
+		e.podEnds(pod)
+		e.pass()
+		assert.False(t, e.suspended())
+		assert.Empty(t, e.backup().Running)
+	})
+	t.Run("a pass that refuses the resource", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		e.scheduledRun("zaentrum-backup-29324160")
+		pod := e.failsWithItsPodRunning("zaentrum-backup-29324160")
+		e.pass()
+		require.Equal(t, "zaentrum-backup-29324160", e.backup().Running)
+		e.change(func(z *zaentrumv1alpha1.Zaentrum) { z.Spec.Databases.Chino = "chi no" })
+		e.pass()
+		assert.Equal(t, "zaentrum-backup-29324160", e.backup().Running, "its pod still runs")
+		e.podEnds(pod)
+		e.pass()
+		assert.Empty(t, e.backup().Running, "its pod has ended")
+	})
+	t.Run("a request", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		e.scheduledRun("zaentrum-backup-29324160")
+		pod := e.failsWithItsPodRunning("zaentrum-backup-29324160")
+		e.askBackup("one")
+		e.pass()
+		out, _ := e.pass()
+		assert.True(t, logged(out, "backups: the backup asked for waits", "request", "one", "for", "zaentrum-backup-29324160"), out)
+		assert.Empty(t, e.carrying("one"))
+		e.podEnds(pod)
+		e.pass()
+		assert.Len(t, e.carrying("one"), 1, "it starts once the pod has ended")
+	})
+	t.Run("the backup before an update", func(t *testing.T) {
+		e := newUpdatePlatform(t, nil)
+		e.scheduledRun("zaentrum-backup-29324160")
+		pod := e.failsWithItsPodRunning("zaentrum-backup-29324160")
+		e.updateTo("v0.5.0")
+		e.pass()
+		out, _ := e.pass()
+		assert.True(t, logged(out, "update: a backup that has ended still has a pod that runs; the update to v0.5.0 waits for it",
+			"job", "zaentrum-backup-29324160"), out)
+		assert.Empty(t, e.beforeUpdate())
+		e.podEnds(pod)
+		e.pass()
+		assert.Len(t, e.beforeUpdate(), 1, "it starts once the pod has ended")
+	})
+}
+
+// refusedApplyOfKind refuses, where refusing, the apply of the objects of a
+// kind: one the platform applies after the backups' CronJob, so that the
+// CronJob's record is written on the pass whose apply fails.
+func refusedApplyOfKind(verb string, obj any, kind string, refusing bool) error {
+	if u, ok := obj.(*unstructured.Unstructured); ok && refusing && verb == "patch" && u.GetKind() == kind {
+		return errors.New("admission webhook refused it")
+	}
+	return nil
+}
+
+// R.C12: a run never marked whose stop is refused as the update is applied is
+// owed its stop by name, and the first pass whose patch is taken stops it.
+func TestRC12ARunNeverMarkedIsOwedItsStopByName(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	e.scheduledRun("zaentrum-backup-29324160")
+	refusing := true
+	e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+		if j, ok := obj.(*batchv1.Job); ok && refusing && verb == "patch" && j.Name == "zaentrum-backup-29324160" {
+			return errors.New("admission webhook refused it")
+		}
+		return nil
+	})
+	e.updateTo("v0.5.0")
+	e.pass()
+	first := e.clock
+	e.passAt(first.Add(36 * time.Minute))
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	held := e.cron().Annotations
+	assert.Equal(t, "v0.5.0", held[annotationBackupBeforeUpdateTo])
+	assert.Equal(t, "zaentrum-backup-29324160", held[annotationBackupBeforeUpdateStopOwed], "owed by name: it carries no mark")
+	refusing = false
+	out, _ := e.pass()
+	run := e.job("zaentrum-backup-29324160")
+	assert.Equal(t, int64(1), *run.Spec.ActiveDeadlineSeconds, "stopped")
+	assert.Equal(t, "v0.4.0", run.Annotations[annotationBackupBeforeUpdate], "and marked")
+	assert.True(t, logged(out, "update: the backup before v0.5.0 still runs after 35 minutes; stopped it", "job", run.Name), out)
+	assert.Empty(t, e.cron().Annotations[annotationBackupBeforeUpdate], "done: the record goes")
+}
+
+// R.C12: a backup the operator stopped is never said to be made before the
+// update, whatever the Job controller's stamp says.
+func TestRC12AStoppedBackupIsNeverMadeBefore(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	job, first := e.heldBackUpdate()
+	e.passAt(first.Add(35 * time.Minute))
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	require.Equal(t, int64(1), *e.job(job).Spec.ActiveDeadlineSeconds)
+	// The Job controller's clock behind the operator's: Complete at 34:50.
+	e.clock = first.Add(34*time.Minute + 50*time.Second)
+	e.endBackup(job, 0, okSummary)
+	e.passAt(first.Add(36 * time.Minute))
+	assert.Equal(t, goodSet, e.backupCondition().Message)
+}
+
+// R.C12: a running Job that carries the count's mark but is owed no stop is
+// left as it is, and one being deleted is not the one settled.
+func TestRC12OnlyTheBackupOwedIsSettled(t *testing.T) {
+	t.Run("a mark by hand on a run owed no stop", func(t *testing.T) {
+		e := newUpdatePlatform(t, nil)
+		job, _ := e.heldBackUpdate()
+		e.endBackup(job, 0, okSummary)
+		e.pass()
+		require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+		e.scheduledRun("zaentrum-backup-29324160")
+		run := e.job("zaentrum-backup-29324160")
+		run.Annotations = e.job(job).Annotations
+		delete(run.Annotations, annotationBackupBeforeUpdateTo)
+		require.NoError(t, e.c.Update(context.Background(), &run))
+		e.pass()
+		e.pass()
+		run = e.job(run.Name)
+		assert.Equal(t, int64(10800), *run.Spec.ActiveDeadlineSeconds, "owed no stop: not stopped")
+		assert.Empty(t, run.Annotations[annotationBackupBeforeUpdateTo], "nor marked: it is left as it is")
+	})
+	t.Run("a match being deleted", func(t *testing.T) {
+		ctx := context.Background()
+		e := newUpdatePlatform(t, nil)
+		refusing := true
+		e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+			if j, ok := obj.(*batchv1.Job); ok && refusing && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+				return errors.New("admission webhook refused it")
+			}
+			return nil
+		})
+		job, _ := e.heldBackUpdate()
+		e.endBackup(job, 0, okSummary)
+		e.pass()
+		require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+		require.Empty(t, e.job(job).Annotations[annotationBackupBeforeUpdateTo])
+		e.scheduledRun("zaentrum-backup-29324160")
+		copied := e.job("zaentrum-backup-29324160")
+		copied.Annotations = e.job(job).Annotations
+		copied.Finalizers = []string{"example.org/hold"}
+		require.NoError(t, e.c.Update(ctx, &copied))
+		require.NoError(t, e.c.Delete(ctx, &copied))
+		refusing = false
+		e.pass()
+		assert.Equal(t, "v0.5.0", e.job(job).Annotations[annotationBackupBeforeUpdateTo], "the count's that is not being deleted")
+	})
+}
+
+// R.C12: at the 35 minutes the update is applied, also while a failed
+// backup's pod still runs.
+func TestRC12TheUpdateIsAppliedAt35WhileAFailedBackupsPodRuns(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	e.scheduledRun("zaentrum-backup-29324160")
+	e.failsWithItsPodRunning("zaentrum-backup-29324160")
+	e.updateTo("v0.5.0")
+	e.pass()
+	first := e.clock
+	e.passAt(first.Add(35*time.Minute - 10*time.Second))
+	require.Equal(t, "v0.4.0", e.zaentrum().Status.CurrentVersion)
+	out := e.passAt(first.Add(35 * time.Minute))
+	assert.True(t, logged(out, "update: no backup before v0.5.0 could be started in 30 minutes; applying it without one"), out)
+	assert.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+}
+
+// R.C12: what the CronJob carries makes an operator that starts again apply
+// an update applied before again, silently, and owe the stop it owed, while
+// the version that runs has not moved.
+func TestRC12TheCronJobsRecordCountsWhileTheVersionHasNotMoved(t *testing.T) {
+	t.Run("applied again", func(t *testing.T) {
+		e := newUpdatePlatform(t, nil)
+		refusing := false
+		e.refuse(func(verb string, obj any, opts *client.ListOptions) error {
+			if err := refusedBackupJobs(verb, obj, opts); err != nil {
+				return err
+			}
+			return refusedApplyOfKind(verb, obj, "Ingress", refusing)
+		})
+		e.updateTo("v0.5.0")
+		e.pass()
+		first := e.clock
+		refusing = true
+		e.clock = first.Add(30*time.Minute - 10*time.Second)
+		out, err := e.tryPass()
+		require.Error(t, err)
+		require.True(t, logged(out, "update: no backup before v0.5.0 could be started in 30 minutes; applying it without one"), out)
+		require.Equal(t, "v0.5.0", e.cron().Annotations[annotationBackupBeforeUpdateTo], "the record is on the CronJob")
+		e.restart()
+		out, err = e.tryPass()
+		require.Error(t, err)
+		assert.NotContains(t, out, "could be started in 30 minutes", "applied again, silently")
+	})
+	t.Run("the stop owed", func(t *testing.T) {
+		e := newUpdatePlatform(t, nil)
+		refusing, stopping := false, false
+		e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+			if j, ok := obj.(*batchv1.Job); ok && !stopping && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+				return errors.New("admission webhook refused it")
+			}
+			return refusedApplyOfKind(verb, obj, "Ingress", refusing)
+		})
+		job, first := e.heldBackUpdate()
+		refusing = true
+		e.clock = first.Add(36*time.Minute - 10*time.Second)
+		_, err := e.tryPass()
+		require.Error(t, err)
+		require.Equal(t, job, e.cron().Annotations[annotationBackupBeforeUpdateStopOwed])
+		e.restart()
+		stopping = true
+		e.endBackup(job, 0, okSummary)
+		_, err = e.tryPass()
+		require.Error(t, err, "the apply still fails")
+		assert.Empty(t, e.job(job).Annotations[annotationBackupBeforeUpdateTo], "ended before its owed stop: not marked")
+	})
+}
+
+// R.C12: pods that cannot be listed count as running: the update waits for a
+// stopped backup until its pods can be seen to have ended.
+func TestRC12PodsThatCannotBeListedCountAsRunning(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	listing := true
+	e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+		if _, ok := obj.(*corev1.PodList); ok && !listing && verb == "list" {
+			return errors.New("the server is currently unable to handle the request")
+		}
+		return nil
+	})
+	job, first := e.heldBackUpdate()
+	e.passAt(first.Add(30 * time.Minute))
+	e.endBackup(job, 1, "")
+	listing = false
+	e.pass()
+	assert.Equal(t, "v0.4.0", e.zaentrum().Status.CurrentVersion, "its pods cannot be listed: they may still write")
+	listing = true
+	out, _ := e.pass()
+	assert.True(t, logged(out, "update: the stopped backup before v0.5.0 has ended; applying it", "job", job), out)
+}
+
+// R.C12: a backup owed a stop that is being deleted once the version has moved
+// is not settled: its pods end with it.
+func TestRC12AnOwedBackupBeingDeletedIsNotSettled(t *testing.T) {
+	ctx := context.Background()
+	e := newUpdatePlatform(t, nil)
+	refusing := true
+	e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+		if j, ok := obj.(*batchv1.Job); ok && refusing && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+			return errors.New("admission webhook refused it")
+		}
+		return nil
+	})
+	name, first := e.heldBackUpdate()
+	e.passAt(first.Add(36 * time.Minute))
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	job := e.job(name)
+	job.Finalizers = []string{"example.org/hold"}
+	require.NoError(t, e.c.Update(ctx, &job))
+	require.NoError(t, e.c.Delete(ctx, &job))
+	refusing = false
+	e.pass()
+	job = e.job(name)
+	assert.Equal(t, int64(10800), *job.Spec.ActiveDeadlineSeconds, "not patched")
+	assert.Empty(t, job.Annotations[annotationBackupBeforeUpdateTo])
+	assert.Empty(t, e.cron().Annotations[annotationBackupBeforeUpdate], "nothing more is owed: the record goes")
+}
+
+// R.C12: a backup asked for does not wait while the CronJob still keeps the
+// record of an update whose version has moved.
+func TestRC12ARequestDoesNotWaitForAnUpdateAlreadyApplied(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	e.refuse(func(verb string, obj any, _ *client.ListOptions) error {
+		if j, ok := obj.(*batchv1.Job); ok && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+			return errors.New("admission webhook refused it")
+		}
+		return nil
+	})
+	job, _ := e.heldBackUpdate()
+	e.endBackup(job, 0, okSummary)
+	e.pass()
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	e.askBackup("one")
+	e.pass()
+	out, _ := e.pass()
+	require.Equal(t, "v0.5.0", e.cron().Annotations[annotationBackupBeforeUpdateTo], "the record is kept: its mark is refused")
+	assert.NotContains(t, out, "the update to v0.5.0 and the backup before it", out)
+	assert.Len(t, e.carrying("one"), 1, "it starts")
+}
+
+// R.C12: only a backup Job that failed holds a new one back by its pod; one
+// that succeeded has ended, whatever its pod says.
+func TestRC12OnlyAFailedBackupsPodHoldsANewOneBack(t *testing.T) {
+	ctx := context.Background()
+	e := newRequestPlatform(t, verifyCR())
+	e.pass()
+	e.scheduledRun("zaentrum-backup-29324160")
+	e.endBackup("zaentrum-backup-29324160", 0, okSummary)
+	var pod corev1.Pod
+	require.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: e.key.Namespace, Name: "zaentrum-backup-29324160-x"}, &pod))
+	pod.Status.Phase = corev1.PodRunning
+	require.NoError(t, e.c.Status().Update(ctx, &pod))
+	e.askBackup("one")
+	e.pass()
+	e.pass()
+	assert.Len(t, e.carrying("one"), 1, "it starts")
+}

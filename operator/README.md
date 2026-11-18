@@ -69,7 +69,10 @@ Zaentrum, a Deployment it owns or one of the backups' Jobs changes:
 `manual` an install keeps the version it runs (`status.currentVersion`) and
 reports the channel's tag in `status.availableUpdate`; a new install starts on
 the channel's tag, and a channel on `latest` is followed in both modes. When
-the document cannot be read, an install keeps what it runs. Digest pinning
+the document cannot be read, an install keeps what it runs; but in auto mode,
+where an update is held back for its backup or applied while the version it
+is from still runs, that update goes on, to the version
+`status.availableUpdate` names. Digest pinning
 resolves the rendered tag — the release's, or `latest` push by push — so a push
 to `main` moves only installs that render `latest`.
 
@@ -78,7 +81,9 @@ backups are on, the operator makes a backup and applies the update when it has
 ended. A failed backup does not stop the update. A backup that still runs
 after 30 minutes is stopped, and the update is applied once it no longer runs,
 35 minutes after it was first held back at the latest; a backup that still
-runs then is stopped as the update is applied. Not on the all-in-one image.
+runs then is stopped as the update is applied, or on the first pass after
+that can see it. No backup starts while a pod of one before it still runs.
+Not on the all-in-one image.
 [Below](#backups-of-the-bundled-postgres-specbackup), under *Before an
 update*, is how.
 
@@ -742,17 +747,32 @@ holds it (a mark, a stop or a list the API server refuses, a backup being
 deleted that does not end, an operator that starts again), the update is
 applied 35 minutes after it was first held back at the latest, and a backup
 that still runs then, neither stopped nor being deleted, is stopped on that
-pass; the update then does not wait for its pod, so what that backup still
-writes is never said to be made before the update. The pass that applies it
-marks the backup before it `zaentrum.io/backup-before-update-to: <the version
-applied>`, in the same patch as that stop; where the patch is refused nothing
-of it is written and a pass after tries again, also once the version has
-moved. Where the apply fails, the passes after it apply the update again,
-without holding it back or backing up again, for as long as the version that
-runs has not moved. In auto mode a pass that cannot look the channel up
-changes nothing of an update held back or applied. After the update, its own backup holds the schedule still for as long
-as it has not ended. During a restore the update waits for the restore to end,
-and the 30 minutes start then, with a backup first.
+pass, or where the backups' Jobs cannot be listed then, on the first pass that
+can list them; the update does not wait for its pod, and a backup that ended
+after the 35 minutes is never said to be made before the update. The pass
+that applies it marks the backup before it `zaentrum.io/backup-before-update-to:
+<the version applied>`, in the same patch as that stop; where the patch is
+refused, nothing of it is written, and every pass after tries again, also
+once the version has moved and after the operator starts again: until that
+is done the CronJob carries, beside the count, `zaentrum.io/backup-before-update-to`
+and, where a stop is owed, `zaentrum.io/backup-before-update-stop-owed: <the
+Job>` (`*` where the Jobs could not be listed: then the count's backup that
+still runs, else one that began before the 35 minutes were over). A backup that
+ends before the stop it was owed is not marked, and one the operator stopped is
+never said to be made before the update; a backup that runs and is owed no
+stop is left as it is. Where
+the apply fails, the passes after it apply the update again, without holding
+it back or backing up again, for as long as the version that runs has not
+moved. In auto mode a pass that cannot look the channel up changes nothing of
+an update held back or applied; one pinned to a version never goes on with
+another. After the update, its own backup holds the schedule still for as
+long as it has not ended. No backup starts, the schedule stands still and a
+restore waits while a pod of a backup Job that has failed still runs: a Job is
+failed at its deadline while its pod may still be in its grace period.
+`status.backup.running` names such a Job while its pod runs; a pod that never
+ends (its node gone) holds the schedule, and every backup asked for, until it
+is removed by hand (`kubectl delete pod`). During a restore the update waits
+for the restore to end, and the 30 minutes start then, with a backup first.
 
 While it waits, the `Backup` condition keeps its status and reason, and its
 sentence ends “; {job} backs up {version} before the update to {target}: the
@@ -775,7 +795,11 @@ or the 30 without a backup apply it, “update: the backup before {target} has
 not ended in 35 minutes; applying it” (with “update: the backup before
 {target} still runs after 35 minutes; stopped it” where it is stopped then)
 or “update: no backup before {target} could be started in 30 minutes;
-applying it without one”. The newest such Job
+applying it without one”. While a pod of a backup that has failed still runs,
+it says “update: a backup that has ended still has a pod that runs; the
+update to {target} waits for it”, and where the backups' Jobs cannot be listed
+once the version has moved, “update: the backups' Jobs could not be listed;
+the backup before {target} is marked on a pass after”. The newest such Job
 that has ended is kept; older ones are deleted. RBAC: the ClusterRole's `jobs`
 rule holds `patch`, with which the operator marks a run and stops one.
 

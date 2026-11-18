@@ -337,6 +337,19 @@ func TestARestoreWaitsForACopyAndABackup(t *testing.T) {
 	require.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: e.z.Namespace, Name: "zaentrum-backup-1"}, &job))
 	job.Finalizers = nil
 	require.NoError(t, e.c.Update(ctx, &job))
+
+	// Failed, with its pod still in its grace period: the restore waits for
+	// the pod.
+	e.backupRun("zaentrum-backup-0", e.clock.Add(-time.Hour), 1, "")
+	var pod corev1.Pod
+	require.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: e.z.Namespace, Name: "zaentrum-backup-0-x"}, &pod))
+	pod.Status.Phase = corev1.PodRunning
+	require.NoError(t, e.c.Status().Update(ctx, &pod))
+	_, _ = e.restorePass(false)
+	assert.Equal(t, zaentrumv1alpha1.RestoreStopping, e.z.Status.Backup.Restore.Result, "its pod may still write")
+	assert.Contains(t, e.z.Status.Backup.Restore.Message, "waiting for the backup zaentrum-backup-0 to end")
+	pod.Status.Phase = corev1.PodFailed
+	require.NoError(t, e.c.Status().Update(ctx, &pod))
 	_, _ = e.restorePass(false)
 	assert.Equal(t, zaentrumv1alpha1.RestoreRunning, e.z.Status.Backup.Restore.Result)
 }
