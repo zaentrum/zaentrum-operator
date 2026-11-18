@@ -69,9 +69,13 @@ func (e *backupEnv) backupRun(name string, created time.Time, exit int32, messag
 	}
 	job.Status.Conditions = []batchv1.JobCondition{cond}
 	require.NoError(e.t, e.c.Status().Update(context.Background(), job))
+	phase := corev1.PodSucceeded
+	if exit != 0 {
+		phase = corev1.PodFailed
+	}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name + "-x", Namespace: e.z.Namespace,
 		Labels: map[string]string{batchv1.JobNameLabel: name}},
-		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: templates.BackupContainer,
+		Status: corev1.PodStatus{Phase: phase, ContainerStatuses: []corev1.ContainerStatus{{Name: templates.BackupContainer,
 			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: exit, Message: message, FinishedAt: ended}}}}}}
 	require.NoError(e.t, e.c.Create(context.Background(), pod))
 }

@@ -86,12 +86,14 @@ type askedBackup struct {
 	// updateFrom is the version that runs of an update this operator holds
 	// back for the backup before it, updateSince when it first did, and
 	// updateApplied whether it has applied it since, while that version still
-	// runs: to updateTo, after the backup updateJob, or "" where there was none
-	// (updatebackup.go).
-	updateFrom          string
-	updateSince         time.Time
-	updateApplied       bool
-	updateTo, updateJob string
+	// runs: to updateTo, with updateStopOwed naming the backup before it a stop
+	// is owed to, as the backups' CronJob does, where one may
+	// still run that has yet to be stopped (updatebackup.go).
+	updateFrom     string
+	updateSince    time.Time
+	updateApplied  bool
+	updateTo       string
+	updateStopOwed string
 }
 
 // backupStatusWritten makes what the pass answered and read count, once the
@@ -244,7 +246,7 @@ func (r *ZaentrumReconciler) planBackupRequest(ctx context.Context, z *zaentrumv
 	if err == nil {
 		ask.request = r.unanswered(z, notDeleting(all))
 	}
-	ask.hold = backupScheduleHeld(z, r.notYetAnswered(z), updateWaits, all, err)
+	ask.hold = backupScheduleHeld(z, r.notYetAnswered(z), updateWaits, all, err) || r.stillWrites(ctx, all) != nil
 	if ask.request == "" && !updateWaits {
 		return ask
 	}
@@ -288,11 +290,13 @@ func (r *ZaentrumReconciler) startBackupRequest(ctx context.Context, z *zaentrum
 		return false
 	}
 	waits := ""
-	switch running := runningBackup(all); {
+	switch running, writes := runningBackup(all), r.stillWrites(ctx, all); {
 	case restoreDump != "":
 		waits = "the restore of " + restoreDump
 	case running != "":
 		waits = running
+	case writes != nil:
+		waits = writes.Name
 	case !ask.suspended:
 		waits = "the schedule to stand still"
 	}
@@ -437,8 +441,8 @@ func (r *ZaentrumReconciler) keepNewest(ctx context.Context, jobs []batchv1.Job,
 }
 
 // backupRunEndedWhileRefused clears status.backup.running, on a pass that
-// refuses the resource and reads nothing else, once the Job it names has ended
-// or is gone.
+// refuses the resource and reads nothing else, once the Job it names has ended,
+// and no pod of a failed one still runs, or is gone.
 func (r *ZaentrumReconciler) backupRunEndedWhileRefused(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) {
 	b := z.Status.Backup
 	if b == nil || b.Running == "" {
@@ -446,7 +450,7 @@ func (r *ZaentrumReconciler) backupRunEndedWhileRefused(ctx context.Context, z *
 	}
 	var job batchv1.Job
 	err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: b.Running}, &job)
-	if done, _ := jobFinished(&job); apierrors.IsNotFound(err) || (err == nil && done) {
+	if done, failed := jobFinished(&job); apierrors.IsNotFound(err) || (err == nil && done && (failed == nil || !r.podRuns(ctx, &job))) {
 		b.Running = ""
 	}
 }
@@ -482,4 +486,20 @@ func (r *ZaentrumReconciler) platformsOfBackupJob(ctx context.Context, obj clien
 		reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: z.Namespace, Name: z.Name}})
 	}
 	return reqs
+}
+
+// stillWrites is the newest of the backups' Jobs that has failed while a pod
+// of it still runs, or might, or nil: a Job is failed at its deadline while
+// its pod may still be in its grace period, and until that pod has ended no
+// other backup starts, nor does the schedule move, so that no run writes the
+// claim, or removes what one left there, while another's pod still writes.
+// jobs are the backups' Jobs, newest first. A Job that succeeded has its pods
+// ended.
+func (r *ZaentrumReconciler) stillWrites(ctx context.Context, jobs []batchv1.Job) *batchv1.Job {
+	for i := range jobs {
+		if done, failed := jobFinished(&jobs[i]); done && failed != nil && r.podRuns(ctx, &jobs[i]) {
+			return &jobs[i]
+		}
+	}
+	return nil
 }

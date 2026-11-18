@@ -6,7 +6,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -82,8 +81,19 @@ const (
 	// backup, in RFC 3339, because it had not ended after 30 minutes.
 	annotationBackupBeforeUpdateStopped = "zaentrum.io/backup-before-update-stopped"
 	// annotationBackupBeforeUpdateTo is the version the update was applied to
-	// after this backup, written by the pass that applied it.
+	// after this backup, written by the pass that applied it; on the backups'
+	// CronJob, the version the update was applied to.
 	annotationBackupBeforeUpdateTo = "zaentrum.io/backup-before-update-to"
+	// annotationBackupBeforeUpdateStopOwed, on the backups' CronJob, names the
+	// backup Job the update was applied while it still ran and whose stop was
+	// refused, or is stopOwedUnknown where the backups' Jobs could not be
+	// listed: the first pass that can, stops it.
+	annotationBackupBeforeUpdateStopOwed = "zaentrum.io/backup-before-update-stop-owed"
+	// stopOwedUnknown is the stop owed to a backup that could not be listed as
+	// the update was applied: the newest of the count's that has not ended,
+	// else the newest backup that has not ended and began before the 35
+	// minutes were over (owedJob).
+	stopOwedUnknown = "*"
 
 	// updateBackupWait is how long an update waits for the backup before it.
 	updateBackupWait = 30 * time.Minute
@@ -129,6 +139,39 @@ type updateBackup struct {
 	// job is the backup before the update, or the one to mark as it.
 	job  *batchv1.Job
 	step updateStep
+	// applied says that the update has been applied, to to; moved that the
+	// version that runs has moved to to, and all that is left of the update is
+	// what its backup is still owed.
+	applied, moved bool
+	// stopOwed names the backup a stop is owed to, or is stopOwedUnknown; ""
+	// where none is owed.
+	stopOwed string
+}
+
+// waits says whether an update waits for the backup before it, or is applied
+// on this pass while the version it is from still runs.
+func (u updateBackup) waits() bool { return u.from != "" && !u.moved }
+
+// record is what the backups' CronJob carries of the update: its count while
+// it waits (heldBack), and once it is applied, until the version that runs
+// has moved and the backup before it has been marked and stopped as it owes,
+// the version it was applied to and whether a stop is owed.
+func (u updateBackup) record() map[string]string {
+	m := u.heldBack()
+	if m == nil || !u.applied {
+		return m
+	}
+	m[annotationBackupBeforeUpdateTo] = u.to
+	if u.stopOwed != "" {
+		m[annotationBackupBeforeUpdateStopOwed] = u.stopOwed
+	}
+	return m
+}
+
+// updateRecord is the record the backups' CronJob carries (record).
+type updateRecord struct {
+	from, to, stopOwed string
+	since              time.Time
 }
 
 // deadline is when a backup before the update that still runs is stopped.
@@ -154,9 +197,9 @@ func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 // this pass, or "".
 func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, target, restoreDump string) updateBackup {
 	from := z.Status.CurrentVersion
+	rec := r.cronRecord(ctx, z)
 	if target == "" || from == "" || target == from || r.onAppliance(z) {
-		r.appliedRecorded(ctx, z, from)
-		return updateBackup{}
+		return r.settleMoved(ctx, z, from, rec)
 	}
 	u := updateBackup{from: from, to: target, hold: true}
 	if restoreDump != "" {
@@ -166,7 +209,10 @@ func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1
 	}
 	logger := log.FromContext(ctx).WithValues("running", from)
 	now := r.now().Time
-	held := r.heldSince(ctx, z, from)
+	var held time.Time
+	if rec.from == from {
+		held = rec.since
+	}
 	all, err := r.allBackupJobs(ctx, z)
 	if err == nil {
 		u.job = beforeUpdateJob(z, all, from, held, now)
@@ -183,16 +229,23 @@ func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1
 		u.since = now.UTC().Truncate(time.Second)
 		logger.Info("update: " + target + " waits for a backup of the version that runs")
 	}
-	applied := a.updateApplied && a.updateFrom == from && a.updateSince.Equal(u.since)
+	ours := rec.from == from && rec.since.Equal(u.since)
+	remembered := a.updateApplied && a.updateFrom == from && a.updateSince.Equal(u.since)
+	switch {
+	case ours && rec.stopOwed != "":
+		u.stopOwed = rec.stopOwed
+	case remembered:
+		u.stopOwed = a.updateStopOwed
+	}
 	r.remember(z, func(a *askedBackup) {
 		if a.updateFrom != from || !a.updateSince.Equal(u.since) {
-			a.updateFrom, a.updateSince, a.updateApplied = from, u.since, false
+			a.updateFrom, a.updateSince, a.updateApplied, a.updateTo, a.updateStopOwed = from, u.since, false, "", ""
 		}
 	})
-	if applied || (u.job != nil && u.job.Annotations[annotationBackupBeforeUpdateTo] != "") {
+	if (ours && rec.to != "") || remembered || (u.job != nil && u.job.Annotations[annotationBackupBeforeUpdateTo] != "") {
 		// Applied by a pass before whose apply did not get through: applied
 		// again, without a second backup.
-		r.applyUpdate(ctx, z, &u)
+		r.applyUpdate(ctx, z, &u, all, err == nil, true)
 		return u
 	}
 	bound := !now.Before(u.since.Add(updateHoldBound))
@@ -200,7 +253,7 @@ func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1
 		if bound {
 			logger.Info("update: the backups' Jobs could not be listed in 35 minutes; applying "+target+" without a backup",
 				"error", err.Error())
-			r.applyUpdate(ctx, z, &u)
+			r.applyUpdate(ctx, z, &u, nil, false, false)
 			return u
 		}
 		logger.Info("update: the backups' Jobs could not be listed; the update waits", "target", target, "error", err.Error())
@@ -209,19 +262,24 @@ func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1
 	_, stopped := stoppedAt(u.job)
 	switch {
 	case u.job == nil:
-		switch running := runningJob(all); {
+		switch running, writes := runningJob(all), r.stillWrites(ctx, all); {
+		case running == nil && writes != nil && !bound:
+			// A backup that has failed with a pod that may still write: no
+			// backup starts beside it.
+			logger.Info("update: a backup that has ended still has a pod that runs; the update to "+target+" waits for it",
+				"job", writes.Name)
 		case running == nil && now.Before(u.deadline()):
 			u.step = updateStart
 		case running == nil:
 			logger.Info("update: no backup before " + target + " could be started in 30 minutes; applying it without one")
-			r.applyUpdate(ctx, z, &u)
+			r.applyUpdate(ctx, z, &u, all, true, false)
 		case bound:
 			logger.Info("update: the backup before "+target+" has not ended in 35 minutes; applying it", "job", running.Name)
 			if running.DeletionTimestamp == nil {
 				// Marked and stopped as the update is applied.
 				u.job = running
 			}
-			r.applyUpdate(ctx, z, &u)
+			r.applyUpdate(ctx, z, &u, all, true, false)
 		case running.DeletionTimestamp != nil:
 			logger.Info("update: a backup that is being deleted has not ended; the update to "+target+" waits for it", "job", running.Name)
 		case now.Before(u.deadline()):
@@ -236,7 +294,7 @@ func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1
 		switch {
 		case bound:
 			logger.Info("update: the backup before "+target+" has not ended in 35 minutes; applying it", "job", u.job.Name)
-			r.applyUpdate(ctx, z, &u)
+			r.applyUpdate(ctx, z, &u, all, true, false)
 		case stopped:
 		case u.job.DeletionTimestamp != nil:
 			logger.Info("update: a backup that is being deleted has not ended; the update to "+target+" waits for it", "job", u.job.Name)
@@ -245,48 +303,118 @@ func (r *ZaentrumReconciler) planUpdateBackup(ctx context.Context, z *zaentrumv1
 		}
 	case stopped:
 		logger.Info("update: the stopped backup before "+target+" has ended; applying it", "job", u.job.Name)
-		r.applyUpdate(ctx, z, &u)
+		r.applyUpdate(ctx, z, &u, all, true, false)
 	case failedJob(u.job):
 		logger.Info("update: the backup before "+target+" failed; applying it", "job", u.job.Name)
-		r.applyUpdate(ctx, z, &u)
+		r.applyUpdate(ctx, z, &u, all, true, false)
 	default:
 		logger.Info("update: the backup before "+target+" has ended; applying it", "job", u.job.Name)
-		r.applyUpdate(ctx, z, &u)
+		r.applyUpdate(ctx, z, &u, all, true, false)
 	}
 	return u
 }
 
 // applyUpdate applies the update from this pass on, and records it: in this
-// operator's memory, and on the backup before it, with the version it is
-// applied to. A backup that still runs, and was neither stopped nor is being
-// deleted, is stopped in the same patch, marked where it was not, so that no
-// set it writes while the databases change counts as one made before the
-// update; where that patch is refused nothing of it is written, and a pass
-// after tries again. A backup the patch could not mark, once the version
-// that runs has moved, is marked on the pass after that (appliedRecorded).
-func (r *ZaentrumReconciler) applyUpdate(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, u *updateBackup) {
-	u.hold, u.step = false, updateWait
-	job := u.job
-	name := ""
-	if job != nil && job.DeletionTimestamp == nil {
-		name = job.Name
+// operator's memory, and on the backups' CronJob, which carries the version it
+// is applied to and the backup a stop is owed to (record), and on the backup
+// before it (settle). A backup of the count's that still runs as the update is
+// first applied, not stopped nor being deleted, is owed a stop; where the
+// backups' Jobs could not be listed then, one is owed to a backup that may run
+// (stopOwedUnknown). all are the backups' Jobs, listed says that they could be
+// listed, again that the update was applied on a pass before; where they could
+// not be listed on a pass after, what is owed stays as it was.
+func (r *ZaentrumReconciler) applyUpdate(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, u *updateBackup,
+	all []batchv1.Job, listed, again bool) {
+	u.hold, u.step, u.applied = false, updateWait, true
+	if job := u.job; !again && job != nil && job.DeletionTimestamp == nil && !finished(job) {
+		if _, stopped := stoppedAt(job); !stopped {
+			u.stopOwed = job.Name
+		}
 	}
-	r.remember(z, func(a *askedBackup) { a.updateApplied, a.updateTo, a.updateJob = true, u.to, name })
-	if name != "" {
-		_ = r.recordApplied(ctx, *u)
+	switch {
+	case !listed && !again:
+		u.stopOwed = stopOwedUnknown
+	case !listed:
+	case u.stopOwed != "":
+		if u.job = owedJob(*u, all); u.job == nil {
+			u.stopOwed = ""
+		} else {
+			u.stopOwed, _ = r.settle(ctx, *u)
+		}
+	case u.job != nil && u.job.DeletionTimestamp == nil:
+		_, _ = r.settle(ctx, *u)
 	}
+	r.remember(z, func(a *askedBackup) {
+		a.updateApplied, a.updateTo, a.updateStopOwed = true, u.to, u.stopOwed
+	})
 }
 
-// recordApplied marks u's backup with the version its update was applied to,
-// and stops it in the same patch where it still runs, neither stopped nor
-// being deleted, marking it where it was not; it logs and gives the error of
-// a patch refused.
-func (r *ZaentrumReconciler) recordApplied(ctx context.Context, u updateBackup) error {
+// owedJob is the backup u's stop is owed to: the Job it names, or where it
+// names none, as the Jobs could not be listed, the newest of the count's that
+// has not ended, else the newest backup that has not ended and began before
+// the 35 minutes were over; nil where that is gone, has ended unnamed, or is
+// being deleted, whose pods end with it. jobs are all the backups' Jobs,
+// newest first.
+func owedJob(u updateBackup, jobs []batchv1.Job) *batchv1.Job {
+	if u.stopOwed != stopOwedUnknown {
+		for i := range jobs {
+			if jobs[i].Name == u.stopOwed {
+				if jobs[i].DeletionTimestamp != nil {
+					return nil
+				}
+				return &jobs[i]
+			}
+		}
+		return nil
+	}
+	if job := countJob(u, jobs, false); job != nil {
+		return job
+	}
+	bound := u.since.Add(updateHoldBound)
+	for i := range jobs {
+		if jobs[i].DeletionTimestamp == nil && !finished(&jobs[i]) && jobs[i].CreationTimestamp.Time.Before(bound) {
+			return &jobs[i]
+		}
+	}
+	return nil
+}
+
+// countJob is the newest backup marked with u's count that is not being
+// deleted, of those that have ended too where ended says so, or nil.
+func countJob(u updateBackup, jobs []batchv1.Job, ended bool) *batchv1.Job {
+	for i := range jobs {
+		job := &jobs[i]
+		if t, err := sinceOf(job); err != nil || job.Annotations[annotationBackupBeforeUpdate] != u.from || !t.Equal(u.since) ||
+			job.DeletionTimestamp != nil || (!ended && finished(job)) {
+			continue
+		}
+		return job
+	}
+	return nil
+}
+
+// settle gives u's backup, once its update is applied, what it owes. One a
+// stop is owed to that still runs, not stopped, is stopped, marked where it was
+// not, and marked with the version its update was applied to, in one patch;
+// one owed none that still runs is left as it is. One that ended before the
+// stop it was owed is not marked, as what it wrote was not waited for, so it
+// is not said to be made before the update; any other that ended, or was
+// stopped, is marked with that version. It gives the backup a stop is still
+// owed to, and the error of a patch refused, which it logs; a pass after tries
+// again.
+func (r *ZaentrumReconciler) settle(ctx context.Context, u updateBackup) (string, error) {
 	job := u.job
 	_, stopped := stoppedAt(job)
-	stop := !finished(job) && !stopped
-	if !stop && job.Annotations[annotationBackupBeforeUpdateTo] == u.to {
-		return nil
+	runs := !finished(job)
+	stop := runs && !stopped && u.stopOwed != ""
+	switch {
+	case stop:
+	case runs && !stopped:
+		return "", nil
+	case !stopped && u.stopOwed != "":
+		return "", nil
+	case job.Annotations[annotationBackupBeforeUpdateTo] == u.to:
+		return "", nil
 	}
 	logger := log.FromContext(ctx).WithValues("running", u.from, "job", job.Name)
 	patch := client.MergeFrom(job.DeepCopy())
@@ -304,34 +432,56 @@ func (r *ZaentrumReconciler) recordApplied(ctx context.Context, u updateBackup) 
 	switch {
 	case err != nil && stop:
 		logger.Info("update: the backup before "+u.to+" could not be stopped; trying again", "error", err.Error())
+		return job.Name, err
 	case err != nil:
 		logger.Info("update: the backup before "+u.to+" could not be marked as made before it; trying again", "error", err.Error())
 	case stop:
 		logger.Info("update: the backup before " + u.to + " still runs after 35 minutes; stopped it")
 	}
-	return err
+	return "", err
 }
 
-// appliedRecorded does, once the version an update was applied to runs, what
-// the pass that applied it could not: it marks the backup before it with that
-// version, and stops it where it still runs (recordApplied); then it forgets
-// the update. from is the version that runs.
-func (r *ZaentrumReconciler) appliedRecorded(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, from string) {
-	a := r.asked(z)
-	if a.updateApplied && a.updateJob != "" && a.updateTo != "" && a.updateTo == from {
-		var job batchv1.Job
-		err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: a.updateJob}, &job)
-		if err == nil && job.DeletionTimestamp == nil {
-			err = r.recordApplied(ctx, updateBackup{from: a.updateFrom, to: a.updateTo, since: a.updateSince, job: &job})
-		} else if err != nil && !apierrors.IsNotFound(err) {
-			log.FromContext(ctx).Info("update: the backup before "+a.updateTo+" could not be read; trying again",
-				"job", a.updateJob, "error", err.Error())
+// settleMoved does, once the version an update was applied to runs, what the
+// passes that applied it could not: it settles the backup a stop is owed to
+// (owedJob), or else the count's newest (settle), on every pass until that is
+// done, and keeps the record on the backups' CronJob until then; then it
+// forgets the update. from is the version that runs and rec the CronJob's
+// record; where the CronJob carries none, what this operator remembers.
+func (r *ZaentrumReconciler) settleMoved(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, from string, rec updateRecord) updateBackup {
+	if rec.to == "" || rec.to != from {
+		a := r.asked(z)
+		if !a.updateApplied || a.updateTo != from || a.updateFrom == "" || a.updateSince.IsZero() {
+			r.forgetUpdate(z)
+			return updateBackup{}
 		}
-		if err != nil && !apierrors.IsNotFound(err) {
-			return
+		rec = updateRecord{from: a.updateFrom, since: a.updateSince, to: a.updateTo, stopOwed: a.updateStopOwed}
+	}
+	u := updateBackup{from: rec.from, to: rec.to, since: rec.since, applied: true, stopOwed: rec.stopOwed, moved: true}
+	keep := func() updateBackup {
+		r.remember(z, func(a *askedBackup) {
+			a.updateFrom, a.updateSince, a.updateApplied, a.updateTo, a.updateStopOwed = u.from, u.since, true, u.to, u.stopOwed
+		})
+		return u
+	}
+	all, err := r.allBackupJobs(ctx, z)
+	if err != nil {
+		log.FromContext(ctx).Info("update: the backups' Jobs could not be listed; the backup before "+u.to+" is marked on a pass after",
+			"error", err.Error())
+		return keep()
+	}
+	if u.stopOwed != "" {
+		u.job = owedJob(u, all)
+	} else {
+		u.job = countJob(u, all, true)
+	}
+	if u.job != nil {
+		var err error
+		if u.stopOwed, err = r.settle(ctx, u); err != nil {
+			return keep()
 		}
 	}
 	r.forgetUpdate(z)
+	return updateBackup{}
 }
 
 // stepUpdateBackup takes this pass's step of the backup before an update,
@@ -418,24 +568,25 @@ func setAnnotations(job *batchv1.Job, set map[string]string, remove ...string) {
 	job.SetAnnotations(annotations)
 }
 
-// heldSince is when the update from the version that runs was first held back,
-// as the backups' CronJob carries it, or zero: where it carries none, one of
-// another version, or one from before a restore that ran since.
-func (r *ZaentrumReconciler) heldSince(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, from string) time.Time {
+// cronRecord is the record of an update the backups' CronJob carries
+// (record), or none: where it carries none, or one from before a restore that
+// ran since.
+func (r *ZaentrumReconciler) cronRecord(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) updateRecord {
 	var cron batchv1.CronJob
 	err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: templates.BackupCronJobName}, &cron)
-	if err != nil || !metav1.IsControlledBy(&cron, z) || cron.Annotations[annotationBackupBeforeUpdate] != from {
-		return time.Time{}
+	if err != nil || !metav1.IsControlledBy(&cron, z) || cron.Annotations[annotationBackupBeforeUpdate] == "" {
+		return updateRecord{}
 	}
 	t, err := time.Parse(time.RFC3339, cron.Annotations[annotationBackupBeforeUpdateSince])
 	if err != nil {
-		return time.Time{}
+		return updateRecord{}
 	}
 	if rs := restoreStatus(z); rs != nil && rs.FinishedAt != nil && rs.Result != zaentrumv1alpha1.RestoreRefused &&
 		t.Before(rs.FinishedAt.Time) {
-		return time.Time{}
+		return updateRecord{}
 	}
-	return t
+	return updateRecord{from: cron.Annotations[annotationBackupBeforeUpdate], since: t,
+		to: cron.Annotations[annotationBackupBeforeUpdateTo], stopOwed: cron.Annotations[annotationBackupBeforeUpdateStopOwed]}
 }
 
 // beforeUpdateJob is the backup before the update from the version that runs:
@@ -531,7 +682,7 @@ func (r *ZaentrumReconciler) podRuns(ctx context.Context, job *batchv1.Job) bool
 // forgetUpdate forgets the update this operator held back or applied.
 func (r *ZaentrumReconciler) forgetUpdate(z *zaentrumv1alpha1.Zaentrum) {
 	r.remember(z, func(a *askedBackup) {
-		a.updateFrom, a.updateSince, a.updateApplied, a.updateTo, a.updateJob = "", time.Time{}, false, "", ""
+		a.updateFrom, a.updateSince, a.updateApplied, a.updateTo, a.updateStopOwed = "", time.Time{}, false, "", ""
 	})
 }
 
@@ -540,7 +691,7 @@ func (r *ZaentrumReconciler) forgetUpdate(z *zaentrumv1alpha1.Zaentrum) {
 // or the backups' CronJob carries it.
 func (r *ZaentrumReconciler) updatePending(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) bool {
 	from := z.Status.CurrentVersion
-	return from != "" && (r.asked(z).updateFrom == from || !r.heldSince(ctx, z, from).IsZero())
+	return from != "" && (r.asked(z).updateFrom == from || r.cronRecord(ctx, z).from == from)
 }
 
 // onAppliance says whether this operator is the one-machine install's: by the
