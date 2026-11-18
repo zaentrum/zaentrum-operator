@@ -88,6 +88,7 @@ func (r *ZaentrumReconciler) controllerReport(
 		cur.Image = managerImage(pod)
 		cur.Version = imageVersion(cur.Image)
 		cur.Source = r.installSource(ctx, pod)
+		r.sourceRead(cur.Source)
 		cur.AvailableUpdate = r.controllerUpdate(ctx, cur.Image, channelTarget)
 	}
 
@@ -305,4 +306,21 @@ func (r *ZaentrumReconciler) controllerUpdate(ctx context.Context, image, channe
 		return target
 	}
 	return ""
+}
+
+// sourceRead keeps the install source this operator read of itself, which
+// onAppliance goes by (updatebackup.go): a pass that cannot read its own pod
+// reports "unknown" and changes nothing of it.
+func (r *ZaentrumReconciler) sourceRead(source zaentrumv1alpha1.InstallSource) {
+	r.clusterMu.Lock()
+	defer r.clusterMu.Unlock()
+	r.source = source
+}
+
+// readSource is the install source this operator last read of itself, or ""
+// where it has read none since it started.
+func (r *ZaentrumReconciler) readSource() zaentrumv1alpha1.InstallSource {
+	r.clusterMu.Lock()
+	defer r.clusterMu.Unlock()
+	return r.source
 }

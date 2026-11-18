@@ -89,7 +89,7 @@ func TestBackupStatusIsWhatTheRunsSay(t *testing.T) {
 	e := newBackupEnv(t, verifyCR())
 	ctx := context.Background()
 
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	c := backupCondition(e.z)
 	require.NotNil(t, c)
 	assert.Equal(t, metav1.ConditionUnknown, c.Status)
@@ -97,12 +97,12 @@ func TestBackupStatusIsWhatTheRunsSay(t *testing.T) {
 	assert.Contains(t, c.Message, "@daily")
 
 	e.backupRun("zaentrum-backup-1", e.clock.Add(-time.Hour), -1, "")
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	assert.Contains(t, backupCondition(e.z).Message, "zaentrum-backup-1 runs the first backup")
 
 	require.NoError(t, e.c.DeleteAllOf(ctx, &batchv1.Job{}, client.InNamespace(e.z.Namespace)))
 	e.backupRun("zaentrum-backup-1", e.clock.Add(-time.Hour), 0, okSummary)
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	b := e.z.Status.Backup
 	require.NotNil(t, b)
 	assert.Equal(t, "2026-10-04T00-00-05Z", b.LastDump)
@@ -118,7 +118,7 @@ func TestBackupStatusIsWhatTheRunsSay(t *testing.T) {
 
 	e.backupRun("zaentrum-backup-2", e.clock, 1, "cannot dump the database katalog")
 	e.clock = e.clock.Add(2 * time.Minute)
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	b = e.z.Status.Backup
 	require.NotNil(t, b.LastFailure)
 	assert.Equal(t, "2026-10-04T00-00-05Z", b.LastDump, "the last good dump stays")
@@ -131,7 +131,7 @@ func TestBackupStatusIsWhatTheRunsSay(t *testing.T) {
 
 	// The CronJob's history goes; what status learnt stays.
 	require.NoError(t, e.c.DeleteAllOf(ctx, &batchv1.Job{}, client.InNamespace(e.z.Namespace)))
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	assert.Equal(t, "2026-10-04T00-00-05Z", e.z.Status.Backup.LastDump)
 	assert.NotNil(t, e.z.Status.Backup.LastSuccess)
 	assert.NotNil(t, e.z.Status.Backup.LastFailure)
@@ -151,7 +151,7 @@ func TestBackupsTurnedOff(t *testing.T) {
 	e := newBackupEnv(t, z, owned)
 	ctx := context.Background()
 	assert.False(t, rendered(e.platform, "CronJob", templates.BackupCronJobName))
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	c := backupCondition(e.z)
 	require.NotNil(t, c)
 	assert.Equal(t, metav1.ConditionFalse, c.Status)
@@ -164,7 +164,7 @@ func TestBackupsTurnedOff(t *testing.T) {
 	e = newBackupEnv(t, verifyCR(), foreign)
 	e.z.Spec.Backup.Enabled = &no
 	e.render("")
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	assert.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: templates.BackupCronJobName}, &batchv1.CronJob{}),
 		"a CronJob the Zaentrum does not own is not its to remove")
 
@@ -174,7 +174,7 @@ func TestBackupsTurnedOff(t *testing.T) {
 	v.PostgresVolume = "emptyDir"
 	objs, err := templates.Render(v)
 	require.NoError(t, err)
-	e.r.reportBackups(ctx, e.z, objs)
+	e.r.reportBackups(ctx, e.z, objs, updateBackup{}, "")
 	assert.Contains(t, backupCondition(e.z).Message, "emptyDir")
 
 	ext := verifyCR()
@@ -183,7 +183,7 @@ func TestBackupsTurnedOff(t *testing.T) {
 	ext.Status.Backup = &zaentrumv1alpha1.BackupStatus{LastDump: "2026-10-04T00-00-05Z"}
 	setCondition(ext, condTypeBackup, metav1.ConditionTrue, "Succeeded", "x")
 	e = newBackupEnv(t, ext)
-	e.r.reportBackups(ctx, e.z, e.platform)
+	e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 	assert.Nil(t, backupCondition(e.z))
 	assert.Nil(t, e.z.Status.Backup)
 }

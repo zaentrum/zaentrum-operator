@@ -83,7 +83,10 @@ type ZaentrumReconciler struct {
 	OpenShift *bool
 	// unserved holds, for a kind the prune lists, when the cluster last said
 	// it does not serve it (prune.go).
-	unserved  map[schema.GroupKind]time.Time
+	unserved map[schema.GroupKind]time.Time
+	// source is the install source this operator last read of itself
+	// (self.go).
+	source    zaentrumv1alpha1.InstallSource
 	clusterMu sync.Mutex
 
 	// askedBackups holds, for each platform, what this operator remembers of
@@ -214,20 +217,56 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		logger.Info("render deferred", "reason", err.Error())
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
-	// The backups' schedule stands still from a request to its answer and
-	// while a backup asked for runs; whether the CronJob is suspended is read
-	// before the apply, as the pass finds it (backuprequest.go).
-	backupAsk := r.planBackupRequest(ctx, &z)
+	// Another version waits for a backup of the version that runs, 30 minutes
+	// at the latest (updatebackup.go). A pass that cannot look the channel up
+	// in auto mode changes nothing of an update held back or applied: it goes
+	// on with the version the passes before named.
+	target := decision.RenderTag
+	if z.Spec.Update.Mode == zaentrumv1alpha1.UpdateAuto && !updates.IsPinned(z.Spec.Version) && channelTarget == "" &&
+		z.Status.AvailableUpdate != "" && z.Status.AvailableUpdate != z.Status.CurrentVersion && r.updatePending(ctx, &z) {
+		target = z.Status.AvailableUpdate
+	}
+	update := r.planUpdateBackup(ctx, &z, target, restoreDump)
+	// The backups' schedule stands still from a request to its answer, while
+	// a backup asked for runs, and while an update waits for its backup;
+	// whether the CronJob is suspended is read before the apply, as the pass
+	// finds it (backuprequest.go).
+	backupAsk := r.planBackupRequest(ctx, &z, update.hold)
 	vals := templates.NewValues(&z)
 	vals.MailSecretVersion = mailSecret
 	vals.OpenShift = openShift
 	vals.BackupSuspend = backupAsk.hold
-	vals.Version = decision.RenderTag
+	vals.Version = target
+	if update.hold {
+		vals.Version = update.from
+	}
 	vals.PostgresVolume = db.volume
 	vals.PostgresMigrate = db.migrate
 	vals.RestoreDump = restoreDump
 	certificateValues(&vals, &z, tlsSecret, issuing)
 	rendered, err := templates.Render(vals)
+	if err == nil && update.from != "" && renderedObject(rendered, "CronJob", templates.BackupCronJobName) == nil {
+		// The platform makes no backups: nothing waits for one.
+		r.forgetUpdate(&z)
+		held := update.hold
+		update = updateBackup{}
+		if held {
+			vals.Version = target
+			rendered, err = templates.Render(vals)
+		}
+	}
+	if cron := renderedObject(rendered, "CronJob", templates.BackupCronJobName); err == nil && cron != nil && update.heldBack() != nil {
+		// The CronJob keeps the count of the update held back, and that it
+		// was applied, until the version that runs moves (updatebackup.go).
+		annotations := cron.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		for k, v := range update.heldBack() {
+			annotations[k] = v
+		}
+		cron.SetAnnotations(annotations)
+	}
 	if err != nil {
 		r.setApplied(&z, metav1.ConditionFalse, "RenderFailed", err.Error())
 		z.Status.Phase = "Error"
@@ -299,10 +338,22 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// The restore in flight takes its step now that its clients were applied
 	// stopped, and the backups are read.
 	restoreInFlight := r.stepRestore(ctx, &z, objs, tests)
+	// The backup before an update is marked, started or stopped
+	// (updatebackup.go).
+	update, updateWaits := r.stepUpdateBackup(ctx, &z, objs, update, backupAsk)
 	// A backup asked for starts once nothing stands in its way, before the
-	// backups are read, so that they read it too (backuprequest.go).
-	backupWaits := r.startBackupRequest(ctx, &z, objs, backupAsk, restoreDump)
-	r.reportBackups(ctx, &z, objs)
+	// backups are read, so that they read it too (backuprequest.go). While an
+	// update is at its backup, that backup answers it, or it starts after the
+	// update.
+	backupWaits := false
+	if update.from == "" {
+		backupWaits = r.startBackupRequest(ctx, &z, objs, backupAsk, restoreDump)
+	} else if backupAsk.request != "" && (update.job == nil || update.job.Annotations[zaentrumv1alpha1.BackupRequestAnnotation] != backupAsk.request) {
+		logger.Info("backups: the backup asked for waits", "request", loggedRequest(backupAsk.request),
+			"for", "the update to "+update.to+" and the backup before it")
+		backupWaits = true
+	}
+	r.reportBackups(ctx, &z, objs, update, vals.Version)
 	r.reportTLS(ctx, &z, tlsSecret, issuing)
 	// Where the platform's mail stands, and the mail Secrets the resource no
 	// longer names (mail.go).
@@ -320,6 +371,10 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// already rolled it into RenderTag so it collapses to "").
 	z.Status.CurrentVersion = vals.Version
 	z.Status.AvailableUpdate = decision.AvailableUpdate
+	if update.hold {
+		// The version that waits for the backup before it.
+		z.Status.AvailableUpdate = update.to
+	}
 	z.Status.ObservedGeneration = z.Generation
 
 	// The controller's report on ITSELF sits beside those and touches nothing
@@ -384,7 +439,7 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	r.backupStatusWritten(&z)
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
-	if verifying || configuring || db.copying || restoreInFlight || backupWaits {
+	if verifying || configuring || db.copying || restoreInFlight || backupWaits || updateWaits {
 		return ctrl.Result{RequeueAfter: verifyRequeueAfter}, nil
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil

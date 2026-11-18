@@ -73,6 +73,15 @@ the document cannot be read, an install keeps what it runs. Digest pinning
 resolves the rendered tag — the release's, or `latest` push by push — so a push
 to `main` moves only installs that render `latest`.
 
+**A backup before an update.** Before another version is applied, where
+backups are on, the operator makes a backup and applies the update when it has
+ended. A failed backup does not stop the update. A backup that still runs
+after 30 minutes is stopped, and the update is applied once it no longer runs,
+35 minutes after it was first held back at the latest; a backup that still
+runs then is stopped as the update is applied. Not on the all-in-one image.
+[Below](#backups-of-the-bundled-postgres-specbackup), under *Before an
+update*, is how.
+
 ### What the render no longer carries
 
 Server-side apply owns what the operator applies, never what it stops
@@ -627,7 +636,9 @@ long as a backup asked for runs, whatever has become of its request — the
 annotation removed or changed, backups turned off and on — and while its Job
 is being deleted; and while the backups' Jobs cannot be listed, so that its
 run and the one asked for never
-write at once; a run the schedule missed meanwhile follows once it moves
+write at once (a finalizer on that Job that never goes holds the schedule, and
+every later request, for as long as the Job's object exists: the finalizer has
+to be cleared); a run the schedule missed meanwhile follows once it moves
 again, if it was due within the last six hours. The backup starts on a later
 pass, one that found the CronJob suspended before it applied anything and
 finds no backup running and no restore that stops the platform or has it
@@ -682,6 +693,91 @@ that value, the sentence says the backup was not made, although it was. With
 external databases a request is answered and refused too, with no `Backup`
 condition; the operator's log says why. RBAC: the ClusterRole's `jobs` rule
 holds `watch`.
+
+**Before an update.** Another version is another tag: the tag a pass renders
+differs from `status.currentVersion`, both set. New images under the same tag
+(an install that follows `latest`), another operator, another image for the
+identity provider and a new install's first version are applied at once, as
+before. Where the pass renders the CronJob and the operator is not the
+all-in-one image's (`appliance`, whose updater keeps a copy of the databases'
+files itself: the operator goes by the install source it last read of itself,
+before it has read one by the one `status.controller.source` keeps, and one
+never read counts as a cluster install's), the operator holds the update
+back: the platform goes on running the version it runs, so that the backup is
+of that version, `status.currentVersion` stays, `status.availableUpdate` names
+the version that waits, and the CronJob is suspended. With no CronJob in the
+render (backups off, external databases) the update is applied at once, also
+while a backup Job still runs.
+
+The 30 minutes count from the pass that first holds the update back, whatever
+that pass can read, and the count is kept on the cluster: from that pass until
+the version that runs moves, the update is taken back or a restore starts, the
+CronJob carries `zaentrum.io/backup-before-update: <the version that runs>`
+and `zaentrum.io/backup-before-update-since: <when the update was first held
+back>`, so an operator that starts again counts on; a target that moves
+meanwhile does not start them again. A backup Job that already runs when the
+update is first held back is the backup before it; otherwise the operator
+starts one, as a request does, once the CronJob is suspended, and it also
+answers a request that waits (one that waits behind a run that counts gets its
+own Job after the update; a restore asked for while the update's backup runs
+waits for that backup). Either Job carries the same two annotations: on a Job,
+the version the backup was made of, before an update from it. A backup Job
+that is being deleted and has not ended is waited for, as it may still write,
+but it is not the backup before the update, and no backup starts beside it.
+Where the CronJob does not carry the count yet, a backup marked with the
+version that runs counts if it was marked in the last 40 minutes and, where it
+has ended, after the last restore and for an update that was not applied: a
+backup up to 40 minutes old counts for a target that is set again.
+
+The update is applied once that Job has ended, well or not. One that still
+runs after 30 minutes is stopped: its `activeDeadlineSeconds` is cut to 1, so
+the Job controller ends it and it stays listed as a run that failed
+(`DeadlineExceeded`), and `zaentrum.io/backup-before-update-stopped` holds
+when; the update is applied once the Job has ended and no pod of it runs. A
+stop counts only on a Job whose deadline is the stop's and for the update the
+Job is marked with, from its 30 minutes on: a time set by hand is no stop,
+and a mark for another update takes it off. Where no backup could be started
+in the 30 minutes, the update is applied then, without one. Whatever else
+holds it (a mark, a stop or a list the API server refuses, a backup being
+deleted that does not end, an operator that starts again), the update is
+applied 35 minutes after it was first held back at the latest, and a backup
+that still runs then, neither stopped nor being deleted, is stopped on that
+pass; the update then does not wait for its pod, so what that backup still
+writes is never said to be made before the update. The pass that applies it
+marks the backup before it `zaentrum.io/backup-before-update-to: <the version
+applied>`, in the same patch as that stop; where the patch is refused nothing
+of it is written and a pass after tries again, also once the version has
+moved. Where the apply fails, the passes after it apply the update again,
+without holding it back or backing up again, for as long as the version that
+runs has not moved. In auto mode a pass that cannot look the channel up
+changes nothing of an update held back or applied. After the update, its own backup holds the schedule still for as long
+as it has not ended. During a restore the update waits for the restore to end,
+and the 30 minutes start then, with a backup first.
+
+While it waits, the `Backup` condition keeps its status and reason, and its
+sentence ends “; {job} backs up {version} before the update to {target}: the
+update is applied once it has ended; a backup that still runs at {time} is
+stopped”. Afterwards, as long as that backup is the latest: “…; made before
+the update to {target}” where it succeeded, “{job} failed: {reason}; the update
+to {target} was applied all the same; …” where it failed, and “{job} had not
+ended after 30 minutes and was stopped; the update to {target} was applied
+without a backup; …” where it was stopped, each ending with the latest that
+succeeded, or “no backup has succeeded yet”. {target} is the version the
+update was applied to after that backup; once the version the backup was made
+of runs again, nothing of an update is said. A long reason is clipped, never
+what follows it. The log says “update: {target} waits for a backup of the
+version that runs” when the update is first held back, “update: backing up
+before applying {target}”, then “update: the backup before {target} has ended;
+applying it”, “… failed; applying it”, or “… has not ended in 30 minutes;
+stopped it and applying” and, once that backup no longer runs, “update: the
+stopped backup before {target} has ended; applying it”; where the 35 minutes
+or the 30 without a backup apply it, “update: the backup before {target} has
+not ended in 35 minutes; applying it” (with “update: the backup before
+{target} still runs after 35 minutes; stopped it” where it is stopped then)
+or “update: no backup before {target} could be started in 30 minutes;
+applying it without one”. The newest such Job
+that has ended is kept; older ones are deleted. RBAC: the ClusterRole's `jobs`
+rule holds `patch`, with which the operator marks a run and stops one.
 
 **Restoring.** Annotate the Zaentrum with the dump's name:
 

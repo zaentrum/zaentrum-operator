@@ -249,9 +249,10 @@ func TestEveryClusterRoleHoldsWhatVerificationUses(t *testing.T) {
 
 // What backups need, every ClusterRole shipped with an operator that renders
 // them allows: the chart's CronJob is applied, read and, with backups turned
-// off, deleted; the backups' Jobs are watched, and a backup asked for and the
-// restore are Jobs like the other runs. So does what a certificate from
-// cert-manager needs: the Certificate.
+// off, deleted; the backups' Jobs are watched, a backup before an update is
+// marked on its Job and one that runs too long stopped by a patch, and a
+// backup asked for and the restore are Jobs like the other runs. So does what
+// a certificate from cert-manager needs: the Certificate.
 func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 	for _, file := range []string{
 		"../../config/rbac/role.yaml",
@@ -263,7 +264,7 @@ func TestEveryClusterRoleHoldsWhatBackupsUse(t *testing.T) {
 		for _, verb := range []string{"get", "list", "watch", "create", "update", "patch", "delete"} {
 			assert.True(t, ruleHolds(rules, "batch", "cronjobs", verb), "%s: no %s on batch cronjobs", file, verb)
 		}
-		for _, verb := range []string{"create", "get", "list", "watch", "delete"} {
+		for _, verb := range []string{"create", "get", "list", "watch", "patch", "delete"} {
 			assert.True(t, ruleHolds(rules, "batch", "jobs", verb), "%s: no %s on batch jobs", file, verb)
 		}
 		assert.True(t, ruleHolds(rules, "", "persistentvolumeclaims", "patch"), file)

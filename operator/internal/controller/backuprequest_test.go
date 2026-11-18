@@ -149,9 +149,13 @@ func (e *platformEnv) endBackup(name string, exit int32, message string) {
 	}
 	job.Status.Conditions = []batchv1.JobCondition{cond}
 	require.NoError(e.t, e.c.Status().Update(ctx, &job))
+	phase := corev1.PodSucceeded
+	if exit != 0 {
+		phase = corev1.PodFailed
+	}
 	require.NoError(e.t, e.c.Create(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name + "-x", Namespace: e.key.Namespace,
 		Labels: map[string]string{batchv1.JobNameLabel: name}},
-		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: templates.BackupContainer,
+		Status: corev1.PodStatus{Phase: phase, ContainerStatuses: []corev1.ContainerStatus{{Name: templates.BackupContainer,
 			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: exit, Message: message, FinishedAt: ended}}}}}}))
 }
 
@@ -396,7 +400,7 @@ func TestRC11ABackupAskedForOnAnEmptyDirIsRefused(t *testing.T) {
 	objs, err := templates.Render(v)
 	require.NoError(t, err)
 	platform, _ := templates.SplitHooks(objs)
-	e.r.reportBackups(context.Background(), e.z, platform)
+	e.r.reportBackups(context.Background(), e.z, platform, updateBackup{}, "")
 	require.NotNil(t, e.z.Status.Backup)
 	assert.Equal(t, "one", e.z.Status.Backup.Request)
 	assert.Equal(t, "the bundled Postgres keeps its data on an emptyDir and is not backed up: backups start once it is on "+
@@ -418,7 +422,7 @@ func TestRC11ABackupAskedForWithExternalDatabasesIsRefusedWithoutACondition(t *t
 	var buf bytes.Buffer
 	ctx := log.IntoContext(context.Background(), zap.New(zap.WriteTo(&buf)))
 	for pass := 1; pass <= 2; pass++ {
-		e.r.reportBackups(ctx, e.z, e.platform)
+		e.r.reportBackups(ctx, e.z, e.platform, updateBackup{}, "")
 		require.NotNil(t, e.z.Status.Backup, "pass %d", pass)
 		assert.Equal(t, "one", e.z.Status.Backup.Request, "pass %d: the request is kept", pass)
 		assert.Equal(t, refused, e.z.Status.Backup.Restore, "pass %d: beside the restore", pass)
@@ -1024,7 +1028,8 @@ func TestRC11AnEventOfABackupJobBringsAPass(t *testing.T) {
 
 // R.C11: a Job asked for that is being deleted and has not ended holds the
 // schedule still, and status.backup.running names it, until its object is
-// gone; it is not read, so its request is answered as not read.
+// gone; it is not read, so its request is answered as not read, once the Job
+// is gone and not before.
 func TestRC11AJobAskedForBeingDeletedHoldsTheSchedule(t *testing.T) {
 	ctx := context.Background()
 	e := newRequestPlatform(t, verifyCR())
@@ -1033,21 +1038,24 @@ func TestRC11AJobAskedForBeingDeletedHoldsTheSchedule(t *testing.T) {
 	job.Finalizers = []string{"example.org/hold"}
 	require.NoError(t, e.c.Update(ctx, &job))
 	require.NoError(t, e.c.Delete(ctx, &job, client.PropagationPolicy(metav1.DeletePropagationBackground)))
-	out, _ := e.pass()
-	assert.True(t, logged(out, "backups: the backup asked for is answered as not read: its Job is gone before it was read",
-		"request", "one", "job", job.Name), out)
 	for pass := 0; pass < 2; pass++ {
+		out, _ := e.pass()
+		assert.NotContains(t, out, "answered as not read", "pass %d: still there", pass)
+		assert.Empty(t, e.backup().Request, "pass %d: not answered while its Job is there", pass)
 		assert.True(t, e.suspended(), "pass %d: its pod may still write", pass)
 		assert.Equal(t, job.Name, e.backup().Running, "pass %d", pass)
-		e.pass()
 	}
 	assert.Empty(t, e.carrying("two"))
 
 	require.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: verifyNS, Name: job.Name}, &job))
 	job.Finalizers = nil
 	require.NoError(t, e.c.Update(ctx, &job))
+	out, _ := e.pass()
+	assert.True(t, logged(out, "backups: the backup asked for is answered as not read: its Job is gone before it was read",
+		"request", "one", "job", job.Name), out)
+	assert.Equal(t, "one", e.backup().Request, "gone: answered as not read")
 	e.pass()
-	assert.False(t, e.suspended(), "gone: the schedule moves")
+	assert.False(t, e.suspended(), "gone and answered: the schedule moves")
 	assert.Empty(t, e.backup().Running)
 	assert.Empty(t, e.requested(), "and no second backup starts")
 }

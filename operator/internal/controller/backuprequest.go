@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -81,6 +82,16 @@ type askedBackup struct {
 	// answering is the value this pass answered, readJob the Job of request
 	// it read, until the pass's status is written.
 	answering, readJob string
+
+	// updateFrom is the version that runs of an update this operator holds
+	// back for the backup before it, updateSince when it first did, and
+	// updateApplied whether it has applied it since, while that version still
+	// runs: to updateTo, after the backup updateJob, or "" where there was none
+	// (updatebackup.go).
+	updateFrom          string
+	updateSince         time.Time
+	updateApplied       bool
+	updateTo, updateJob string
 }
 
 // backupStatusWritten makes what the pass answered and read count, once the
@@ -169,6 +180,12 @@ func askedFor(z *zaentrumv1alpha1.Zaentrum, job *batchv1.Job) bool {
 	return job.Annotations[zaentrumv1alpha1.BackupRequestAnnotation] != "" && metav1.IsControlledBy(job, z)
 }
 
+// platformsRun says whether a backup Job is one the platform started itself,
+// not the schedule: one asked for, or one before an update (updatebackup.go).
+func platformsRun(z *zaentrumv1alpha1.Zaentrum, job *batchv1.Job) bool {
+	return askedFor(z, job) || (job.Annotations[annotationBackupBeforeUpdate] != "" && metav1.IsControlledBy(job, z))
+}
+
 // notYetAnswered is the backup the resource asks for that has no answer
 // yet: status.backup.request does not hold it, and this operator did not
 // answer it in a status it wrote; or "".
@@ -198,18 +215,19 @@ func (r *ZaentrumReconciler) unanswered(z *zaentrumv1alpha1.Zaentrum, jobs []bat
 
 // backupScheduleHeld says whether the backups' schedule stands still this
 // pass: a backup asked for has no answer in a status written yet (request),
-// even where its Job has ended, until that run has been read; a Job asked for
-// of the platform's has not ended, whatever has become of its request, and
-// also while it is being deleted; or the backups' Jobs could not be listed
-// (err). jobs are all the backups' Jobs, those being deleted among them. It is
-// the one hold on the schedule; whatever else makes it stand still adds its
-// reason here.
-func backupScheduleHeld(z *zaentrumv1alpha1.Zaentrum, request string, jobs []batchv1.Job, err error) bool {
-	if err != nil || request != "" {
+// even where its Job has ended, until that run has been read; an update waits
+// for the backup before it (updateWaits, updatebackup.go); a Job the platform
+// started itself, asked for or before an update, has not ended, whatever has
+// become of its request or its update, and also while it is being deleted; or
+// the backups' Jobs could not be listed (err). jobs are all the backups' Jobs,
+// those being deleted among them. It is the one hold on the schedule; whatever
+// else makes it stand still adds its reason here.
+func backupScheduleHeld(z *zaentrumv1alpha1.Zaentrum, request string, updateWaits bool, jobs []batchv1.Job, err error) bool {
+	if err != nil || request != "" || updateWaits {
 		return true
 	}
 	for i := range jobs {
-		if done, _ := jobFinished(&jobs[i]); !done && askedFor(z, &jobs[i]) {
+		if done, _ := jobFinished(&jobs[i]); !done && platformsRun(z, &jobs[i]) {
 			return true
 		}
 	}
@@ -218,15 +236,16 @@ func backupScheduleHeld(z *zaentrumv1alpha1.Zaentrum, request string, jobs []bat
 
 // planBackupRequest reads, before the render, the backup the resource asks for
 // that has no answer yet, whether the schedule stands still, and, for a
-// request, whether the backups' CronJob is suspended as the pass finds it.
-func (r *ZaentrumReconciler) planBackupRequest(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) backupAsk {
+// request or an update that waits for its backup (updateWaits), whether the
+// backups' CronJob is suspended as the pass finds it.
+func (r *ZaentrumReconciler) planBackupRequest(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, updateWaits bool) backupAsk {
 	all, err := r.allBackupJobs(ctx, z)
 	ask := backupAsk{request: backupRequest(z)}
 	if err == nil {
 		ask.request = r.unanswered(z, notDeleting(all))
 	}
-	ask.hold = backupScheduleHeld(z, r.notYetAnswered(z), all, err)
-	if ask.request == "" {
+	ask.hold = backupScheduleHeld(z, r.notYetAnswered(z), updateWaits, all, err)
+	if ask.request == "" && !updateWaits {
 		return ask
 	}
 	var cron batchv1.CronJob
@@ -348,6 +367,13 @@ func runningBackup(jobs []batchv1.Job) string {
 // makes one, but owned by the Zaentrum, under a name of its own, and annotated
 // with the request's value.
 func (r *ZaentrumReconciler) requestedBackupJob(z *zaentrumv1alpha1.Zaentrum, cron *unstructured.Unstructured, request string) (*unstructured.Unstructured, error) {
+	return r.platformBackupJob(z, cron, map[string]string{zaentrumv1alpha1.BackupRequestAnnotation: request})
+}
+
+// platformBackupJob is a backup Job the platform starts itself: the rendered
+// CronJob's job template made into a Job of the Zaentrum's, under a name of its
+// own, with these annotations beside the template's.
+func (r *ZaentrumReconciler) platformBackupJob(z *zaentrumv1alpha1.Zaentrum, cron *unstructured.Unstructured, extra map[string]string) (*unstructured.Unstructured, error) {
 	spec, found, err := unstructured.NestedMap(cron.Object, "spec", "jobTemplate", "spec")
 	if err != nil || !found {
 		return nil, fmt.Errorf("the CronJob %s renders no job template", cron.GetName())
@@ -367,7 +393,9 @@ func (r *ZaentrumReconciler) requestedBackupJob(z *zaentrumv1alpha1.Zaentrum, cr
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	annotations[zaentrumv1alpha1.BackupRequestAnnotation] = request
+	for k, v := range extra {
+		annotations[k] = v
+	}
 	job.SetAnnotations(annotations)
 	if err := controllerutil.SetControllerReference(z, job, r.Scheme); err != nil {
 		return nil, err
@@ -377,13 +405,21 @@ func (r *ZaentrumReconciler) requestedBackupJob(z *zaentrumv1alpha1.Zaentrum, cr
 
 // keepNewestAskedFor deletes the Jobs asked for of the platform's that are
 // older than the newest one that has ended, once the pass has read the
-// backups' Jobs: that one has been read, and so have those before it. jobs are
-// the backups' Jobs, newest first.
+// backups' Jobs: that one has been read, and so have those before it; and the
+// same of the Jobs it started before an update and no request asked for
+// (updatebackup.go). jobs are the backups' Jobs, newest first.
 func (r *ZaentrumReconciler) keepNewestAskedFor(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, jobs []batchv1.Job) {
+	r.keepNewest(ctx, jobs, func(job *batchv1.Job) bool { return askedFor(z, job) })
+	r.keepNewest(ctx, jobs, func(job *batchv1.Job) bool { return platformsRun(z, job) && !askedFor(z, job) })
+}
+
+// keepNewest deletes the Jobs of a kind (of) older than the newest one of it
+// that has ended. jobs are newest first.
+func (r *ZaentrumReconciler) keepNewest(ctx context.Context, jobs []batchv1.Job, of func(*batchv1.Job) bool) {
 	kept := false
 	for i := range jobs {
 		job := &jobs[i]
-		if !askedFor(z, job) {
+		if !of(job) {
 			continue
 		}
 		done, _ := jobFinished(job)

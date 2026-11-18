@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -66,8 +67,11 @@ type backupDatabase struct {
 // reportBackups writes status.backup and the Backup condition from the
 // backups' Jobs, and answers the backup asked for (answerBackupRequest). A pass
 // that cannot read the Jobs, or the pod of one it has to read, leaves the
-// status as it is: the next pass reads them. platform is the pass's render.
-func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, platform []*unstructured.Unstructured) {
+// status as it is: the next pass reads them. platform is the pass's render and
+// version the version it renders; update is the backup before an update, whose
+// wait the condition's sentence ends with (updatebackup.go).
+func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, platform []*unstructured.Unstructured,
+	update updateBackup, version string) {
 	r.remember(z, func(a *askedBackup) { a.answering, a.readJob = "", "" })
 	if z.Spec.Databases.Mode == "external" {
 		// The databases are the tenant's, and so are their backups. A restore
@@ -150,6 +154,7 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 	}
 	var status metav1.ConditionStatus
 	var reason, msg string
+	ending := updateEnding(update, all)
 	switch {
 	case !on:
 	case latest == nil:
@@ -165,12 +170,25 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 			return
 		}
 		status, reason = metav1.ConditionFalse, "Failed"
-		msg = fmt.Sprintf("%s failed: %s; ", latest.Name, why)
-		if b.LastSuccess != nil && b.LastDump != "" {
-			msg += fmt.Sprintf("the latest that succeeded wrote %s, %s", b.LastDump, b.LastSuccess.UTC().Format("2006-01-02 15:04 MST"))
-		} else {
-			msg += "no backup has succeeded yet"
+		head, tail := latest.Name+" failed: ", "; "
+		if to := updatedAfter(latest, version); to != "" {
+			if _, stopped := stoppedAt(latest); stopped {
+				head, why, tail = latest.Name+" had not ended after 30 minutes and was stopped; the update to "+to+
+					" was applied without a backup; ", "", ""
+			} else {
+				tail = "; the update to " + to + " was applied all the same; "
+			}
 		}
+		if b.LastSuccess != nil && b.LastDump != "" {
+			tail += fmt.Sprintf("the latest that succeeded wrote %s, %s", b.LastDump, b.LastSuccess.UTC().Format("2006-01-02 15:04 MST"))
+		} else {
+			tail += "no backup has succeeded yet"
+		}
+		// The reason is clipped, never what follows it.
+		if why != "" {
+			why = clip(why, max(1, maxVerifyMessage-utf8.RuneCountInString(head+tail+ending)))
+		}
+		msg = head + why + tail
 	default:
 		rep, ok, err := r.backupSummary(ctx, latest)
 		if err != nil {
@@ -183,10 +201,14 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 			msg = fmt.Sprintf("%s: %d databases, %s; %d dumps kept, %s free", rep.Dump, len(rep.Databases),
 				bytesOf(rep.Bytes), len(rep.Kept), bytesOf(rep.Free))
 		}
+		if to := updatedAfter(latest, version); to != "" && !stoppedAtTheBound(latest) {
+			msg += "; made before the update to " + to
+		}
 	}
+	msg += ending
 
 	// Every run that ended has been read.
-	r.answerBackupRequest(ctx, z, b, jobs, on)
+	r.answerBackupRequest(ctx, z, b, jobs, all, on)
 	if on || z.Status.Backup != nil || !reflect.DeepEqual(*b, zaentrumv1alpha1.BackupStatus{}) {
 		z.Status.Backup = b
 	}
@@ -212,10 +234,11 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 // request started has ended; the Job this operator started for it is gone
 // before it was read, which answers it as not read, the Backup condition
 // keeping what it said; or backups are off (on is false) and the request
-// started none, so it is refused. A request that waits, or whose Job runs,
-// stays unanswered. jobs are the backups' Jobs, newest first.
+// started none, so it is refused. A request that waits, or whose Job runs or
+// is still there being deleted, stays unanswered. jobs are the backups' Jobs
+// that are not being deleted, all of them with those, newest first.
 func (r *ZaentrumReconciler) answerBackupRequest(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, b *zaentrumv1alpha1.BackupStatus,
-	jobs []batchv1.Job, on bool) {
+	jobs, all []batchv1.Job, on bool) {
 	a := r.asked(z)
 	if a.job != "" {
 		for i := range jobs {
@@ -243,6 +266,11 @@ func (r *ZaentrumReconciler) answerBackupRequest(ctx context.Context, z *zaentru
 		}
 		r.answerBackup(ctx, z, b, request, "backups: the backup asked for has ended", "job", job.Name, "result", result)
 	case a.request == request:
+		if askedJob(z, all, request) != nil {
+			// Being deleted, but still there: gone once it is in neither
+			// list.
+			return
+		}
 		r.answerBackup(ctx, z, b, request, "backups: the backup asked for is answered as not read: its Job is gone before it was read",
 			"job", a.job)
 	case a.answered == request:
@@ -398,4 +426,24 @@ func bytesOf(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// updatedAfter is the version an update was applied to after this backup,
+// made before it, where the version the pass renders is no longer the one the
+// backup was made of; or "".
+func updatedAfter(job *batchv1.Job, version string) string {
+	from, to := job.Annotations[annotationBackupBeforeUpdate], job.Annotations[annotationBackupBeforeUpdateTo]
+	if from == "" || from == version {
+		return ""
+	}
+	return to
+}
+
+// stoppedAtTheBound says whether the backup was stopped only as the update was
+// applied, after the 35 minutes: the update did not wait for its pod, so a set
+// it wrote is not one made before the update.
+func stoppedAtTheBound(job *batchv1.Job) bool {
+	t, stopped := stoppedAt(job)
+	since, err := sinceOf(job)
+	return stopped && err == nil && !t.Before(since.Add(updateHoldBound))
 }

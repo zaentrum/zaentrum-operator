@@ -179,7 +179,9 @@ func (r *ZaentrumReconciler) stepRestore(ctx context.Context, z *zaentrumv1alpha
 			setRestore(z, rs)
 			return true
 		}
-		jobs, err := r.backupJobs(ctx, z)
+		// Those being deleted among them: one that has not ended may still
+		// write.
+		jobs, err := r.allBackupJobs(ctx, z)
 		if err != nil {
 			return true
 		}

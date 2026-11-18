@@ -245,7 +245,7 @@ func TestRestoreRefusals(t *testing.T) {
 		dump, _ := e.restorePass(false)
 		assert.Empty(t, dump)
 		assert.Contains(t, e.z.Status.Backup.Restore.Message, "external")
-		e.r.reportBackups(context.Background(), e.z, e.platform)
+		e.r.reportBackups(context.Background(), e.z, e.platform, updateBackup{}, "")
 		assert.NotNil(t, e.z.Status.Backup.Restore, "the refusal stays readable")
 	})
 	t.Run("no claim to restore from", func(t *testing.T) {
@@ -324,7 +324,19 @@ func TestARestoreWaitsForACopyAndABackup(t *testing.T) {
 	assert.Contains(t, e.z.Status.Backup.Restore.Message, "waiting for the backup zaentrum-backup-1 to end")
 	assert.Empty(t, restoreJobs(t, e.c, e.z.Namespace))
 
-	require.NoError(t, e.c.Delete(context.Background(), &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "zaentrum-backup-1", Namespace: e.z.Namespace}}))
+	// Being deleted, it may still write: the restore waits until it is gone.
+	ctx := context.Background()
+	var job batchv1.Job
+	require.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: e.z.Namespace, Name: "zaentrum-backup-1"}, &job))
+	job.Finalizers = []string{"example.org/hold"}
+	require.NoError(t, e.c.Update(ctx, &job))
+	require.NoError(t, e.c.Delete(ctx, &job))
+	_, _ = e.restorePass(false)
+	assert.Equal(t, zaentrumv1alpha1.RestoreStopping, e.z.Status.Backup.Restore.Result, "being deleted, it has not ended")
+	assert.Contains(t, e.z.Status.Backup.Restore.Message, "waiting for the backup zaentrum-backup-1 to end")
+	require.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: e.z.Namespace, Name: "zaentrum-backup-1"}, &job))
+	job.Finalizers = nil
+	require.NoError(t, e.c.Update(ctx, &job))
 	_, _ = e.restorePass(false)
 	assert.Equal(t, zaentrumv1alpha1.RestoreRunning, e.z.Status.Backup.Restore.Result)
 }
