@@ -621,10 +621,12 @@ kubectl -n zaentrum get zaentrum zaentrum \
 ```
 
 The CronJob is suspended (`backup.suspend` under plain Helm, `true` or
-`"true"`) from the pass that takes the request up until it is answered, and
-for as long as a backup asked for runs, whatever has become of its request —
-the annotation removed or changed, backups turned off and on — and while the
-backups' Jobs cannot be listed, so that its run and the one asked for never
+`"true"`) from the pass that takes the request up until its answer has been
+written, also where the pass that finds the Job ended cannot read it; for as
+long as a backup asked for runs, whatever has become of its request — the
+annotation removed or changed, backups turned off and on — and while its Job
+is being deleted; and while the backups' Jobs cannot be listed, so that its
+run and the one asked for never
 write at once; a run the schedule missed meanwhile follows once it moves
 again, if it was due within the last six hours. The backup starts on a later
 pass, one that found the CronJob suspended before it applied anything and
@@ -647,7 +649,7 @@ platform would each start a Job; every shipped manifest runs the operator with
 `--leader-elect`, so one leads.
 
 `status.backup.running` names the backup Job that runs, the schedule's or one
-asked for: the operator watches the backups' Jobs, by their label, so it
+asked for, one being deleted among them: the operator watches the backups' Jobs, by their label, so it
 follows a run's start and end within a pass; of the Jobs, its cache holds those
 alone. While the resource is refused (`ResourceRefused`) it is cleared once
 that Job has ended; a request waits until the resource is corrected.
@@ -655,15 +657,20 @@ that Job has ended; a request waits until the resource is corrected.
 `status.backup.request` is the value answered: the backup it started has
 ended, well or not, and has been read, so `lastSuccess`, `lastFailure` and the
 `Backup` condition are that run's. A pass that cannot read a run's pod leaves
-the status as it is, and the next pass reads it. A Job asked for that is gone
-before it was read answers its request as not read, the `Backup` condition
-keeping what it said, and no second backup starts for it — unless the
-operator started again in between, which knows only the Jobs that are there
-and starts the backup once more. An ended Job of the platform's that carries
-the value counts as the answer too, so where the resource's CRD does not
-serve `status.backup.request` (an operator newer than its CRD) the schedule
-moves again and no second backup starts; the log says once that the status
-did not keep the answer. The log shows the first 64 characters of a value.
+the status as it is, and the next pass reads it. A Job asked for that is gone,
+or is being deleted, before it was read answers its request as not read, the
+`Backup` condition keeping what it said, and no second backup starts for it —
+unless the operator started again in between, which knows only the Jobs that
+are there and starts the backup once more. That is said also of a Job that ran
+to its end and wrote a set before it was lost: the status then says nothing of
+that set, and with backups off the `Disabled` sentence says the backup asked
+for is not made. No backup starts for a value an ended Job of the platform's
+carries, and an answer counts once the status holding it has been written, so
+where the resource's CRD does not serve `status.backup.request` (an operator
+newer than its CRD) the schedule moves again on the pass after the answer, and
+after each start of the operator one pass later, and no second backup starts;
+the log says once that the status did not keep the answer, never for a status
+write that merely failed. The log shows the first 64 characters of a value.
 
 Where backups are off it is answered at once, and refused: while the
 annotation holds that value and no backup carries it, the `Disabled` sentence

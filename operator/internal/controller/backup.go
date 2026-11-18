@@ -68,6 +68,7 @@ type backupDatabase struct {
 // that cannot read the Jobs, or the pod of one it has to read, leaves the
 // status as it is: the next pass reads them. platform is the pass's render.
 func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alpha1.Zaentrum, platform []*unstructured.Unstructured) {
+	r.remember(z, func(a *askedBackup) { a.answering, a.readJob = "", "" })
 	if z.Spec.Databases.Mode == "external" {
 		// The databases are the tenant's, and so are their backups. A restore
 		// once refused here and a backup asked for, which is refused at once,
@@ -92,11 +93,12 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 		r.removeBackupSchedule(ctx, z)
 	}
 
-	jobs, err := r.backupJobs(ctx, z)
+	all, err := r.allBackupJobs(ctx, z)
 	if err != nil {
 		log.FromContext(ctx).Info("backups: the runs could not be listed; status stays as it is", "error", err.Error())
 		return
 	}
+	jobs := notDeleting(all)
 	unread := func(job *batchv1.Job, err error) {
 		log.FromContext(ctx).Info("backups: a run could not be read; status stays as it is", "job", job.Name, "error", err.Error())
 	}
@@ -109,7 +111,7 @@ func (r *ZaentrumReconciler) reportBackups(ctx context.Context, z *zaentrumv1alp
 	}
 	var latest *batchv1.Job
 	var latestFailed bool
-	running := runningBackup(jobs)
+	running := runningBackup(all)
 	for i := range jobs {
 		job := &jobs[i]
 		done, failed := jobFinished(job)
@@ -218,8 +220,9 @@ func (r *ZaentrumReconciler) answerBackupRequest(ctx context.Context, z *zaentru
 	if a.job != "" {
 		for i := range jobs {
 			if done, _ := jobFinished(&jobs[i]); done && jobs[i].Name == a.job {
-				// Read: no longer one that could be gone unread.
-				r.remember(z, func(a *askedBackup) { a.request, a.job = "", "" })
+				// Read: no longer one that could be gone unread, once the
+				// status is written.
+				r.remember(z, func(a *askedBackup) { a.readJob = jobs[i].Name })
 				break
 			}
 		}
@@ -281,23 +284,41 @@ func (r *ZaentrumReconciler) removeBackupSchedule(ctx context.Context, z *zaentr
 	log.FromContext(ctx).Info("backups: turned off; removed their schedule", "cronjob", cron.Name)
 }
 
-// backupJobs lists the backups' Jobs in the platform's namespace, newest first.
+// backupJobs lists the backups' Jobs in the platform's namespace that are not
+// being deleted, newest first: the ones that are read.
 func (r *ZaentrumReconciler) backupJobs(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) ([]batchv1.Job, error) {
+	all, err := r.allBackupJobs(ctx, z)
+	if err != nil {
+		return nil, err
+	}
+	return notDeleting(all), nil
+}
+
+// allBackupJobs lists the backups' Jobs in the platform's namespace, newest
+// first, those being deleted among them: one that has not ended may still
+// write, so it counts for the hold on the schedule and for what runs.
+func (r *ZaentrumReconciler) allBackupJobs(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) ([]batchv1.Job, error) {
 	var jobs batchv1.JobList
 	if err := r.reader().List(ctx, &jobs, client.InNamespace(z.Namespace),
 		client.MatchingLabels{labelDatabase: databaseBackup}); err != nil {
 		return nil, err
 	}
-	out := make([]batchv1.Job, 0, len(jobs.Items))
-	for _, j := range jobs.Items {
-		if j.DeletionTimestamp == nil {
-			out = append(out, j)
-		}
-	}
+	out := jobs.Items
 	sort.SliceStable(out, func(a, b int) bool {
 		return out[b].CreationTimestamp.Before(&out[a].CreationTimestamp)
 	})
 	return out, nil
+}
+
+// notDeleting is the Jobs that are not being deleted, in their order.
+func notDeleting(jobs []batchv1.Job) []batchv1.Job {
+	out := make([]batchv1.Job, 0, len(jobs))
+	for _, j := range jobs {
+		if j.DeletionTimestamp == nil {
+			out = append(out, j)
+		}
+	}
+	return out
 }
 
 // backupMessage is the termination message the backup container of the Job's

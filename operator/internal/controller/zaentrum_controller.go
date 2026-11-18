@@ -379,6 +379,9 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.patchStatus(ctx, &z); err != nil {
 		return ctrl.Result{}, err
 	}
+	// What the pass answered of a backup asked for counts now that the status
+	// holding it is written (backuprequest.go).
+	r.backupStatusWritten(&z)
 
 	logger.Info("reconciled zaentrum", "objects", len(objs), "phase", z.Status.Phase, "version", vals.Version)
 	if verifying || configuring || db.copying || restoreInFlight || backupWaits {

@@ -13,9 +13,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
@@ -181,8 +183,8 @@ func logged(log, msg string, kv ...string) bool {
 // one Job, the schedule's own job template made into a Job of the platform's,
 // with the request's value; status.backup.running names it. Once it has ended
 // and been read, the request is answered, and the last backup and the Backup
-// condition are that run's; the schedule moves again on the pass that finds
-// it ended.
+// condition are that run's; the schedule moves again on the pass after the
+// answer.
 func TestRC11ABackupAskedForStartsOnceTheScheduleStandsStill(t *testing.T) {
 	e := newRequestPlatform(t, verifyCR())
 	e.pass()
@@ -233,10 +235,10 @@ func TestRC11ABackupAskedForStartsOnceTheScheduleStandsStill(t *testing.T) {
 	assert.Equal(t, "Succeeded", c.Reason)
 	assert.Equal(t, "2026-10-04T00-00-05Z: 4 databases, 12.0 MiB; 2 dumps kept, 4.0 GiB free", c.Message, "that run's")
 	assert.True(t, logged(out, "backups: the backup asked for has ended", "request", "one", "job", job.Name, "result", "succeeded"), out)
-	assert.False(t, e.suspended(), "its Job has ended: the schedule moves again")
+	assert.True(t, e.suspended(), "the pass that answers it was rendered before the answer")
 
 	out, _ = e.pass()
-	assert.False(t, e.suspended())
+	assert.False(t, e.suspended(), "answered: the schedule moves again")
 	assert.Len(t, e.requested(), 1, "nothing more starts, and the one that has ended is kept")
 	assert.Equal(t, "one", e.backup().Request)
 	assert.NotContains(t, out, "has ended", "answered once")
@@ -712,8 +714,9 @@ func TestRC11TheNextBackupAskedForMovesNothingBeforeItEnds(t *testing.T) {
 }
 
 // R.C11: a run whose pod cannot be listed on the pass that finds it ended is
-// not read on that pass: the status stays as it is and the request has no
-// answer; the next pass reads it, and answers.
+// not read on that pass: the status stays as it is, the request has no
+// answer, and the schedule stands still, so no run of it can end first; the
+// next pass reads it, and answers, and the schedule moves on the pass after.
 func TestRC11ARunNotReadIsReadOnTheNextPass(t *testing.T) {
 	failPods := false
 	var e *platformEnv
@@ -745,12 +748,16 @@ func TestRC11ARunNotReadIsReadOnTheNextPass(t *testing.T) {
 	assert.True(t, logged(out, "backups: a run could not be read; status stays as it is", "job", job.Name), out)
 	assert.Empty(t, b.Request, "not read: no answer")
 	assert.Equal(t, before.LastSuccess, b.LastSuccess)
+	assert.True(t, e.suspended(), "the schedule stands still until the answer")
 	failPods = false
 	e.pass()
 	b = e.backup()
 	assert.Equal(t, "one", b.Request)
 	assert.Equal(t, "2026-10-04T00-00-05Z", b.LastDump, "its own set")
 	assert.Equal(t, "2026-10-04T00-00-05Z: 4 databases, 12.0 MiB; 2 dumps kept, 4.0 GiB free", e.backupCondition().Message)
+	assert.True(t, e.suspended())
+	e.pass()
+	assert.False(t, e.suspended(), "answered: the schedule moves")
 }
 
 // R.C11: a Job asked for that is gone before it was read answers its request
@@ -782,8 +789,9 @@ func TestRC11AJobGoneBeforeItWasReadIsAnsweredAsNotRead(t *testing.T) {
 
 // R.C11: where the status cannot keep status.backup.request (a CRD older than
 // the operator), the ended Job that carries the value is its answer: the
-// schedule moves again, no second backup starts, "has ended" is logged once,
-// and that the status did not keep the answer, once.
+// schedule moves again on the pass after the answer, no second backup starts,
+// "has ended" is logged once, and that the status did not keep the answer,
+// once.
 func TestRC11AnEndedJobAnswersWhereTheStatusCannotKeepTheField(t *testing.T) {
 	e := newRequestPlatform(t, verifyCR())
 	e.c = interceptor.NewClient(e.c, interceptor.Funcs{
@@ -805,8 +813,9 @@ func TestRC11AnEndedJobAnswersWhereTheStatusCannotKeepTheField(t *testing.T) {
 	e.pass()
 	job := e.runAsked("one")
 	e.endBackup(job.Name, 0, okSummary)
-	all := ""
-	for pass := 0; pass < 4; pass++ {
+	all, _ := e.pass()
+	assert.True(t, e.suspended(), "the pass that answers it")
+	for pass := 1; pass < 4; pass++ {
 		out, _ := e.pass()
 		all += out
 		assert.False(t, e.suspended(), "pass %d: the schedule moves", pass)
@@ -1011,4 +1020,92 @@ func TestRC11AnEventOfABackupJobBringsAPass(t *testing.T) {
 	jobs.Add(meta)
 	assert.Eventually(t, func() bool { return e.backup().Running == job.Name }, 30*time.Second, 50*time.Millisecond,
 		"the event brings a pass that names the run")
+}
+
+// R.C11: a Job asked for that is being deleted and has not ended holds the
+// schedule still, and status.backup.running names it, until its object is
+// gone; it is not read, so its request is answered as not read.
+func TestRC11AJobAskedForBeingDeletedHoldsTheSchedule(t *testing.T) {
+	ctx := context.Background()
+	e := newRequestPlatform(t, verifyCR())
+	e.pass()
+	job := e.runAsked("one")
+	job.Finalizers = []string{"example.org/hold"}
+	require.NoError(t, e.c.Update(ctx, &job))
+	require.NoError(t, e.c.Delete(ctx, &job, client.PropagationPolicy(metav1.DeletePropagationBackground)))
+	out, _ := e.pass()
+	assert.True(t, logged(out, "backups: the backup asked for is answered as not read: its Job is gone before it was read",
+		"request", "one", "job", job.Name), out)
+	for pass := 0; pass < 2; pass++ {
+		assert.True(t, e.suspended(), "pass %d: its pod may still write", pass)
+		assert.Equal(t, job.Name, e.backup().Running, "pass %d", pass)
+		e.pass()
+	}
+	assert.Empty(t, e.carrying("two"))
+
+	require.NoError(t, e.c.Get(ctx, types.NamespacedName{Namespace: verifyNS, Name: job.Name}, &job))
+	job.Finalizers = nil
+	require.NoError(t, e.c.Update(ctx, &job))
+	e.pass()
+	assert.False(t, e.suspended(), "gone: the schedule moves")
+	assert.Empty(t, e.backup().Running)
+	assert.Empty(t, e.requested(), "and no second backup starts")
+}
+
+// R.C11: an answer counts once the status that holds it was written. A status
+// write that fails on the answering pass is no status that cannot keep the
+// field: the next pass answers again, without saying so; and where the status
+// does drop the field later, that is said, once.
+func TestRC11AFailedStatusWriteIsNotAStatusThatCannotKeepTheField(t *testing.T) {
+	fail, prune := false, false
+	e := newRequestPlatform(t, verifyCR())
+	e.c = interceptor.NewClient(e.c, interceptor.Funcs{
+		Patch: applyAsCreateOrUpdate,
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if created := obj.GetCreationTimestamp(); created.IsZero() {
+				obj.SetCreationTimestamp(metav1.NewTime(e.clock))
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			z, ok := obj.(*zaentrumv1alpha1.Zaentrum)
+			switch {
+			case ok && fail:
+				fail = false
+				return apierrors.NewConflict(schema.GroupResource{Group: "zaentrum.io", Resource: "zaentrums"}, z.Name,
+					fmt.Errorf("the object has been modified"))
+			case ok && prune && z.Status.Backup != nil:
+				z.Status.Backup.Request, z.Status.Backup.Running = "", ""
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	})
+	e.r = &ZaentrumReconciler{Client: e.c, Scheme: e.r.Scheme, Now: e.r.Now}
+	e.pass()
+	job := e.runAsked("one")
+	e.endBackup(job.Name, 0, okSummary)
+
+	var buf bytes.Buffer
+	fail = true
+	_, err := e.r.Reconcile(log.IntoContext(context.Background(), zap.New(zap.WriteTo(&buf))), ctrl.Request{NamespacedName: e.key})
+	require.Error(t, err, "the answering pass's status write fails")
+	all := buf.String()
+	out, _ := e.pass()
+	all += out
+	assert.Equal(t, "one", e.backup().Request, "answered again, and written")
+	assert.NotContains(t, all, "did not keep", all)
+	e.pass()
+	assert.False(t, e.suspended())
+
+	prune = true
+	two := e.runAsked("two")
+	e.endBackup(two.Name, 0, okSummary)
+	all = ""
+	for pass := 0; pass < 3; pass++ {
+		out, _ := e.pass()
+		all += out
+	}
+	assert.Equal(t, 1, strings.Count(all, "the status did not keep the answer to the backup asked for"), all)
+	assert.False(t, e.suspended())
+	assert.Len(t, e.carrying("two"), 1, "no second backup")
 }

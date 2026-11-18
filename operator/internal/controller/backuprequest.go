@@ -26,15 +26,17 @@ import (
 //
 // The annotation zaentrum.io/backup-request on the Zaentrum, with a value —
 // trimmed, not empty — that has no answer yet, asks for one backup now. A
-// value has its answer when status.backup.request holds it, or when an ended
-// Job of the platform's carries it, so that a status that cannot hold the
-// field (a CRD older than the operator) neither holds the schedule for good
-// nor starts a second backup.
+// value has its answer when status.backup.request holds it, or when this
+// operator answered it in a status it wrote, so that a status that cannot
+// hold the field (a CRD older than the operator) does not hold the schedule
+// for good. No backup starts for a value an ended Job of the platform's
+// carries, whatever the status says.
 //
 // The schedule stands still (backup.suspend, the CronJob's suspend) from the
-// pass that takes a request up until its answer, and for as long as a backup
-// asked for runs, whatever has become of its request, so that the schedule's
-// run and the one asked for never write at once (backupScheduleHeld). The
+// pass that takes a request up until its answer has been written, and for as
+// long as a backup asked for runs, whatever has become of its request and
+// also while its Job is being deleted, so that the schedule's run and the one
+// asked for never write at once (backupScheduleHeld). The
 // backup starts on a later pass: one that found the CronJob suspended before
 // it applied anything, and finds no backup Job unfinished and no restore that
 // stops the platform or has it stopped. A request waits for all of these; it
@@ -67,12 +69,36 @@ const maxLoggedRequest = 64
 // askedBackup is what this operator remembers of a platform's backups asked
 // for, between its passes: the Job it started for a request and has not yet
 // read, which tells a Job gone before it was read from one never started; the
-// value it answered last, which tells a status that did not keep the answer
-// from a request with no answer; and whether it said so.
+// value it answered last in a status that was written, which tells a status
+// that did not keep the answer from a request with no answer; and whether it
+// said so. What a pass answers and reads counts once its status is written
+// (backupStatusWritten).
 type askedBackup struct {
 	request, job string
 	answered     string
 	toldUnkept   bool
+
+	// answering is the value this pass answered, readJob the Job of request
+	// it read, until the pass's status is written.
+	answering, readJob string
+}
+
+// backupStatusWritten makes what the pass answered and read count, once the
+// status that holds it was written: an answer of a status write that failed is
+// given again on the next pass, as if it had not been given.
+func (r *ZaentrumReconciler) backupStatusWritten(z *zaentrumv1alpha1.Zaentrum) {
+	r.remember(z, func(a *askedBackup) {
+		if a.readJob != "" && a.readJob == a.job {
+			a.request, a.job = "", ""
+		}
+		if a.answering != "" {
+			a.answered = a.answering
+			if a.request == a.answering {
+				a.request, a.job = "", ""
+			}
+		}
+		a.answering, a.readJob = "", ""
+	})
 }
 
 // asked is what this operator remembers of z's backups asked for.
@@ -143,12 +169,23 @@ func askedFor(z *zaentrumv1alpha1.Zaentrum, job *batchv1.Job) bool {
 	return job.Annotations[zaentrumv1alpha1.BackupRequestAnnotation] != "" && metav1.IsControlledBy(job, z)
 }
 
-// unanswered is the backup the resource asks for that has no answer yet, or
-// "": status.backup.request does not hold it, no ended Job of the platform's
-// carries it, and this operator did not answer it already.
-func (r *ZaentrumReconciler) unanswered(z *zaentrumv1alpha1.Zaentrum, jobs []batchv1.Job) string {
+// notYetAnswered is the backup the resource asks for that has no answer
+// yet: status.backup.request does not hold it, and this operator did not
+// answer it in a status it wrote; or "".
+func (r *ZaentrumReconciler) notYetAnswered(z *zaentrumv1alpha1.Zaentrum) string {
 	request := backupRequest(z)
 	if request == "" || r.asked(z).answered == request {
+		return ""
+	}
+	return request
+}
+
+// unanswered is the backup to start, or "": one with no answer yet
+// (notYetAnswered) that no ended Job of the platform's carries either. jobs
+// are the backups' Jobs that are not being deleted.
+func (r *ZaentrumReconciler) unanswered(z *zaentrumv1alpha1.Zaentrum, jobs []batchv1.Job) string {
+	request := r.notYetAnswered(z)
+	if request == "" {
 		return ""
 	}
 	if job := askedJob(z, jobs, request); job != nil {
@@ -160,9 +197,11 @@ func (r *ZaentrumReconciler) unanswered(z *zaentrumv1alpha1.Zaentrum, jobs []bat
 }
 
 // backupScheduleHeld says whether the backups' schedule stands still this
-// pass: a backup asked for has no answer yet (request), a Job asked for of the
-// platform's has not ended, whatever has become of its request, or the
-// backups' Jobs could not be listed (err). jobs are the backups' Jobs. It is
+// pass: a backup asked for has no answer in a status written yet (request),
+// even where its Job has ended, until that run has been read; a Job asked for
+// of the platform's has not ended, whatever has become of its request, and
+// also while it is being deleted; or the backups' Jobs could not be listed
+// (err). jobs are all the backups' Jobs, those being deleted among them. It is
 // the one hold on the schedule; whatever else makes it stand still adds its
 // reason here.
 func backupScheduleHeld(z *zaentrumv1alpha1.Zaentrum, request string, jobs []batchv1.Job, err error) bool {
@@ -181,12 +220,12 @@ func backupScheduleHeld(z *zaentrumv1alpha1.Zaentrum, request string, jobs []bat
 // that has no answer yet, whether the schedule stands still, and, for a
 // request, whether the backups' CronJob is suspended as the pass finds it.
 func (r *ZaentrumReconciler) planBackupRequest(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) backupAsk {
-	jobs, err := r.backupJobs(ctx, z)
+	all, err := r.allBackupJobs(ctx, z)
 	ask := backupAsk{request: backupRequest(z)}
 	if err == nil {
-		ask.request = r.unanswered(z, jobs)
+		ask.request = r.unanswered(z, notDeleting(all))
 	}
-	ask.hold = backupScheduleHeld(z, ask.request, jobs, err)
+	ask.hold = backupScheduleHeld(z, r.notYetAnswered(z), all, err)
 	if ask.request == "" {
 		return ask
 	}
@@ -214,7 +253,8 @@ func (r *ZaentrumReconciler) startBackupRequest(ctx context.Context, z *zaentrum
 	}
 	logger := log.FromContext(ctx)
 	value := loggedRequest(ask.request)
-	jobs, err := r.backupJobs(ctx, z)
+	all, err := r.allBackupJobs(ctx, z)
+	jobs := notDeleting(all)
 	if err != nil {
 		logger.Info("backups: the backup asked for waits", "request", value, "for", "the backups' Jobs to be listed", "error", err.Error())
 		return true
@@ -229,7 +269,7 @@ func (r *ZaentrumReconciler) startBackupRequest(ctx context.Context, z *zaentrum
 		return false
 	}
 	waits := ""
-	switch running := runningBackup(jobs); {
+	switch running := runningBackup(all); {
 	case restoreDump != "":
 		waits = "the restore of " + restoreDump
 	case running != "":
@@ -273,12 +313,7 @@ func (r *ZaentrumReconciler) answerBackup(ctx context.Context, z *zaentrumv1alph
 		return
 	}
 	logger.Info(msg, append([]any{"request", loggedRequest(value)}, kv...)...)
-	r.remember(z, func(a *askedBackup) {
-		a.answered = value
-		if a.request == value {
-			a.request, a.job = "", ""
-		}
-	})
+	r.remember(z, func(a *askedBackup) { a.answering = value })
 }
 
 // loggedRequest is a request's value as the log shows it: its first
@@ -298,7 +333,7 @@ func renderedObject(objs []*unstructured.Unstructured, kind, name string) *unstr
 }
 
 // runningBackup is the name of the newest of the backups' Jobs that has not
-// ended, or "". jobs are newest first.
+// ended, or "". jobs are newest first, those being deleted among them.
 func runningBackup(jobs []batchv1.Job) string {
 	for i := range jobs {
 		if done, _ := jobFinished(&jobs[i]); !done {
