@@ -2,7 +2,7 @@
 # Seeds the demo library on the NFS share with Creative-Commons content only.
 # Mounts the whole export at /var/lib/katalog (the parent-mount layout the services use):
 # source under media/, shared HLS output under packages/. Writes RW (NFS export must allow
-# arbitrary-UID writes — the live packager proves nas001 tolerates this for /media).
+# arbitrary-UID writes, as the packager's own writes to /media need).
 # CI deletes this Job before apply so it re-runs each deploy (idempotent: migrate + skip-if-present).
 apiVersion: batch/v1
 kind: Job

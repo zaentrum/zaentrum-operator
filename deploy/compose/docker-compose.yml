@@ -23,7 +23,7 @@
 name: zaentrum
 
 x-env: &oidc
-  OIDC_ISSUER: ""          # set to your server's OIDC issuer, or leave blank for first-run setup
+  OIDC_ISSUER: ""          # required: your server's OIDC issuer; the services do not start without one
   OIDC_AUDIENCE: "chino"
 
 services:
