@@ -44,10 +44,11 @@ All three public clients:
 
 > Compatibility note: these mirror the historical `chino*` clients in
 > `identity/idp-config/clients/` (public, PKCE S256, device grant, audience
-> mapper) but are produced generically — no `nalet.cloud` redirect URIs, no
-> real secrets. The public clients use wildcard redirect/origins so the realm
-> works behind any host the appliance is deployed under. Tighten these per
-> deployment if you front a single known host.
+> mapper) but are produced generically — no redirect URIs of a particular host
+> such as `sso.example.org`, no real secrets. The public clients use wildcard
+> redirect/origins so the realm works behind any host the appliance is
+> deployed under. Tighten these per deployment if you front a single known
+> host.
 
 ### `zaentrum-manager` secret
 
