@@ -10,23 +10,6 @@ jobs:
     permissions:
       contents: read
     uses: zaentrum/.github/.github/workflows/neutrality.yml@v1
-    with:
-      exceptions: |
-        scripts/check-neutrality.sh  holds the older neutrality check until the shared check replaces it
-
-  # The public boundary the open-source strategy calls "enforced, not trusted".
-  # It was neither until 2026-08-06, when the published operator image was found
-  # to carry three internal hostnames, compiled in via the chart templates the
-  # binary embeds. Nothing checked.
-  #
-  # (This comment used to name those hostnames, and the guard failed the commit
-  #  that added it — correctly. Even describing the problem counts as carrying
-  #  it.)
-  neutrality:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: ./scripts/check-neutrality.sh
 
   # The operator's own tests, and the chart it embeds. The image's build
   # compiles the operator and runs neither.

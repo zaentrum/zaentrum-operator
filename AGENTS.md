@@ -38,13 +38,12 @@ docker build -f operator/bundle/bundle.Dockerfile operator/bundle    # operator-
 
 ## Test
 
-As `ci.yml` runs them on a pull request, in its `operator` and `neutrality` jobs:
+As `ci.yml` runs them on a pull request, in its `operator` job:
 
 ```sh
 (cd operator && go vet ./... && go test ./...)
 helm lint operator/platform/chart
 ./deploy/allinone/build.sh render && git diff --exit-code -- deploy/allinone/manifests
-./scripts/check-neutrality.sh
 ```
 
 The Go tests need Go alone: the reconcilers run on controller-runtime's fake client, the
@@ -111,9 +110,5 @@ in `operator/platform/chart/values-demo.yaml`
 - **The appliance's manifests are committed.** After a change to `operator/config/`, run
   `./deploy/allinone/build.sh render` and commit what it changes in
   `deploy/allinone/manifests/`; on a tree that is in step, it changes nothing.
-- **The neutrality guard.** `./scripts/check-neutrality.sh` fails on an internal hostname,
-  an acquisition tool's or another media product's name in any tracked file, prose
-  included, and on acquisition vocabulary in code and config. Every rule skips the four
-  paths on its allow list: `deploy/overlays/demo/`, `operator/platform/chart/values-demo.yaml`,
-  `platform/keycloak/README.md` and the script itself. A line marked
-  `neutrality-guard:allow` is skipped; `--self-test` checks the guard's own patterns.
+- **Neutrality.** The organisation's shared check, the `neutrality-shared` job of `ci.yml`,
+  is the one neutrality check.

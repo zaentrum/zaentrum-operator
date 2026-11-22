@@ -1237,7 +1237,6 @@ install it, and so does one on a platform without a VPN.
 ```sh
 go build ./... && go vet ./... && go test ./...
 helm lint platform/chart && helm lint platform/chart -f platform/chart/values-demo.yaml
-../scripts/check-neutrality.sh       # the public boundary; it checks its own patterns first
 ../deploy/allinone/build.sh render   # must leave deploy/allinone/manifests unchanged
 ```
 
