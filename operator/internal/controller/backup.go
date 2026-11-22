@@ -393,9 +393,14 @@ func (r *ZaentrumReconciler) backupSummary(ctx context.Context, job *batchv1.Job
 	return rep, true, nil
 }
 
-// backupFailure is why a failed run failed: its own message, else the Job's;
-// an error where its pods could not be listed.
+// backupFailure is why a failed run failed: "stopped" for one the operator
+// stopped for an update (stoppedAt), whatever its pod left, as the summary of
+// a set it finished in its grace period is no reason; else its own message,
+// else the Job's; an error where its pods could not be listed.
 func (r *ZaentrumReconciler) backupFailure(ctx context.Context, job *batchv1.Job) (string, error) {
+	if _, stopped := stoppedAt(job); stopped {
+		return "stopped", nil
+	}
 	msg, err := r.backupMessage(ctx, job)
 	if err != nil {
 		return "", err

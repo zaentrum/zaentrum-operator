@@ -769,10 +769,12 @@ another. After the update, its own backup holds the schedule still for as
 long as it has not ended. No backup starts, the schedule stands still and a
 restore waits while a pod of a backup Job that has failed still runs: a Job is
 failed at its deadline while its pod may still be in its grace period.
-`status.backup.running` names such a Job while its pod runs; a pod that never
-ends (its node gone) holds the schedule, and every backup asked for, until it
-is removed by hand (`kubectl delete pod`). During a restore the update waits
-for the restore to end, and the 30 minutes start then, with a backup first.
+`status.backup.running` names such a Job while its pod runs. A pod that never
+ends, as on a node that is gone, holds the schedule, every backup asked for
+and a restore until its Job is deleted (`kubectl delete job {name}`): deleting
+the pod may not remove it while its node is gone. During a restore the update
+waits for the restore to end, and the 30 minutes start then, with a backup
+first.
 
 While it waits, the `Backup` condition keeps its status and reason, and its
 sentence ends “; {job} backs up {version} before the update to {target}: the

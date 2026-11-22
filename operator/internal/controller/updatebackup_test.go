@@ -216,6 +216,25 @@ func TestRC12ABackupStillRunningAfter30MinutesIsStopped(t *testing.T) {
 		assert.Equal(t, job.Name+" had not ended after 30 minutes and was stopped; the update to v0.5.0 was applied without a backup; "+
 			"the latest that succeeded wrote 2026-10-04T00-00-05Z, "+at(first.Add(-20*time.Second)), c.Message)
 	})
+	t.Run("it finishes its set in its grace period, the update taken back meanwhile", func(t *testing.T) {
+		e, job, first := start(t)
+		e.updateTo("v0.4.0")
+		// The Job controller fails it at its deadline; its pod finishes the set
+		// in its grace period and leaves the run's summary.
+		job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(e.clock), Reason: "DeadlineExceeded"}}
+		require.NoError(t, e.c.Status().Update(context.Background(), &job))
+		require.NoError(t, e.c.Create(context.Background(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: job.Name + "-x",
+			Namespace: e.key.Namespace, Labels: map[string]string{batchv1.JobNameLabel: job.Name}},
+			Status: corev1.PodStatus{Phase: corev1.PodSucceeded, ContainerStatuses: []corev1.ContainerStatus{{Name: templates.BackupContainer,
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: okSummary, FinishedAt: metav1.NewTime(e.clock)}}}}}}))
+		e.pass()
+		assert.Equal(t, "v0.4.0", e.zaentrum().Status.CurrentVersion)
+		c := e.backupCondition()
+		assert.Equal(t, "Failed", c.Reason)
+		assert.Equal(t, job.Name+" failed: stopped; the latest that succeeded wrote 2026-10-04T00-00-05Z, "+at(first.Add(-20*time.Second)),
+			c.Message, "the summary of the set it finished is no reason")
+	})
 	t.Run("it does not end", func(t *testing.T) {
 		e, job, _ := start(t)
 		e.clock = e.clock.Add(5*time.Minute - 20*time.Second)
@@ -1915,4 +1934,63 @@ func TestRC12OnlyAFailedBackupsPodHoldsANewOneBack(t *testing.T) {
 	e.pass()
 	e.pass()
 	assert.Len(t, e.carrying("one"), 1, "it starts")
+}
+
+// R.C12: a stop owed that names no Job, as the backups' Jobs could not be
+// listed, is owed, where no backup of the count's runs, to the newest backup
+// that has not ended, and only to one that began before the 35 minutes were
+// over.
+func TestRC12AStopOwedToNoNameGoesToTheNewestBackupThatBeganInTime(t *testing.T) {
+	since := time.Date(2026, 10, 4, 18, 0, 0, 0, time.UTC)
+	u := updateBackup{from: "v0.4.0", to: "v0.5.0", since: since, applied: true, moved: true, stopOwed: stopOwedUnknown}
+	run := func(name string, after time.Duration, ended bool) batchv1.Job {
+		job := batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, CreationTimestamp: metav1.NewTime(since.Add(after))}}
+		if ended {
+			job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+		}
+		return job
+	}
+	name := func(job *batchv1.Job) string {
+		if job == nil {
+			return ""
+		}
+		return job.Name
+	}
+	t.Run("beyond the count's, the newest that has not ended", func(t *testing.T) {
+		jobs := []batchv1.Job{run("ended", 30*time.Minute, true), run("newer", 20*time.Minute, false), run("older", 10*time.Minute, false)}
+		assert.Equal(t, "newer", name(owedJob(u, jobs)))
+	})
+	t.Run("only one that began before the 35 minutes were over", func(t *testing.T) {
+		jobs := []batchv1.Job{run("after", 36*time.Minute, false), run("before", 5*time.Minute, false)}
+		assert.Equal(t, "before", name(owedJob(u, jobs)))
+		assert.Empty(t, name(owedJob(u, jobs[:1])), "none began in time")
+	})
+}
+
+// R.C12: a stop refused to a backup the stop owed to no name found is owed to
+// that backup by name: the record says which Job it is, and the pass after
+// stops it.
+func TestRC12ARefusedStopOfABackupFoundForNoNameNamesIt(t *testing.T) {
+	e := newUpdatePlatform(t, nil)
+	job, first := e.heldBackUpdate()
+	listing, stopping := false, false
+	e.refuse(func(verb string, obj any, opts *client.ListOptions) error {
+		if _, ok := obj.(*batchv1.JobList); ok && !listing && verb == "list" && opts.LabelSelector != nil &&
+			opts.LabelSelector.Matches(labels.Set{labelDatabase: databaseBackup}) {
+			return errors.New("the server is currently unable to handle the request")
+		}
+		if j, ok := obj.(*batchv1.Job); ok && !stopping && verb == "patch" && j.Annotations[annotationBackupBeforeUpdateTo] != "" {
+			return errors.New("admission webhook refused it")
+		}
+		return nil
+	})
+	e.passAt(first.Add(35 * time.Minute))
+	require.Equal(t, "v0.5.0", e.zaentrum().Status.CurrentVersion)
+	require.Equal(t, stopOwedUnknown, e.cron().Annotations[annotationBackupBeforeUpdateStopOwed])
+	listing = true
+	e.pass()
+	assert.Equal(t, job, e.cron().Annotations[annotationBackupBeforeUpdateStopOwed], "the stop refused names the backup")
+	stopping = true
+	out, _ := e.pass()
+	e.stoppedAsApplied(t, out, job)
 }
