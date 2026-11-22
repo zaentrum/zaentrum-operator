@@ -322,9 +322,10 @@ func (m *countingMapper) RESTMapping(gk schema.GroupKind, versions ...string) (*
 }
 
 // A pass that refuses the resource discovers, renders, applies, starts and
-// prunes nothing: in the platform's namespace it reads the resource and writes
-// its status, nothing else, and it asks neither the channel nor the cluster
-// whether it is OpenShift. The status names the operator that runs.
+// prunes nothing: in the platform's namespace it reads the resource and the
+// backups' CronJob, whose schedule it lets move once nothing holds it, and
+// writes its status, nothing else, and it asks neither the channel nor the
+// cluster whether it is OpenShift. The status names the operator that runs.
 func TestARefusedPassDoesNothingButSayIt(t *testing.T) {
 	selfEnv(t)
 	const image = "ghcr.io/zaentrum/operator:sha-0000000000000000000000000000000000000002"
@@ -361,6 +362,7 @@ func TestARefusedPassDoesNothingButSayIt(t *testing.T) {
 			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 				err := cl.Get(ctx, key, obj, opts...)
 				obj.SetNamespace(key.Namespace)
+				obj.SetName(key.Name)
 				record("get", obj)
 				return err
 			},
@@ -398,8 +400,8 @@ func TestARefusedPassDoesNothingButSayIt(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	one := []string{"get *v1alpha1.Zaentrum zaentrum", "update status *v1alpha1.Zaentrum zaentrum"}
-	assert.Equal(t, append(one, one...), calls, "the resource and its status, each pass")
+	one := []string{"get *v1alpha1.Zaentrum zaentrum", "get *v1.CronJob " + templates.BackupCronJobName, "update status *v1alpha1.Zaentrum zaentrum"}
+	assert.Equal(t, append(one, one...), calls, "the resource, the backups' CronJob and the status, each pass")
 	assert.Zero(t, channel, "the channel is not consulted")
 	assert.Zero(t, mapper.asked, "nor the cluster, whether it is OpenShift")
 	var got zaentrumv1alpha1.Zaentrum

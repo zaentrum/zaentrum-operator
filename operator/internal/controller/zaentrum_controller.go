@@ -155,13 +155,15 @@ func (r *ZaentrumReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// the Ready condition, on every pass; the controller's report, which names
 	// the operator that runs; the refusal of a restore asked for meanwhile
 	// (refusal.go); and, once the backup Job status.backup.running names has
-	// ended, that it no longer runs.
+	// ended, that it no longer runs. Beside the status, it lets the backups'
+	// schedule move once nothing holds it (backuprequest.go).
 	if refused := refusals(&z); len(refused) > 0 {
 		z.Status.Controller = r.controllerWhileRefused(ctx, &z)
 		z.Status.Phase = "Error"
 		r.setReady(&z, metav1.ConditionFalse, reasonResourceRefused, refusedMessage(refused))
 		r.answerRestoreWhileRefused(ctx, &z)
 		r.backupRunEndedWhileRefused(ctx, &z)
+		r.scheduleMovesWhileRefused(ctx, &z)
 		if err := r.patchStatus(ctx, &z); err != nil {
 			return ctrl.Result{}, err
 		}

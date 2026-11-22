@@ -22,9 +22,10 @@ import (
 
 // This file is a restore's second step: before anything stops, the operator
 // checks the set a restore asks for. The backups' claim must be there and
-// bound and hold the set, and the version rule (versionrule.go) must let the
-// set be restored: a newer release never, a version that cannot be compared
-// only where zaentrum.io/restore-any-version holds the set's name.
+// bound and hold the set, whole (its SHA256SUMS there), and the version rule
+// (versionrule.go) must let the set be restored: a newer release never, a
+// version that cannot be compared only where zaentrum.io/restore-any-version
+// holds the set's name.
 //
 // The set's version is read from status.backup.sets, which counts only for the
 // claim the restore reads from: the claim the backups' volume was listed with.
@@ -118,8 +119,9 @@ type restoreWait struct {
 }
 
 // waitFor is the wait for a request's set, begun now where it is another
-// request's or none.
-func (r *ZaentrumReconciler) waitFor(z *zaentrumv1alpha1.Zaentrum, request string) restoreWait {
+// request's or none. An operator that starts again counts from what the
+// cluster holds: since the Restore condition began to wait for that set.
+func (r *ZaentrumReconciler) waitFor(z *zaentrumv1alpha1.Zaentrum, request, set string) restoreWait {
 	r.restoreMu.Lock()
 	defer r.restoreMu.Unlock()
 	if r.restoreWaits == nil {
@@ -128,9 +130,31 @@ func (r *ZaentrumReconciler) waitFor(z *zaentrumv1alpha1.Zaentrum, request strin
 	w, ok := r.restoreWaits[z.UID]
 	if !ok || w.request != request {
 		w = restoreWait{request: request, since: r.now().Time}
+		if c := meta.FindStatusCondition(z.Status.Conditions, condTypeRestore); !ok && c != nil &&
+			c.Status == metav1.ConditionUnknown && c.Reason == reasonWaiting && strings.HasPrefix(c.Message, "the restore of "+set+" ") {
+			w.since = c.LastTransitionTime.Time
+		}
 		r.restoreWaits[z.UID] = w
 	}
 	return w
+}
+
+// setWaiting has the Restore condition wait, saying msg, which begins "the
+// restore of {set} "; where it begins to wait, or for another set, its time is
+// this operator's clock, which a wait counts from after a restart (waitFor).
+func (r *ZaentrumReconciler) setWaiting(z *zaentrumv1alpha1.Zaentrum, msg string) {
+	before := meta.FindStatusCondition(z.Status.Conditions, condTypeRestore)
+	setOf := func(m string) string {
+		if f := strings.Fields(m); len(f) > 3 {
+			return f[3]
+		}
+		return ""
+	}
+	begins := before == nil || before.Status != metav1.ConditionUnknown || setOf(before.Message) != setOf(msg)
+	setCondition(z, condTypeRestore, metav1.ConditionUnknown, reasonWaiting, msg)
+	if c := meta.FindStatusCondition(z.Status.Conditions, condTypeRestore); begins && c != nil {
+		c.LastTransitionTime = r.now()
+	}
 }
 
 // noteUnmade keeps why the run asked for a request's set could not be made,
@@ -179,7 +203,7 @@ func (r *ZaentrumReconciler) checkSet(ctx context.Context, z *zaentrumv1alpha1.Z
 	}
 
 	if s := listedSet(z, set, claim); s != nil {
-		return ruled(z, set, s.Version, version)
+		return wholeAndRuled(z, *s, version)
 	}
 
 	run, err := r.setRun(ctx, z, request, claim)
@@ -187,7 +211,7 @@ func (r *ZaentrumReconciler) checkSet(ctx context.Context, z *zaentrumv1alpha1.Z
 		log.FromContext(ctx).Info("restore: the measuring runs could not be listed; trying again", "error", err.Error())
 		return undecided(set, "the measuring runs could not be listed")
 	}
-	wait := r.waitFor(z, request)
+	wait := r.waitFor(z, request, set)
 	if run == nil {
 		// Another run has to end first, or the run could not be made.
 		if !r.now().Time.Before(wait.since.Add(restoreWaitInAll)) {
@@ -220,10 +244,20 @@ func (r *ZaentrumReconciler) checkSet(ctx context.Context, z *zaentrumv1alpha1.Z
 	sets := backupSets(read.report)
 	for _, s := range sets {
 		if s.Name == set {
-			return ruled(z, set, s.Version, version)
+			return wholeAndRuled(z, s, version)
 		}
 	}
 	return notOnClaim(set, claim, sets)
+}
+
+// wholeAndRuled refuses a set that is not whole, with no SHA256SUMS, as the
+// restore's Job would once the clients had stopped; else it is what the
+// version rule says (ruled).
+func wholeAndRuled(z *zaentrumv1alpha1.Zaentrum, s zaentrumv1alpha1.BackupSet, version string) setCheck {
+	if !s.Whole {
+		return refused(reasonRefused, s.Name+" has no SHA256SUMS", "", "")
+	}
+	return ruled(z, s.Name, s.Version, version)
 }
 
 // listedSet is the set of that name status.backup.sets lists, or nil. What is

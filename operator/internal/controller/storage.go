@@ -12,6 +12,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -92,6 +93,10 @@ const (
 
 	// timeOfFigures is how a condition writes the time of figures that stay.
 	timeOfFigures = "2006-01-02 15:04 MST"
+
+	// notMeasuredNote follows the backups' claim in the condition where a request
+	// was answered without its run, a backup holding it.
+	notMeasuredNote = " was not measured: a backup holds it"
 )
 
 // measuredVolumes are the volumes in the order status lists them.
@@ -223,6 +228,12 @@ func (r *ZaentrumReconciler) measureMemoryOf(z *zaentrumv1alpha1.Zaentrum) *meas
 	m := r.measured[z.UID]
 	if m == nil {
 		m = &measureMemory{inFlight: map[string]*measureRun{}, read: map[string]string{}, outcome: map[string]*measureRun{}}
+		// An operator that starts again keeps the note the condition holds,
+		// until the backups' claim has been measured since.
+		if c := meta.FindStatusCondition(z.Status.Conditions, condTypeStorageMeasured); c != nil && strings.Contains(c.Message, notMeasuredNote) {
+			now := r.now()
+			m.unmeasured = &now
+		}
 		r.measured[z.UID] = m
 	}
 	return m
@@ -1061,8 +1072,15 @@ func (r *ZaentrumReconciler) holdsClaim(ctx context.Context, runs []batchv1.Job)
 // it, counted from its start: one that has not ended by then, as on a node
 // that is gone, holds nothing and is removed (removeRun).
 func (r *ZaentrumReconciler) pastGrace(job *batchv1.Job) bool {
+	end, ok := graceEnds(job)
+	return ok && !r.now().Time.Before(end)
+}
+
+// graceEnds is when a run's deadline and its pod's grace after it have
+// passed, counted from its start; false for a run with no deadline.
+func graceEnds(job *batchv1.Job) (time.Time, bool) {
 	if job.Spec.ActiveDeadlineSeconds == nil {
-		return false
+		return time.Time{}, false
 	}
 	start := job.CreationTimestamp
 	if job.Status.StartTime != nil {
@@ -1072,7 +1090,7 @@ func (r *ZaentrumReconciler) pastGrace(job *batchv1.Job) bool {
 	if g := job.Spec.Template.Spec.TerminationGracePeriodSeconds; g != nil {
 		grace = *g
 	}
-	return !r.now().Time.Before(start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds+grace) * time.Second))
+	return start.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds+grace) * time.Second), true
 }
 
 // removeRun deletes a run past its deadline and its pod's grace that has not
@@ -1084,8 +1102,11 @@ func (r *ZaentrumReconciler) removeRun(ctx context.Context, mem *measureMemory, 
 		log.FromContext(ctx).Info("storage: a run past its deadline could not be removed", "job", job.Name, "error", err.Error())
 		return
 	}
+	// It ended, for what reads it, when its grace did: a run that ended since,
+	// while its removal was refused, stays the volume's latest.
+	end, _ := graceEnds(job)
 	run := runOf(job)
-	run.reason, run.at = job.Name+" had not ended at its deadline and was removed", r.now()
+	run.reason, run.at = job.Name+" had not ended at its deadline and was removed", metav1.NewTime(end)
 	mem.outcome[volume] = run
 	log.FromContext(ctx).Info("storage: removed a run that had not ended at its deadline", "volume", volume, "job", job.Name)
 }
@@ -1098,8 +1119,9 @@ type failure struct{ job, reason, ending string }
 // each Job: Measured with what it found, or Failed with why, for every run
 // that failed and every claim that is not there; and, kept whole, that the
 // backups' claim was not measured, where a request was answered without it
-// since its latest run (unmeasured). It is absent until the first run has
-// ended, or such a request has been answered.
+// since its latest run (unmeasured); NotMeasured with that alone where no run
+// has ended yet. It is absent until the first run has ended, or such a
+// request has been answered.
 func storageCondition(z *zaentrumv1alpha1.Zaentrum, plan []volumePlan, latest map[string]*measureRun, unmeasured *metav1.Time) {
 	var failed []failure
 	ended := false
@@ -1110,7 +1132,7 @@ func storageCondition(z *zaentrumv1alpha1.Zaentrum, plan []volumePlan, latest ma
 			continue
 		}
 		if b := latest[p.name]; p.name == templates.VolumeBackups && unmeasured != nil && (b == nil || b.at.Before(unmeasured)) {
-			note = p.claim + " was not measured: a backup holds it" + ending(z, plan, p.name, nil)
+			note = p.claim + notMeasuredNote + ending(z, plan, p.name, nil)
 		}
 		measuredNow[p.name] = true
 		if p.name == templates.VolumeMedia {
@@ -1136,9 +1158,11 @@ func storageCondition(z *zaentrumv1alpha1.Zaentrum, plan []volumePlan, latest ma
 	switch {
 	case len(failed) > 0:
 		setCondition(z, condTypeStorageMeasured, metav1.ConditionFalse, "Failed", withNote(failedMessage(failed, n), note))
-	case ended || note != "":
+	case ended:
 		setCondition(z, condTypeStorageMeasured, metav1.ConditionTrue, "Measured",
 			withNote(measuredMessage(z, measuredNow, latest[templates.VolumeMedia], latest[templates.VolumeBackups], n), note))
+	case note != "":
+		setCondition(z, condTypeStorageMeasured, metav1.ConditionFalse, "NotMeasured", note)
 	}
 }
 

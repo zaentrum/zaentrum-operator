@@ -273,7 +273,8 @@ list_sets() {
 	say "$total sets, the newest $listed reported"
 }
 
-if [ ! -d "$dir" ] || [ ! -r "$dir" ] || [ ! -x "$dir" ]; then
+# stat -f reads nothing in the claim: only the sets are listed from it.
+if [ ! -d "$dir" ] || { [ "${SETS:-}" = true ] && { [ ! -r "$dir" ] || [ ! -x "$dir" ]; }; }; then
 	fail "$dir is not a directory this measuring can read"
 	finish
 fi

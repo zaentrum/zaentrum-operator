@@ -115,7 +115,8 @@ func TestRC10AURLIsWrittenBare(t *testing.T) {
 		"k1.example.org:9093,someone:pa55@k2.example.org:9093": LeftOut,
 		// Mail addresses and a server list stay as they are.
 		"quay.io/keycloak/keycloak:26.0@sha256:abababababababababababababababababababababababababababababababab": "quay.io/keycloak/keycloak:26.0@sha256:abababababababababababababababababababababababababababababababab",
-		"someone:pa55@sha256":                      LeftOut,
+		"someone:pa55@sha256": LeftOut,
+		"someone:pa55@registry.example.org/img:1@sha256:abababababababababababababababababababababababababababababababab": LeftOut,
 		"alerts@example.org, zaentrum@example.org": "alerts@example.org, zaentrum@example.org",
 		"k1.example.org:9093,k2.example.org:9093":  "k1.example.org:9093,k2.example.org:9093",
 		// A URL whose host is no host, as when the at-sign is missing.

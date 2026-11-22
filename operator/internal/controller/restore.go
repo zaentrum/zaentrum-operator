@@ -128,20 +128,19 @@ func (r *ZaentrumReconciler) planRestore(ctx context.Context, z *zaentrumv1alpha
 	case setRefused:
 		return refuse(c.reason, c.message)
 	case setWaits:
-		setCondition(z, condTypeRestore, metav1.ConditionUnknown, reasonWaiting, c.message)
+		r.setWaiting(z, c.message)
 		if c.ask {
 			return restorePlan{ask: request}
 		}
 		return restorePlan{}
 	case setUndecided:
 		// What it could not read is said, and read again next pass.
-		setCondition(z, condTypeRestore, metav1.ConditionUnknown, reasonWaiting, c.message)
+		r.setWaiting(z, c.message)
 		return restorePlan{}
 	}
 	r.endWait(z)
 	if copying {
-		setCondition(z, condTypeRestore, metav1.ConditionUnknown, reasonWaiting,
-			"the restore of "+m[1]+" starts once the bundled Postgres has been copied onto its claim")
+		r.setWaiting(z, "the restore of "+m[1]+" starts once the bundled Postgres has been copied onto its claim")
 		return restorePlan{}
 	}
 	log.FromContext(ctx).Info("restore: stopping the database's clients", "dump", m[1])
@@ -229,7 +228,11 @@ func (r *ZaentrumReconciler) stepRestore(ctx context.Context, z *zaentrumv1alpha
 		// waits for it, still stopping (storage.go).
 		if job := r.backupsMeasuring(ctx, z); job != "" {
 			log.FromContext(ctx).Info("restore: waiting for the backups' claim to be measured", "dump", dump, "job", job)
-			rs.Message = "restoring " + dump + ": stopping the database's clients"
+			why := "waiting for " + job + ", which measures the backups' claim, to end"
+			if !strings.HasPrefix(job, templates.MeasureJobPrefix) {
+				why = "waiting for the backups' claim: " + job
+			}
+			rs.Message = "restoring " + dump + ": " + why
 			setRestore(z, rs)
 			return true
 		}

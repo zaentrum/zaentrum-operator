@@ -258,8 +258,9 @@ func barePart(p string, urls bool) (string, bool) {
 		case strings.Contains(p, "://"):
 			// A scheme the pattern does not read, as jdbc:postgresql://.
 			return "", false
-		case at >= 0 && strings.Contains(p[:at], ":") && !imageDigest.MatchString(p[at+1:]):
-			// A user and a password; an image pinned by its digest stays.
+		case at >= 0 && strings.Contains(p[:at], ":") && (strings.Contains(p[:at], "@") || !imageDigest.MatchString(p[at+1:])):
+			// A user and a password; an image pinned by its digest stays, where
+			// no at-sign before it names a host with a user in it.
 			return "", false
 		case at >= 0 && urls:
 			return "", false

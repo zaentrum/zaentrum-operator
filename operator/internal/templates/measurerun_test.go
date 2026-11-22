@@ -304,6 +304,22 @@ func TestRC7MeasureScriptMeasuresAClaim(t *testing.T) {
 		assert.Contains(t, out.stdout, "measure: "+claim+": 4096000 bytes, 1024000 free, filesystem 1a2b3c4d5e6f7a8b\n")
 	})
 
+	t.Run("R.C7 a root its user cannot read is measured all the same; its sets are not listed", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads whatever the mode says")
+		}
+		e := newMeasureEnv(t)
+		claim := e.claim("4096 1000 250 1a2b3c4d5e6f7a8b")
+		require.NoError(t, os.Chmod(claim, 0))
+		t.Cleanup(func() { _ = os.Chmod(claim, 0o755) })
+		out := e.run(map[string]string{"MEASURE_DIR": claim})
+		assert.Equal(t, 0, out.exit, out.stderr)
+		assert.Equal(t, `{"v":1,"size":4096000,"free":1024000,"fs":"1a2b3c4d5e6f7a8b"}`, out.raw, "stat -f reads nothing in it")
+		out = e.run(map[string]string{"MEASURE_DIR": claim, "SETS": "true"})
+		assert.Equal(t, 1, out.exit)
+		assert.Equal(t, claim+" is not a directory this measuring can read", out.report["failed"], "the sets are read from it")
+	})
+
 	t.Run("R.C7 no folder to read", func(t *testing.T) {
 		e := newMeasureEnv(t)
 		missing := filepath.Join(t.TempDir(), "nothing")

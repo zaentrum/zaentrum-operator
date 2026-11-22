@@ -557,6 +557,26 @@ func TestRC10TheWaitEndsIn15MinutesInAll(t *testing.T) {
 		refusedOnce(t, e, e.restorePass(), set, "ClaimUnreadable", head+"the backup zaentrum-backup-1 runs; nothing was changed")
 	})
 
+	t.Run("R.C10 the 15 minutes go on across a restart of the operator", func(t *testing.T) {
+		e := newCheckEnv(t, aRelease(), listed)
+		e.backupRun("zaentrum-backup-1", false)
+		e.annotate(zaentrumv1alpha1.RestoreRequestAnnotation, set)
+		first := e.clock.Add(10 * time.Second)
+		for i := 0; i < 8; i++ {
+			e.restorePass()
+			e.clock = e.clock.Add(time.Minute - 10*time.Second)
+		}
+		require.Nil(t, restoreStatus(e.z))
+		e.r = &ZaentrumReconciler{Client: e.c, Scheme: e.r.Scheme, Now: e.r.Now}
+		for e.clock.Add(10 * time.Second).Before(first.Add(restoreWaitInAll)) {
+			assert.Empty(t, e.restorePass().dump)
+			require.Nil(t, restoreStatus(e.z), "it waits, counted from its start before the restart")
+			e.clock = e.clock.Add(time.Minute - 10*time.Second)
+		}
+		e.clock = first.Add(restoreWaitInAll).Add(-10 * time.Second)
+		refusedOnce(t, e, e.restorePass(), set, "ClaimUnreadable", head+"the backup zaentrum-backup-1 runs; nothing was changed")
+	})
+
 	t.Run("R.C10 a backup that ends inside the 15 minutes", func(t *testing.T) {
 		e := newCheckEnv(t, aRelease(), listed)
 		e.backupRun("zaentrum-backup-1", false)
@@ -673,6 +693,26 @@ func TestRC10NoRunForTheSetWhileABackupMayStart(t *testing.T) {
 	require.Len(t, e.carrying("one"), 1)
 	assert.Empty(t, e.backupsRuns(), "nor while it runs")
 	assert.Nil(t, e.zaentrum().Status.Backup.Restore, "the restore waits")
+}
+
+// R.C10: a set that is not whole, with no SHA256SUMS, is refused before
+// anything stops, in the words the restore's Job refuses it with once the
+// clients have stopped: listed, or found by the run asked for it.
+func TestRC10ASetThatIsNotWholeIsRefusedBeforeAnythingStops(t *testing.T) {
+	const set = "2026-11-15T00-00-05Z"
+	const words = "refused: " + set + " has no SHA256SUMS; nothing was changed"
+	t.Run("R.C10 listed", func(t *testing.T) {
+		e := newCheckEnv(t, aRelease(), `{"v":1,"size":5368709120,"free":4294967296,"fs":"c1","total":1,"sets":[["`+set+`",1024,"v0.5.0",false,true]]}`)
+		e.annotate(zaentrumv1alpha1.RestoreRequestAnnotation, set)
+		refusedOnce(t, e, e.restorePass(), set, "Refused", words)
+	})
+	t.Run("R.C10 found by the run asked for it", func(t *testing.T) {
+		e := newCheckEnv(t, aRelease(), setsOf())
+		e.annotate(zaentrumv1alpha1.RestoreRequestAnnotation, set)
+		e.restorePass()
+		e.end("backups", "node-a", 0, `{"v":1,"size":5368709120,"free":4294967296,"fs":"c1","total":1,"sets":[],"set":["`+set+`",1024,"v0.5.0",false,true]}`)
+		refusedOnce(t, e, e.restorePass(), set, "Refused", words)
+	})
 }
 
 // R.C10: what holds the backups' claim, as a refusal at 15 minutes names it.

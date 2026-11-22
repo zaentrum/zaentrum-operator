@@ -466,6 +466,33 @@ func (r *ZaentrumReconciler) backupRunEndedWhileRefused(ctx context.Context, z *
 	}
 }
 
+// scheduleMovesWhileRefused lets the backups' schedule move again, on a pass
+// that refuses the resource, once nothing holds it still, as after a run that
+// measured the backups' claim (storage.go). A backup asked for, one that runs
+// or may still write, the backup before an update and a restore keep it held,
+// as they would on a pass that renders.
+func (r *ZaentrumReconciler) scheduleMovesWhileRefused(ctx context.Context, z *zaentrumv1alpha1.Zaentrum) {
+	var cron batchv1.CronJob
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: z.Namespace, Name: templates.BackupCronJobName}, &cron); err != nil ||
+		cron.Spec.Suspend == nil || !*cron.Spec.Suspend || cron.Annotations[annotationBackupBeforeUpdate] != "" {
+		return
+	}
+	if _, ok := restoring(z); ok {
+		return
+	}
+	all, err := r.allBackupJobs(ctx, z)
+	if backupScheduleHeld(z, r.notYetAnswered(z), false, r.backupsMeasuring(ctx, z), all, err) || r.stillWrites(ctx, all) != nil {
+		return
+	}
+	moving, still := cron.DeepCopy(), false
+	moving.Spec.Suspend = &still
+	if err := r.Patch(ctx, moving, client.MergeFrom(&cron), client.FieldOwner(templates.FieldManager)); err != nil {
+		log.FromContext(ctx).Info("backups: the schedule could not be let move while the resource is refused; trying again", "error", err.Error())
+		return
+	}
+	log.FromContext(ctx).Info("backups: the schedule moves again while the resource is refused")
+}
+
 // backupJobSelector selects the backups' Jobs: the CronJob's own and the ones
 // asked for.
 func backupJobSelector() labels.Selector {

@@ -44,11 +44,12 @@ type storageEnv struct {
 	clock    time.Time
 	postgres string
 
-	refuse       string          // a create of a run is refused, saying this
-	unreadClaims map[string]bool // these claims cannot be read
-	unreadPods   bool            // no pod can be listed
-	unreadRuns   bool            // no Job can be listed
-	creates      int             // the runs it was asked to create
+	refuse        string          // a create of a run is refused, saying this
+	unreadClaims  map[string]bool // these claims cannot be read
+	unreadPods    bool            // no pod can be listed
+	unreadRuns    bool            // no Job can be listed
+	refuseDeletes int             // so many deletes of a run are refused
+	creates       int             // the runs it was asked to create
 }
 
 func newStorageEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum, objs ...client.Object) *storageEnv {
@@ -76,6 +77,13 @@ func newStorageEnv(t *testing.T, z *zaentrumv1alpha1.Zaentrum, objs ...client.Ob
 					return errors.New("the claim could not be read")
 				}
 				return c.Get(ctx, key, obj, opts...)
+			},
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if _, run := obj.GetLabels()[templates.LabelMeasure]; run && e.refuseDeletes > 0 {
+					e.refuseDeletes--
+					return errors.New("the delete was refused")
+				}
+				return c.Delete(ctx, obj, opts...)
 			},
 			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 				if _, pods := list.(*corev1.PodList); pods && e.unreadPods {
@@ -701,7 +709,7 @@ func TestRC7ARestoreWaitsForTheBackupsClaimToBeMeasured(t *testing.T) {
 	_, inFlight := e.restorePass(false)
 	assert.True(t, inFlight)
 	assert.Equal(t, zaentrumv1alpha1.RestoreStopping, e.z.Status.Backup.Restore.Result)
-	assert.Equal(t, "restoring "+aDump+": stopping the database's clients", e.z.Status.Backup.Restore.Message)
+	assert.Equal(t, "restoring "+aDump+": waiting for "+run.Name+", which measures the backups' claim, to end", e.z.Status.Backup.Restore.Message)
 	assert.Empty(t, restoreJobs(t, e.c, e.z.Namespace))
 
 	run.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(e.clock)}}
@@ -1246,8 +1254,158 @@ func TestRC7ARequestDuringABackupWithNothingMeasuredYet(t *testing.T) {
 	require.Equal(t, "r1", e.answered(), "answered at once: no run to wait for")
 	c := e.condition()
 	require.NotNil(t, c)
-	assert.Equal(t, "Measured", c.Reason)
+	assert.Equal(t, metav1.ConditionFalse, c.Status, "nothing is measured")
+	assert.Equal(t, "NotMeasured", c.Reason)
 	assert.Equal(t, "backups was not measured: a backup holds it; nothing is measured yet", c.Message)
+}
+
+// R.C7: an operator that starts again keeps the note that the backups' claim
+// was not measured, until that claim has been measured since.
+func TestRC7TheNoteSurvivesARestart(t *testing.T) {
+	e := newStorageEnv(t, verifyCR())
+	e.claim("media", "50Gi", true)
+	e.claim("backups", "5Gi", true)
+	e.pass(false)
+	e.end("media", "node-a", 0, libraryReport(50*gib, 20*gib, "b9e2"))
+	e.end("backups", "node-a", 0, backupsReport)
+	e.pass(false)
+	measured := e.volume("backups").MeasuredAt
+	e.clock = e.clock.Add(10 * time.Minute)
+	e.backupRun("zaentrum-backup-1", false)
+	e.request("r1")
+	e.pass(false)
+	e.end("media", "node-a", 0, libraryReport(50*gib, 20*gib, "b9e2"))
+	e.pass(false)
+	require.Equal(t, "r1", e.answered())
+	note := "; backups" + notMeasuredNote + "; the figures of " + measured.UTC().Format(timeOfFigures) + " stay"
+	require.True(t, strings.HasSuffix(e.condition().Message, note), e.condition().Message)
+	e.r = &ZaentrumReconciler{Client: e.c, Scheme: e.r.Scheme, Now: e.r.Now}
+	e.clock = e.clock.Add(time.Minute)
+	e.pass(false)
+	assert.True(t, strings.HasSuffix(e.condition().Message, note), "kept by the operator that started again: "+e.condition().Message)
+	e.clock = e.clock.Add(time.Minute)
+	e.backupRun("zaentrum-backup-1", true)
+	e.pass(false)
+	e.end("backups", "node-a", 0, backupsReport)
+	e.pass(false)
+	assert.Equal(t, "Measured", e.condition().Reason)
+	assert.NotContains(t, e.condition().Message, notMeasuredNote, "measured since")
+}
+
+// R.C7: a run whose removal was refused at first, and done later, is dated
+// at the end of its grace: a run that has ended since stays the volume's
+// latest.
+func TestRC7ARunRemovedLateIsNotTheLatest(t *testing.T) {
+	e := newStorageEnv(t, verifyCR())
+	e.claim("media", "50Gi", false)
+	e.claim("backups", "5Gi", true)
+	e.pass(false)
+	hung := e.runs("backups")[0]
+	end, _ := graceEnds(&hung)
+	e.clock = end
+	e.refuseDeletes = 1
+	e.request("r1")
+	e.pass(false)
+	require.Len(t, e.runs("backups"), 2, "its removal refused, the request's run beside one that holds nothing")
+	e.end("backups", "node-a", 0, backupsReport)
+	e.pass(false)
+	assert.Len(t, e.runs("backups"), 1, "removed now")
+	assert.Equal(t, "r1", e.answered())
+	c := e.condition()
+	assert.Equal(t, "Measured", c.Reason, c.Message)
+	assert.NotContains(t, c.Message, hung.Name, "the run that ended since is the latest")
+}
+
+// R.C7: a pass that refuses the resource lets the backups' schedule move again
+// once the run that measured the backups' claim and held it has ended. Each
+// thing that holds it otherwise keeps it held, alone: a backup asked for and
+// not answered, the platform's own backup that has not ended, the update's
+// count on the CronJob, a restore, a failed backup's pod that may still
+// write, and the backups' Jobs that cannot be listed.
+func TestRC7ARefusedPassLetsTheScheduleMoveOnceNothingHoldsIt(t *testing.T) {
+	refuse := func(z *zaentrumv1alpha1.Zaentrum) { z.Spec.Databases.Chino = "chi no" }
+	t.Run("a run of the backups' Job that has ended", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		run := e.measuringBackups()
+		e.pass()
+		require.True(t, e.suspended(), "held for the run")
+		e.change(refuse)
+		e.pass()
+		assert.True(t, e.suspended(), "held while the run reads the claim")
+		e.endBackup(run.Name, 0, "")
+		out, _ := e.pass()
+		assert.False(t, e.suspended(), "the run has ended: the schedule moves, though the resource is refused")
+		assert.True(t, logged(out, "backups: the schedule moves again while the resource is refused"), out)
+	})
+	// Each of these holds the schedule alone; a refused pass keeps it held.
+	heldWhileRefused := func(t *testing.T, e *platformEnv, why string) {
+		t.Helper()
+		require.True(t, e.suspended(), "held before the refusal")
+		e.change(refuse)
+		out, _ := e.pass()
+		out2, _ := e.pass()
+		assert.True(t, e.suspended(), why)
+		assert.NotContains(t, out+out2, "the schedule moves again")
+	}
+	t.Run("a backup asked for, not yet answered", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		e.askBackup("one")
+		e.pass()
+		heldWhileRefused(t, e, "the backup asked for waits for the resource, and holds the schedule")
+		assert.Empty(t, e.backupJobs())
+	})
+	t.Run("a backup asked for that runs, its request taken away", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		e.runAsked("one")
+		e.dropAsk()
+		e.pass()
+		heldWhileRefused(t, e, "the platform's own backup has not ended")
+	})
+	t.Run("the backup before an update, not yet started", func(t *testing.T) {
+		e := newUpdatePlatform(t, nil)
+		e.updateTo("v0.5.0")
+		e.pass()
+		require.NotEmpty(t, e.cron().Annotations[annotationBackupBeforeUpdate], "the count is on the CronJob")
+		require.Empty(t, e.beforeUpdate())
+		heldWhileRefused(t, e, "the update waits for its backup")
+	})
+	t.Run("a restore", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		e.listOnClaim(aDump)
+		e.change(func(z *zaentrumv1alpha1.Zaentrum) {
+			z.Annotations = map[string]string{zaentrumv1alpha1.RestoreRequestAnnotation: aDump}
+		})
+		e.pass()
+		require.Equal(t, zaentrumv1alpha1.RestoreRunning, e.zaentrum().Status.Backup.Restore.Result)
+		heldWhileRefused(t, e, "the restore holds it")
+	})
+	t.Run("a failed backup whose pod may still write", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		e.scheduledRun("zaentrum-backup-29324160")
+		e.failsWithItsPodRunning("zaentrum-backup-29324160")
+		e.pass()
+		heldWhileRefused(t, e, "its pod may still write")
+	})
+	t.Run("the backups' Jobs that cannot be listed", func(t *testing.T) {
+		e := newRequestPlatform(t, verifyCR())
+		e.pass()
+		run := e.measuringBackups()
+		e.pass()
+		e.endBackup(run.Name, 0, "")
+		e.refuse(func(verb string, obj any, opts *client.ListOptions) error {
+			if _, jobs := obj.(*batchv1.JobList); jobs && verb == "list" && opts.LabelSelector != nil &&
+				opts.LabelSelector.String() == backupJobSelector().String() {
+				return errors.New("the Jobs could not be listed")
+			}
+			return nil
+		})
+		heldWhileRefused(t, e, "what cannot be read holds it")
+	})
 }
 
 // R.C7: a request answered while a backup holds the backups' claim keeps the

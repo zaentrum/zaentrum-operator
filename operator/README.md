@@ -955,12 +955,13 @@ again.
 
 ### The volumes, measured (`status.storage`)
 
-The operator measures each claim the platform uses — the library's, the
-databases', the backups' and the event broker's — with a Job of its own,
+The operator measures each claim the platform uses: the library's, the
+backups' and the event broker's each with a Job of its own,
 `zaentrum-measure-{volume}-{five characters}` (label `zaentrum.io/measure`),
-which mounts the claim read-only: every hour, the backups' claim after each
-backup, and all at once for a `zaentrum.io/storage-request` value it has not
-answered yet:
+which mounts the claim read-only, and the databases' through the library's
+Job, which asks the bundled Postgres. It does so every hour, the backups'
+claim after each backup, and all at once for a `zaentrum.io/storage-request`
+value it has not answered yet:
 
 ```sh
 kubectl -n zaentrum annotate zaentrum zaentrum --overwrite \
